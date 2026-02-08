@@ -1,23 +1,22 @@
 import React, { useState, useEffect} from "react";
-import { Car, Bot, Search, Users, Settings, Fuel, Bell, MessageCircle } from "lucide-react";
+import { MapPin, Car, Bot, Search, Users, Settings, Fuel, Bell, MessageCircle } from "lucide-react";
 
 
 
 const getTodayDate = () => {
-  const today = new Date();
-  return today.toISOString().split("T")[0];
+  return new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD (LOCAL)
 };
 
 const getTomorrowDate = () => {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return tomorrow.toISOString().split("T")[0];
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toLocaleDateString("en-CA");
 };
 
 const getCurrentTime = () => {
-  const now = new Date();
-  return now.toTimeString().slice(0, 5); // HH:MM
+  return new Date().toTimeString().slice(0, 5); // HH:mm
 };
+
 
 const VehiclesPage = ({ 
   bookingData, 
@@ -30,13 +29,24 @@ const VehiclesPage = ({
   onNavigateToRegister, 
   onViewDetails, 
   onNavigateToBookingHistory, 
-  onNavigateToAbout}) => {
+  onNavigateToAbout,
+  onNavigateToAccountSettings}) => {
 
   const [showAI, setShowAI] = useState(false);
   const [userMessage, setUserMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  
+  const normalize = (str = "") =>
+  str
+    .toLowerCase()
+    .replace(/city/g, "")
+    .replace(/,/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+
 
   useEffect(() => {
     if (showAI) {
@@ -49,24 +59,87 @@ const VehiclesPage = ({
     }
   }, [showAI]);
   
-  const { pickupDate, pickupTime, returnDate, returnTime, vehicleType } = bookingData;
+  const { pickupDate, pickupTime, returnDate, returnTime, vehicleType, location } = bookingData;
    useEffect(() => {
-    if (!pickupDate || !pickupTime || !returnDate || !returnTime) {
-      setBookingData((prev) => ({
-        ...prev,
-        pickupDate: prev.pickupDate || getTodayDate(),
-        pickupTime: prev.pickupTime || getCurrentTime(),
-        returnDate: prev.returnDate || getTomorrowDate(),
-        returnTime: prev.returnTime || getCurrentTime(),
-      }));
-    }
-  }, [pickupDate, pickupTime, returnDate, returnTime, setBookingData]);
+  if (
+    bookingData.pickupDate &&
+    bookingData.pickupTime &&
+    bookingData.returnDate &&
+    bookingData.returnTime
+  ) return;
+
+  setBookingData((prev) => ({
+    ...prev,
+    pickupDate: getTodayDate(),
+    pickupTime: getCurrentTime(),
+    returnDate: getTomorrowDate(),
+    returnTime: getCurrentTime(),
+  }));
+}, [bookingData, setBookingData]);
+
+
+
+ const isValidDateTime = () => {
+  const now = new Date();
+  now.setSeconds(0, 0);
+
+  const pickup = new Date(`${pickupDate}T${pickupTime}`);
+  const dropoff = new Date(`${returnDate}T${returnTime}`);
+
+  return pickup >= now && dropoff > pickup;
+};
+
+
+
+
+useEffect(() => {
+  if (!pickupDate || !returnDate) return;
+
+  const pickup = new Date(pickupDate);
+  const dropoff = new Date(returnDate);
+
+  if (dropoff <= pickup) {
+    const nextDay = new Date(pickup);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    setBookingData((prev) => ({
+      ...prev,
+      returnDate: nextDay.toLocaleDateString("en-CA"),
+    }));
+  }
+}, [pickupDate, returnDate]);
+
+
+useEffect(() => {
+  if (pickupDate !== getTodayDate()) return;
+
+  const now = getCurrentTime();
+
+  if (pickupTime < now) {
+    setBookingData((prev) => ({
+      ...prev,
+      pickupTime: now,
+    }));
+  }
+}, [pickupDate, pickupTime]);
+
+
+  const [locationFilter, setLocationFilter] = useState(location || "");
+useEffect(() => {
+  if (location) {
+    setLocationFilter(location);
+  }
+}, [location]);
+
+
+
+
   
   {/* VEHUCE TYPE */}
     const [selectedFilters, setSelectedFilters] = useState({
       all: !vehicleType,
       cars: vehicleType === "car",
-      motor: vehicleType === "motorcycle",
+      motor: vehicleType === "motor",
       vans: vehicleType === "van",
       truck: vehicleType === "truck",
   });
@@ -96,6 +169,7 @@ const VehiclesPage = ({
   {
     id: 1,
     name: "BMW X5",
+    location: "Dagupan City, Pangasinan",
     image: "/bmw-x5.png",
     type: "car",
     subType: "SUV",
@@ -106,10 +180,22 @@ const VehiclesPage = ({
     price: 5500,
     rating: 4.8,
     available: true,
+    codingDay: "Wednesday",
+
+    owner: {
+    name: "Anya Forger",
+    avatar: "/owner-profile.png",
+    verified: true,
+    rating: 4.8,
+    rentals: 204,
+    vehicles: 40,
+}
+
   },
   {
     id: 2,
     name: "Yamaha R3",
+    location: "Lingayen City, Pangasinan",
     image: "/yamaha-r3.png",
     type: "motor",
     subType: "Sport",
@@ -120,10 +206,23 @@ const VehiclesPage = ({
     price: 1200,
     rating: 4.6,
     available: true,
+    codingDay: "Thursday",
+
+    owner: {
+    name: "Anya Forger",
+    avatar: "/owner-profile.png",
+    verified: true,
+    rating: 4.8,
+    rentals: 204,
+    vehicles: 40,
+}
+
   },
+
   {
     id: 3,
     name: "Toyota HiAce",
+    location: "San Carlos City, Pangasinan",
     image: "/toyota-hiAce.png",
     type: "van",
     subType: "Passenger",
@@ -134,10 +233,22 @@ const VehiclesPage = ({
     price: 4800,
     rating: 4.7,
     available: true,
+    codingDay: "Saturday",
+
+    owner: {
+    name: "Anya Forger",
+    avatar: "/owner-profile.png",
+    verified: true,
+    rating: 4.8,
+    rentals: 204,
+    vehicles: 40,
+}
+
   },
   {
     id: 4,
     name: "Isuzu Truck",
+    location: "University of Pangasinan",
     image: "/isuzu-truck.png",
     type: "truck",
     subType: "Flatbed",
@@ -148,9 +259,24 @@ const VehiclesPage = ({
     price: 6000,
     rating: 4.5,
     available: true,
+    codingDay: "Monday",
+
+    owner: {
+    name: "Anya Forger",
+    avatar: "/owner-profile.png",
+    verified: true,
+    rating: 4.8,
+    rentals: 204,
+    vehicles: 40,
+}
+
   },
 ];
 
+const formatCoding = (day) => {
+  if (!day) return null;
+  return `Coding every ${day}`;
+};
 
   const handleFilterClick = (filter) => {
   setSubTypeFilter([]); // reset sub-types kapag nagpalit ng main type
@@ -177,14 +303,15 @@ const VehiclesPage = ({
 
 
   const clearFilters = () => {
-  setBookingData({
-    ...bookingData,
-    pickupDate: "",
-    pickupTime: "",
-    returnDate: "",
-    returnTime: "",
-  });
+  setBookingData((prev) => ({
+    ...prev,
+    pickupDate: getTodayDate(),
+    pickupTime: getCurrentTime(),
+    returnDate: getTomorrowDate(),
+    returnTime: getCurrentTime(),
+  }));
 
+  setLocationFilter("");
   setTransmission({ manual: false, automatic: false });
   setFuelType({ gasoline: false, diesel: false });
   setPriceRange({ min: "", max: "" });
@@ -201,6 +328,16 @@ const VehiclesPage = ({
 
 
  const filteredVehicles = vehicles.filter((vehicle) => {
+
+  const matchLocation =
+  !locationFilter ||
+  normalize(vehicle.location).includes(
+    normalize(locationFilter)
+  );
+
+
+
+
   // VEHICLE TYPE
   const matchType =
     selectedFilters.all ||
@@ -246,9 +383,12 @@ const matchSubType =
     matchTransmission &&
     matchFuel &&
     matchPrice &&
-    matchSearch
+    matchSearch &&
+    matchLocation
   );
 });
+
+
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -374,12 +514,12 @@ const matchSubType =
                   <p className="text-sm text-gray-400">{user?.email}</p>
                 </div>
 
-                <button
-                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition"
-                        >
-                          <Settings size={18} />
-                          Account Settings
-                        </button>
+                 <button onClick={() => {
+                    setShowProfileMenu(false);
+                    onNavigateToAccountSettings();}}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition">
+                    <Settings size={18} />  Account Settings
+                  </button>
 
                 <button
                   onClick={onNavigateToBookingHistory}
@@ -402,7 +542,8 @@ const matchSubType =
     </div>
   </nav>
 
-  <div className="pt-20 max-w-7xl mx-auto px-4 pb-20">
+  <div className="pt-20 max-w-[1400px] mx-auto px-6 pb-20">
+
     <div className="flex gap-6">
       {/* LEFT SIDEBAR - FILTERS */}
         <div className="w-72 bg-white rounded-xl p-6 shadow-sm h-fit sticky top-24">
@@ -427,6 +568,31 @@ const matchSubType =
                     />
                 </div>
             </div>
+
+            {/* Location */}
+<div className="mb-6">
+  <label className="block text-sm font-semibold mb-2">Location</label>
+
+  <div className="relative">
+    <MapPin
+      size={18}
+      className="absolute left-3 top-1/2 -translate-y-1/2 text-[#017FE6]"
+    />
+
+    <input
+      type="text"
+      placeholder="Enter location..."
+      value={locationFilter}
+      onChange={(e) => setLocationFilter(e.target.value)}
+      className="
+        w-full border border-gray-300 rounded-lg
+        pl-10 pr-3 py-2 text-sm
+        focus:outline-none focus:ring-2 focus:ring-[#017FE6]
+      "
+    />
+  </div>
+</div>
+
             
             {/* Vehicle Type */}
             <div className="mb-6">
@@ -516,6 +682,7 @@ const matchSubType =
               <input
                 type="date"
                 value={pickupDate}
+                min={getTodayDate()}
                 onChange={(e) =>
                   setBookingData({ ...bookingData, pickupDate: e.target.value })
                 }
@@ -525,6 +692,7 @@ const matchSubType =
               <input
                 type="time"
                 value={pickupTime}
+                min={pickupDate === getTodayDate() ? getCurrentTime() : undefined}
                 onChange={(e) =>
                   setBookingData({ ...bookingData, pickupTime: e.target.value })
                 }
@@ -539,6 +707,7 @@ const matchSubType =
               <input
                 type="date"
                 value={returnDate}
+                min={pickupDate}
                 onChange={(e) =>
                   setBookingData({ ...bookingData, returnDate: e.target.value })
                 }
@@ -657,12 +826,16 @@ const matchSubType =
         <div className="flex-1">
         <h1 className="text-4xl font-bold mb-7">Browse Vehicles</h1>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+
+
             {filteredVehicles.map((vehicle) => (
 
             <div
                 key={vehicle.id}
-                 className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-xl transition-shadow group"
+                  className="bg-white rounded-xl shadow-md overflow-hidden
+                  hover:shadow-xl transition-shadow
+                  group flex flex-col"
             >
                 <div className="relative">
                 {/* AVAILABLE - LEFT */}
@@ -679,23 +852,60 @@ const matchSubType =
                 </span>
 
 
-                <div className="relative bg-gray-50 rounded-t-xl p-4 h-52 flex items-center justify-center">
+               <div className="relative bg-gray-50 rounded-t-xl px-5 py-2 h-36 flex items-center justify-center overflow-hidden">
                     <img
                       src={vehicle.image || "/bmw-x5.png"}
                       alt={vehicle.name}
-                      className="max-h-full object-contain transition-transform duration-300 group-hover:scale-105"
+                      className="
+                        h-full
+                        max-w-[93%]
+                        object-contain
+                        mx-auto
+                        transition-transform duration-300
+                        group-hover:scale-105
+                      "
                     />
+
+
                   </div>
-
-
-
                 </div>
 
-                <div className="p-5">
-                <h3 className="text-xl font-bold mb-1">{vehicle.name}</h3>
-                <p className="text-gray-500 text-sm mb-3">{vehicle.category}</p>
+                <div className="p-4 flex flex-col flex-1">
 
-                <div className="flex items-center gap-5 mb-4 text-sm text-gray-600">
+                {/* VEHICLE NAME + LOCATION (INLINE) */}
+                  <h3 className="text-xl font-bold leading-tight mb-1">
+                  {vehicle.name}
+                </h3>
+
+                  {/* CATEGORY */}
+                  <p className="text-gray-500 text-sm mb-2">
+                    {vehicle.category}
+                  </p>
+
+                   <div className="flex items-center gap-1 text-sm text-gray-500 mb-2">
+                  <MapPin size={14} className="text-[#017FE6]" />
+                  <span>{vehicle.location}</span>
+                </div>
+
+                  {/* CODING DAY (FIGMA STYLE) */}
+                  {vehicle.codingDay && (
+                   <span className="
+                    inline-flex
+                    w-fit
+                    mb-3
+                    px-3 py-1
+                    text-xs
+                    bg-gray-200
+                    text-gray-700
+                    rounded-full
+                    font-medium
+                  ">
+                    {formatCoding(vehicle.codingDay)}
+                  </span>
+                  )}
+
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-3 text-sm text-gray-600">
+
                   <span className="flex items-center gap-1">
                     <Users size={16} className="text-[#017FE6]" />
                     {vehicle.seats} seats
@@ -713,9 +923,10 @@ const matchSubType =
                 </div>
 
                 {/* PRICE */} 
-                <div className="text-lg font-bold text-[#017FE6] mb-4"> ₱{vehicle.price.toLocaleString()} / day </div>
+                <div className="text-lg font-bold text-[#017FE6] mb-3"> ₱{vehicle.price.toLocaleString()} / day </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2 mt-auto">
+
                     <button
             type="button"
             onClick={() => {
@@ -727,11 +938,18 @@ const matchSubType =
           >
             View Details
           </button>
-
-
-                   <button onClick={() => isLoggedIn ? onViewDetails(vehicle) : onNavigateToSignIn()}
-                     className="flex-1 bg-[#017FE6] text-white py-2 rounded-lg hover:bg-[#0165B8]">  Book Now</button>
-
+                  <button
+                      onClick={() => {
+                        if (!isValidDateTime()) {
+  alert("Please make sure pick-up is not in the past and return is after pick-up.");
+  return;
+}
+                        isLoggedIn ? onViewDetails(vehicle) : onNavigateToSignIn();
+                      }}
+                      className="flex-1 bg-[#017FE6] text-white py-2 rounded-lg hover:bg-[#0165B8]"
+                    >
+                      Book Now
+                  </button>
                     </div>
                   </div>
                 </div>

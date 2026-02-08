@@ -9,29 +9,34 @@ import ForgotPasswordEmail from "./Verification/ForgotPasswordEmail";
 import ForgotPasswordOTP from "./Verification/ForgotPasswordOTP";
 import ResetPassword from "./Verification/ResetPassword";
 import AboutPage from "./pages/AboutPage";
+import AccountSettings from "./pages/AccountSettings";
 
 
 const App = () => {
-  const defaultBookingData = {
-  vehicleType: "",
-  pickupDate: new Date().toISOString().split("T")[0],
-  pickupTime: new Date().toTimeString().slice(0, 5),
-  returnDate: (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split("T")[0];
-  })(),
-  returnTime: new Date().toTimeString().slice(0, 5),
-};
+  // Helper function to get default booking data with local timezone
+  const getDefaultBookingData = () => {
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    return {
+      vehicleType: "",
+      location: "",
+      pickupDate: today.toLocaleDateString("en-CA"), // YYYY-MM-DD in local timezone
+      pickupTime: today.toTimeString().slice(0, 5), // HH:mm
+      returnDate: tomorrow.toLocaleDateString("en-CA"), // Tomorrow's date
+      returnTime: today.toTimeString().slice(0, 5), // Same time as pickup
+    };
+  };
 
-const [currentPage, setCurrentPage] = useState("home");
-const [bookingData, setBookingData] = useState(defaultBookingData);
-const [selectedVehicle, setSelectedVehicle] = useState(null);
-const [registeredEmail, setRegisteredEmail] = useState("");
-const [registeredPhone, setRegisteredPhone] = useState("");
-const [forgotEmail, setForgotEmail] = useState("");
-const [isLoggedIn, setIsLoggedIn] = useState(false);
-const [user, setUser] = useState(null);
+  const [currentPage, setCurrentPage] = useState("home");
+  const [bookingData, setBookingData] = useState(getDefaultBookingData());
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [registeredEmail, setRegisteredEmail] = useState("");
+  const [registeredPhone, setRegisteredPhone] = useState("");
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
 
   return (
     <>
@@ -41,7 +46,12 @@ const [user, setUser] = useState(null);
         isLoggedIn={isLoggedIn}
         user={user}
         onNavigateToSignIn={() => setCurrentPage("signin")}
-        onNavigateToVehicles={() => setCurrentPage("vehicles")}
+         onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+        onNavigateToVehicles={() => {
+          // Reset to fresh defaults when navigating to vehicles without search
+          setBookingData(getDefaultBookingData());
+          setCurrentPage("vehicles");
+        }}
         onNavigateToBookingHistory={() => setCurrentPage("signin")}
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToAbout={() => setCurrentPage("about")}
@@ -117,14 +127,20 @@ const [user, setUser] = useState(null);
         onNavigateToBookingHistory={() => setCurrentPage("signin")} 
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToAbout={() => setCurrentPage("about")}
+         onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
         onViewDetails={(vehicle) => {
           setSelectedVehicle(vehicle);
           setCurrentPage("vehicle-details");
         }}
+        onLogout={() => {
+          setIsLoggedIn(false);
+          setUser(null);
+          setCurrentPage("home");
+        }}
       />
     )}
 
-    {/* VEHICLE DETAIKS */}
+    {/* VEHICLE DETAILS */}
     {currentPage === "vehicle-details" && selectedVehicle && (
       <VehicleDetailsPage
         vehicle={selectedVehicle}
@@ -136,7 +152,12 @@ const [user, setUser] = useState(null);
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToSignIn={() => setCurrentPage("signin")}
         onNavigateToAbout={() => setCurrentPage("about")}
-          
+        onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+        onLogout={() => {
+          setIsLoggedIn(false);
+          setUser(null);
+          setCurrentPage("home");
+        }}
       />
     )}
 
@@ -169,7 +190,11 @@ const [user, setUser] = useState(null);
         isLoggedIn={isLoggedIn}
         user={user}
         onNavigateToHome={() => setCurrentPage("home")}
-        onNavigateToVehicles={() => setCurrentPage("vehicles")}
+        onNavigateToVehicles={() => {
+          // Reset to fresh defaults when navigating to vehicles from About page
+          setBookingData(getDefaultBookingData());
+          setCurrentPage("vehicles");
+        }}
         onNavigateToBookingHistory={() => setCurrentPage("signin")}
         onNavigateToSignIn={() => setCurrentPage("signin")}
         onNavigateToRegister={() => setCurrentPage("register")}
@@ -181,6 +206,24 @@ const [user, setUser] = useState(null);
         }}
       />
     )}
+
+    {/* ACCOUNT SETTINGS */}
+{currentPage === "account-settings" && (
+  <AccountSettings
+    isLoggedIn={isLoggedIn}
+    user={user}
+    onNavigateToHome={() => setCurrentPage("home")}
+    onNavigateToVehicles={() => setCurrentPage("vehicles")}
+    onNavigateToBookingHistory={() => setCurrentPage("signin")}
+    onNavigateToSignIn={() => setCurrentPage("signin")}
+    onLogout={() => {
+      setIsLoggedIn(false);
+      setUser(null);
+      setCurrentPage("home");
+    }}
+  />
+)}
+
 
   </>
 );

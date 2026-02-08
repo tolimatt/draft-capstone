@@ -1,21 +1,27 @@
 import React, { useState, useEffect } from "react";
-import { Car, Bike, Truck, Van, Sparkles, Shield, Radio, Bot, Search,  Users, Settings, Fuel, Bell, MessageCircle } from "lucide-react";
+import { MapPin, Car, Bike, Truck, Van, Sparkles, Shield, Radio, Bot, Search, Users, Settings, Fuel, Bell, MessageCircle, BadgeCheck } from "lucide-react";
 
 const getTodayDate = () => {
-  const today = new Date();
-  return today.toISOString().split("T")[0]; // YYYY-MM-DD
+  const d = new Date();
+  return d.toLocaleDateString("en-CA"); // YYYY-MM-DD (LOCAL time)
 };
 
 const getTomorrowDate = () => {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return tomorrow.toISOString().split("T")[0]; // YYYY-MM-DD
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toLocaleDateString("en-CA"); // YYYY-MM-DD
 };
 
 const getCurrentTime = () => {
-  const now = new Date();
-  return now.toTimeString().slice(0, 5); // HH:MM
+  const d = new Date();
+  return d.toTimeString().slice(0, 5); // HH:mm
 };
+
+const normalize = (str = "") =>
+  str.toLowerCase().replace(/\s+/g, " ").trim();
+
+
+
 
 const RentifyPro = ({
   onNavigateToSignIn, 
@@ -25,17 +31,21 @@ const RentifyPro = ({
   onSearch, 
   onViewDetails, 
   onNavigateToBookingHistory,  
+   onNavigateToAccountSettings,
   isLoggedIn, 
   user, 
   onLogout,
 }) => {
-  
+
+  const [location, setLocation] = useState("");
+  const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
   const [vehicleType, setVehicleType] = useState("");
   const [showAI, setShowAI] = useState(false);
   const [userMessage, setUserMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
 
   const getInitials = (firstName, lastName) => {
   if (!firstName || !lastName) return "";
@@ -54,16 +64,67 @@ const RentifyPro = ({
         ]);
       }
     }, [showAI]);
+
+    const locations = [
+      "Urdaneta City, Pangasinan",
+      "Dagupan City, Pangasinan",
+      "Calasiao, Pangasinan",
+      "Lingayen, Pangasinan",
+      "Mangaldan, Pangasinan",
+      "University of Pangasinan",
+      "San Carlos City, Pangasinan",
+      "Sta Barbara, Pangasinan",
+      "SM Dagupan",
+      "Robinsons Place Pangasinan",
+    ];
+
   
     {/* DEFAULT DATE AND TIME */}
 
     {/* PICKUP NOW */}
-  const [pickupDate, setPickupDate] = useState(getTodayDate());
-  const [pickupTime, setPickupTime] = useState(getCurrentTime());
+  // DEFAULT PICKUP
+const [pickupDate, setPickupDate] = useState(() => getTodayDate());
+const [pickupTime, setPickupTime] = useState(() => getCurrentTime());
 
-  {/* SAME DATE AND TIME FOR PICKUP  */}
-  const [returnDate, setReturnDate] = useState(getTomorrowDate());
-  const [returnTime, setReturnTime] = useState(getCurrentTime());
+// DEFAULT RETURN (always +1 day, same time)
+const [returnDate, setReturnDate] = useState(() => getTomorrowDate());
+const [returnTime, setReturnTime] = useState(() => getCurrentTime());
+
+
+ useEffect(() => {
+  if (returnDate <= pickupDate) {
+    const nextDay = new Date(pickupDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    setReturnDate(nextDay.toISOString().split("T")[0]);
+  }
+}, [pickupDate]);
+
+useEffect(() => {
+  const today = getTodayDate();
+  const now = getCurrentTime();
+
+  if (pickupDate === today) {
+    if (pickupTime < now) {
+      setPickupTime(now);
+    }
+  }
+}, [pickupDate, pickupTime]);
+
+const isValidDateTime = () => {
+  const now = new Date();
+  now.setSeconds(0, 0);
+
+  const pickup = new Date(`${pickupDate}T${pickupTime}`);
+  const dropoff = new Date(`${returnDate}T${returnTime}`);
+
+  if (pickup < now) return false;        // pickup in past
+  if (dropoff <= pickup) return false;   // return not after pickup
+
+  return true;
+};
+
+
+
 
   {/* VEHICLE CTAGEORIES */}
 
@@ -111,6 +172,7 @@ const featuredVehicles = [
   {
     id: 1,
     name: "BMW X5",
+    location: "Dagupan City, Pangasinan",
     image: "/bmw-x5.png",
     type: "car",
     subType: "SUV",
@@ -121,24 +183,22 @@ const featuredVehicles = [
     price: 5500,
     rating: 4.8,
     available: true,
-  },
-  {
-    id: 3,
-    name: "Toyota HiAce",
-    image: "/toyota-hiAce.png",
-    type: "van",
-    subType: "Passenger",
-    category: "Toyota • Van",
-    seats: 12,
-    transmission: "Manual",
-    fuel: "Diesel",
-    price: 4800,
-    rating: 4.7,
-    available: true,
+    codingDay: "Wednesday",
+
+    owner: {
+      name: "Anya Forger",
+      avatar: "/owner-profile.png",
+      verified: true,
+      rating: 4.8,
+      rentals: 204,
+      vehicles: 40,
+    }
+    
   },
   {
     id: 2,
     name: "Yamaha R3",
+    location: "Lingayen, Pangasinan",
     image: "/yamaha-r3.png",
     type: "motor",
     subType: "Sport",
@@ -149,8 +209,51 @@ const featuredVehicles = [
     price: 1200,
     rating: 4.6,
     available: true,
+    codingDay: "Thursday",
+
+    owner: {
+      name: "Anya Forger",
+      avatar: "/owner-profile.png",
+      verified: true,
+      rating: 4.8,
+      rentals: 204,
+      vehicles: 40,
+      
+    }
+    
+  },
+
+  {
+    id: 3,
+    name: "Toyota HiAce",
+    location: "San Carlos City, Pangasinan",
+    image: "/toyota-hiAce.png",
+    type: "van",
+    subType: "Passenger",
+    category: "Toyota • Van",
+    seats: 12,
+    transmission: "Manual",
+    fuel: "Diesel",
+    price: 4800,
+    rating: 4.7,
+    available: true,
+    codingDay: "Saturday",
+
+    owner: {
+      name: "Anya Forger",
+      avatar: "/owner-profile.png",
+      verified: true,
+      rating: 4.8,
+      rentals: 204,
+      vehicles: 40,
+    }
   },
 ];
+
+const formatCoding = (day) => {
+  if (!day) return null;
+  return `Coding every ${day}`;
+};
 
 
 
@@ -302,10 +405,16 @@ const featuredVehicles = [
           </div>
           
           <button
-          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition">
-            <Settings size={18} />
-              Account Settings
-            </button>
+          onClick={() => {
+            setShowProfileMenu(false);
+            onNavigateToAccountSettings();
+          }}
+          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition"
+        >
+          <Settings size={18} />
+          Account Settings
+        </button>
+
   
           <button
             onClick={onNavigateToBookingHistory}
@@ -363,70 +472,208 @@ const featuredVehicles = [
       {/* SEARCH CARD */}
       <div className="max-w-6xl mx-auto px-4 -mt-20 relative z-10">
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-4 mb-6">
+
+
+             <div className="relative md:col-span-2">
+  <label className="block text-[#017FE6] font-semibold mb-2">
+    Location
+  </label>
+
+  <div className="relative">
+    <MapPin
+      size={18}
+      className="absolute left-3 top-1/2 -translate-y-1/2 text-[#017FE6]"
+    />
+
+    <input
+      type="text"
+      value={location}
+      placeholder="Search location"
+      onChange={(e) => {
+        setLocation(e.target.value);
+        setShowLocationSuggestions(true);
+      }}
+      onFocus={() => setShowLocationSuggestions(true)}
+      className="
+         w-full h-[52px]
+        border
+        border-gray-300
+        rounded-lg
+        pl-10
+        pr-5
+        py-4
+        text-sm
+        focus:outline-none
+        focus:ring-2
+        focus:ring-[#017FE6]
+      "
+    />
+  </div>
+
+  {showLocationSuggestions && location && (
+    <div
+      className="
+        absolute
+        left-0
+        top-full
+        z-50
+        mt-1
+        w-full
+        bg-white
+        rounded-lg
+        shadow-lg
+        border
+        border-gray-200
+        max-h-56
+        overflow-y-auto
+      "
+    >
+      {locations
+        .filter((loc) =>
+          loc.toLowerCase().includes(location.toLowerCase())
+        )
+        .map((loc, index) => (
+          <button
+            key={index}
+            onClick={() => {
+              setLocation(loc);
+              setShowLocationSuggestions(false);
+            }}
+            className="
+               w-full h-[52px]
+              px-4
+              py-2
+              text-left
+              flex
+              items-center
+              gap-2
+              hover:bg-[#017FE6]/10
+            "
+          >
+            <MapPin size={14} className="text-[#017FE6]" />
+            {loc}
+          </button>
+        ))}
+    </div>
+  )}
+</div>
+
+
             <div>
               <label className="block text-[#017FE6] font-semibold mb-2">Vehicle Types</label>
               <select
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
+                className=" w-full h-[52px] border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
                 value={vehicleType}
                 onChange={(e) => setVehicleType(e.target.value)}
               >
                 <option value="">Select type</option>
                 <option value="car">Car</option>
-                <option value="motorcycle">Motorcycle</option>
+                <option value="motor">Motorcycle</option>
                 <option value="van">Van</option>
                 <option value="truck">Truck</option>
               </select>
             </div>
+
+
             <div>
               <label className="block text-[#017FE6] font-semibold mb-2">Pick-up Date</label>
               <input
-                type="date"
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
-                value={pickupDate}
-                onChange={(e) => setPickupDate(e.target.value)}
+              type="date"
+              value={pickupDate}
+               min={getTodayDate()}
+              onChange={(e) => setPickupDate(e.target.value)}
+              className="
+                w-full h-[52px]
+                border border-gray-300 rounded-lg
+                px-4
+                text-sm
+                leading-[52px]
+                focus:outline-none focus:ring-2 focus:ring-[#017FE6]
+              "
               />
             </div>
             <div>
               <label className="block text-[#017FE6] font-semibold mb-2">Pick-up Time</label>
               <input
                 type="time"
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
                 value={pickupTime}
+                min={pickupDate === getTodayDate() ? getCurrentTime() : undefined}
                 onChange={(e) => setPickupTime(e.target.value)}
-              />
+                className="
+                    w-full h-[52px]
+                    border border-gray-300 rounded-lg
+                    px-4
+                    text-sm
+                    leading-[52px]
+                    focus:outline-none focus:ring-2 focus:ring-[#017FE6]
+                  "
+                />
+
             </div>
             <div>
               <label className="block text-[#017FE6] font-semibold mb-2">Return Date</label>
               <input
                 type="date"
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
                 value={returnDate}
+                min={(() => {
+    const d = new Date(pickupDate);
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split("T")[0];
+  })()}
                 onChange={(e) => setReturnDate(e.target.value)}
+              className="
+                  w-full h-[52px]
+                  border border-gray-300 rounded-lg
+                  px-4
+                  text-sm
+                  leading-[52px]
+                  focus:outline-none focus:ring-2 focus:ring-[#017FE6]
+                "
               />
+
             </div>
             <div>
               <label className="block text-[#017FE6] font-semibold mb-2">Return Time</label>
               <input
-                type="time"
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
-                value={returnTime}
-                onChange={(e) => setReturnTime(e.target.value)}
-              />
+                  type="time"
+                  value={returnTime}
+                  onChange={(e) => setReturnTime(e.target.value)}
+                className="
+                    w-full h-[52px]
+                    border border-gray-300 rounded-lg
+                    px-4
+                    text-sm
+                    leading-[52px]
+                    focus:outline-none focus:ring-2 focus:ring-[#017FE6]
+                  "
+                />
+
             </div>
           </div>
           <div className="flex justify-center">
             
           <button
-              onClick={() =>
-              onSearch({
-              vehicleType,
-              pickupDate,
-              pickupTime,
-              returnDate,
-              returnTime,
-            })}
-            
+              onClick={() => {
+                if (!isValidDateTime()) {
+  alert(
+    pickupDate === returnDate
+      ? "Return date must be at least 1 day after pick-up date."
+      : "Pick-up time must not be in the past."
+  );
+  return;
+}
+
+                onSearch({
+                  location,
+                  vehicleType,
+                  pickupDate,
+                  pickupTime,
+                  returnDate,
+                  returnTime,
+                });
+              }}
+
             className="flex items-center gap-3 bg-[#017FE6] text-white px-10 py-3 rounded-xl font-semibold text-lg hover:bg-[#0165B8] transition">
               <Search size={22} className="stroke-[2.5]" />
               Search Available Vehicles
@@ -454,11 +701,12 @@ const featuredVehicles = [
               
               onClick={() =>
                 onSearch({
+                  location,
                   vehicleType:
                     category.id === "premium-cars"
                       ? "car"
                       : category.id === "motorcycles"
-                      ? "motorcycle"
+                      ? "motor"
                       : category.id === "vans"
                       ? "van"
                       : "truck",
@@ -534,13 +782,44 @@ const featuredVehicles = [
                       className="max-h-full object-contain transition-transform duration-300 group-hover:scale-105"
                     />
                   </div>
-                  
+
                   </div>
-                    <div className="p-6">
-                    <h3 className="text-2xl font-bold mb-2">{vehicle.name}</h3>
-                    <p className="text-gray-600 mb-4">{vehicle.category}</p>
+                     <div className="p-5">
+      
+                      {/* VEHICLE NAME */}
+                      <h3 className="text-xl font-bold leading-tight mb-1">
+                        {vehicle.name}
+                      </h3>
+
+                      {/* CATEGORY */}
+                      <p className="text-gray-500 text-sm mb-2">
+                        {vehicle.category}
+                      </p>
+
+                      {/* LOCATION */}
+                      <div className="flex items-center gap-1 text-sm text-gray-500 mb-2">
+                        <MapPin size={14} className="text-[#017FE6]" />
+                        <span>{vehicle.location}</span>
+                      </div>
+
+                      
+                      {/* CODING DAY (FIGMA STYLE) */}
+                        {vehicle.codingDay && (
+                          <span className="
+                          inline-block
+                          mb-3
+                          px-3 py-1
+                          text-xs
+                          bg-gray-200
+                          text-gray-700
+                          rounded-full
+                          font-medium
+                          ">
+                            {formatCoding(vehicle.codingDay)}
+                            </span>
+                          )}
+
                  <div className="flex items-center gap-5 mb-4 text-sm text-gray-600">
-                    
                     <span className="flex items-center gap-1">
                       <Users size={16} className="text-[#017FE6]" />
                       {vehicle.seats} seats

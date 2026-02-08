@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Bot, Users, Settings, Fuel, Car, Wallet, Receipt, Camera, Bell, MessageCircle } from "lucide-react";
+import { Bot, Users, Settings, Fuel, Car, Wallet, Receipt, Camera, Bell, MessageCircle, BadgeCheck } from "lucide-react";
 
 const VehicleDetailsPage = ({
 vehicle,
@@ -11,6 +11,7 @@ vehicle,
   onNavigateToRegister,
   onNavigateToBookingHistory,
   onNavigateToAbout,
+  onNavigateToAccountSettings,
   isLoggedIn,
   user,
   onLogout,
@@ -22,6 +23,9 @@ vehicle,
     const [messages, setMessages] = useState([]);
     const [isTyping, setIsTyping] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
+    const [showReviewsModal, setShowReviewsModal] = useState(false);
+    const [sortOption, setSortOption] = useState("recent");
+
 
       useEffect(() => {
           if (showAI) {
@@ -45,7 +49,6 @@ vehicle,
       { src: "/interior-4.png", label: "USB Charging Port" },
     ]);
 
-
 // combine date + time → Date object
 const getDateTime = (date, time) => new Date(`${date}T${time}`);
 
@@ -65,6 +68,60 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
     const totalPrice = durationDays * dailyRate;
     const DOWNPAYMENT_RATE = 0.30;
     const downpaymentFee = Math.round(dailyRate * DOWNPAYMENT_RATE);
+
+    const reviews = [
+  {
+    id: 1,
+    name: "John Doe",
+    avatar: "/owner-profile.png",
+    rating: 1,
+    comment: "Very Comfortable, Amazing!",
+    date: "2026-01-03",
+  },
+  {
+    id: 2,
+    name: "John Doe",
+    avatar: "/owner-profile.png",
+    rating: 5,
+    comment: "Very Comfortable, Amazing!",
+    date: "2026-01-03",
+  },
+  {
+    id: 3,
+    name: "John Doe",
+    avatar: "/owner-profile.png",
+    rating: 2,
+    comment: "Very Comfortable, Amazing!",
+    date: "2026-01-03",
+  },
+];
+
+ const totalReviews = reviews.length;
+
+const averageRating =
+  totalReviews > 0
+    ? (
+        reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+      ).toFixed(1)
+    : "0.0";
+
+    const processedReviews = (() => {
+  if (sortOption === "highest") {
+    const maxRating = Math.max(...reviews.map(r => r.rating));
+    return reviews.filter(r => r.rating === maxRating);
+  }
+
+  if (sortOption === "lowest") {
+    const minRating = Math.min(...reviews.map(r => r.rating));
+    return reviews.filter(r => r.rating === minRating);
+  }
+
+  // Most Recent (default)
+  return [...reviews].sort(
+    (a, b) => new Date(b.date) - new Date(a.date)
+  );
+})();
+
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -203,11 +260,12 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
               <p className="text-sm text-gray-400">{user?.email}</p>
             </div>
     
-            <button
+            <button onClick={() => {
+              setShowProfileMenu(false);
+              onNavigateToAccountSettings();}}
               className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition">
-                <Settings size={18} />
-                Account Settings
-           </button>
+                <Settings size={18} />  Account Settings
+            </button>
 
             <button
               onClick={onNavigateToBookingHistory}
@@ -233,7 +291,7 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
         <button
           onClick={onBack}
           className="mb-6 text-sm font-medium text-gray-500 hover:text-[#017FE6]">
-          ← Back to Vehicles
+          ← Back
         </button>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1.8fr_1.3fr] gap-12">
@@ -252,8 +310,6 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
                     }}
                   />
 
-
-
                   <h2 className="text-2xl font-bold">{vehicle.name}</h2>
                   <p className="text-sm text-gray-500 mb-3">{vehicle.category}</p>
 
@@ -261,10 +317,17 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
                   
                   {/* RATING */}
                   <div className="flex items-center gap-2">
-                    <span className="text-yellow-400 text-lg">★</span>
-                    <span className="font-semibold text-lg">{vehicle.rating}</span>
-                    <span className="text-gray-400 text-sm">(130 reviews)</span>
-                 </div>
+                  <span className="text-yellow-400 text-lg">★</span>
+
+                  <span className="font-semibold text-lg">
+                    {averageRating}
+                  </span>
+
+                  <span className="text-gray-400 text-sm">
+                    ({totalReviews} {totalReviews === 1 ? "review" : "reviews"})
+                  </span>
+                </div>
+
                  
                  {/* PRICE */}
                   <div className="text-2xl font-extrabold text-[#017FE6]">
@@ -273,6 +336,55 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
                   </div>
                 </div>
                </div>
+
+               {/* VEHICLE OWNER */}
+              <div className="bg-white rounded-xl border p-6 flex items-center gap-4">
+                
+                {/* AVATAR */}
+                <img
+                  src={vehicle.owner?.avatar || "/owner-profile.png"}
+                  alt={vehicle.owner?.name}
+                  className="w-16 h-16 rounded-full object-cover border"
+                />
+
+                {/* INFO */}
+                <div className="flex-1">
+                   {/* LISTED BY LABEL */}
+                    <p className="text-sm text-gray-400 mb-1">
+                      Listed by:
+                    </p>
+
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-lg">
+                      {vehicle.owner?.name || "Vehicle Owner"}
+                    </h4>
+
+                    {/* VERIFIED BADGE */}
+                    {vehicle.owner?.verified && (
+                    <BadgeCheck
+                      size={20}
+                      className="text-[#017FE6]"
+                      title="Verified Vehicle Owner"
+                    />
+                  )}
+
+                  </div>
+
+                  <p className="text-sm text-[#017FE6]">
+                    Verified Vehicle Owner
+                  </p>
+
+                  {/* STATS */}
+                  <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
+                     <span className="flex items-center gap-1 font-semibold text-gray-800">
+                    <span className="text-yellow-400 text-base">★</span>
+                      {vehicle.owner?.rating || "4.8"}
+                    </span> {vehicle.owner?.rentals || 204} Rentals
+                    <span>{vehicle.owner?.vehicles || 40} Vehicles</span>
+                  </div>
+                </div>
+              </div>
+
                
                {/* INTERIOR */}
                 <div className="bg-white rounded-2xl border p-7">
@@ -307,9 +419,8 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
                   </div>
                 </div>
               </div>
-
           {/* RIGHT */}
-          <div className="space-y-7">
+          <div className="space-y-7 lg:sticky lg:top-24 self-start">
 
            {/* SPECIFICATIONS */}
             <div className="bg-white rounded-2xl shadow-sm p-7">
@@ -410,8 +521,57 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
                     </ul>
                   </div>
 
+                  {/* REVIEWS */}
+                  <div className="bg-white rounded-2xl shadow-sm p-7">
+                    <h3 className="text-lg font-bold mb-5 flex items-center gap-2">
+                      <span className="text-yellow-400 text-lg">★</span>
+                      Reviews
+                    </h3>
 
-                          {/* BOOKING */}
+                    <div className="space-y-4">
+                      {reviews.map((review) => (
+                        <div
+                          key={review.id}
+                          className="flex items-start gap-4 border rounded-xl p-4"
+                        >
+                          <img
+                            src={review.avatar}
+                            alt={review.name}
+                            className="w-10 h-10 rounded-full object-cover"
+                          />
+
+                          <div className="flex-1">
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-semibold">{review.name}</p>
+                                  <div className="flex text-yellow-400 text-xs">
+                                    {"★".repeat(review.rating)}
+                                  </div>
+                                </div>
+
+                                <span className="text-xs text-gray-400">
+                                  {review.date}
+                                </span>
+                          </div>
+
+                            <p className="text-sm text-gray-700">{review.comment}</p>
+                            <p className="text-xs text-gray-400 mt-1">
+                              Booked {vehicle.name}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={() => setShowReviewsModal(true)}
+                      className="mt-5 w-full bg-[#D6EBFF] text-[#017FE6] py-3 rounded-xl font-semibold hover:bg-[#c5e2ff]"
+                    >
+                      View all reviews
+                    </button>
+                  </div>
+
+                 {/* BOOKING */}
                 <div className="bg-white rounded-2xl border shadow-sm p-7">
                   <h3 className="text-lg font-bold mb-6">Book This Vehicle</h3>
 
@@ -580,8 +740,110 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
             <a href="#" className="text-blue-100 hover:text-white">Terms and Condition</a>
         </div>
         </div>
+        
     </div>
     </footer>
+
+    {showReviewsModal && (
+  <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-4">
+    <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden">
+
+      {/* HEADER */}
+      <div className="px-6 py-4 border-b">
+
+  {/* ROW 1: TITLE + CLOSE */}
+  <div className="flex items-center justify-between">
+    <h3 className="text-xl font-bold">All Reviews</h3>
+
+    <button
+      onClick={() => setShowReviewsModal(false)}
+      className="text-gray-400 hover:text-gray-700 text-2xl leading-none"
+      aria-label="Close"
+    >
+      ×
+    </button>
+  </div>
+
+  {/* ROW 2: RATING + SORT */}
+  <div className="flex items-center justify-between mt-2">
+    <p className="text-sm text-gray-500 flex items-center gap-1">
+      <span className="text-yellow-400">★</span>
+      {averageRating}
+      <span className="text-gray-400">
+        ({totalReviews} {totalReviews === 1 ? "review" : "reviews"})
+      </span>
+    </p>
+
+   <select
+  value={sortOption}
+  onChange={(e) => setSortOption(e.target.value)}
+  className="border rounded-lg px-3 py-1.5 text-sm"
+>
+  <option value="recent">Most Recent</option>
+  <option value="highest">Highest Rating</option>
+  <option value="lowest">Lowest Rating</option>
+</select>
+
+  </div>
+
+</div>
+
+
+      {/* BODY */}
+      <div className="max-h-[60vh] overflow-y-auto px-6 py-5 space-y-4">
+        {processedReviews.map((review) => (
+          <div
+            key={review.id}
+            className="flex gap-4 border rounded-xl p-4"
+          >
+            <img
+              src={review.avatar}
+              alt={review.name}
+              className="w-12 h-12 rounded-full object-cover"
+            />
+
+            <div className="flex-1">
+              <div className="flex justify-between items-center">
+  <div className="flex items-center gap-2">
+    <p className="font-semibold">{review.name}</p>
+    <div className="flex text-yellow-400 text-xs">
+      {"★".repeat(review.rating)}
+    </div>
+  </div>
+
+  <span className="text-xs text-gray-400">
+    {review.date}
+  </span>
+</div>
+
+
+              <p className="text-sm text-gray-700">
+                {review.comment}
+              </p>
+
+              <p className="text-xs text-gray-400 mt-1">
+                Booked {vehicle.name}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* FOOTER */}
+      <div className="border-t px-6 py-4">
+        <button
+          onClick={() => setShowReviewsModal(false)}
+          className="w-full bg-[#017FE6] text-white py-3 rounded-xl font-semibold hover:bg-[#0165B8]"
+        >
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+)}
+
+
 
     {/* AI ASSISTANT */}
     {showAI && (
@@ -658,6 +920,7 @@ const getDateTime = (date, time) => new Date(`${date}T${time}`);
           </div>
         </div>
       )}
+      
 
 
     </div>

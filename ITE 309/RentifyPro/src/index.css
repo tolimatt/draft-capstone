@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+.input {
+  @apply w-full bg-gray-100 border border-gray-200 rounded-lg px-4 py-2
+         text-sm text-gray-700
+         focus:outline-none focus:ring-2 focus:ring-[#017FE6];
+}
+
+
 /* ================================
    REMOVE DEFAULT PASSWORD TOGGLE
    (Chrome / Edge / Browser Eye)
@@ -14,3 +21,5 @@ input[type="password"]::-ms-clear {
 input[type="password"]::-webkit-credentials-auto-fill-button {
   display: none !important;
 }
+
+
