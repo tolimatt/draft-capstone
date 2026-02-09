@@ -37,8 +37,28 @@ vehicle,
             ]);
           }
       }, [showAI]);
-      
-      
+
+      const [profilePhoto, setProfilePhoto] = useState(
+              localStorage.getItem("profilePhoto") || null
+            );
+            
+            const handlePhotoUpload = (e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+            
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                setProfilePhoto(reader.result);
+                localStorage.setItem("profilePhoto", reader.result);
+              };
+              reader.readAsDataURL(file);
+            };
+            
+            const handleRemovePhoto = () => {
+              setProfilePhoto(null);
+              localStorage.removeItem("profilePhoto");
+            };
+        
 
     const dailyRate = vehicle?.price || 0;
 
@@ -246,9 +266,20 @@ const averageRating =
           onClick={() => setShowProfileMenu(!showProfileMenu)}
           className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full hover:bg-gray-200 transition"
         >
-          <div className="w-8 h-8 rounded-full bg-[#017FE6] text-white flex items-center justify-center text-sm font-bold">
-            {user?.initials}
-          </div>
+          <div className="w-8 h-8 rounded-full overflow-hidden bg-[#017FE6] flex items-center justify-center">
+            {profilePhoto ? (
+                <img
+                src={profilePhoto}
+                alt="Profile"
+                className="w-full h-full object-cover"
+                />
+            ) : (
+                <span className="text-white text-sm font-bold">
+                {user?.initials}
+                </span>
+            )}
+            </div>
+
           <span className="text-sm font-medium">{user?.name}</span>
         </button>
     

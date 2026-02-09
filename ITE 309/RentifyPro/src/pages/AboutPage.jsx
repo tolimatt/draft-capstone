@@ -8,6 +8,7 @@ import { Bot, Bell, MessageCircle, Settings, Car, Users, Wrench, ShieldCheck} fr
     onNavigateToRegister,
     onNavigateToAbout,
     onNavigateToBookingHistory,
+    onNavigateToAccountSettings,
     isLoggedIn,
     user,
     onLogout,
@@ -18,6 +19,7 @@ import { Bot, Bell, MessageCircle, Settings, Car, Users, Wrench, ShieldCheck} fr
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  
 
   const getInitials = (firstName, lastName) => {
     if (!firstName || !lastName) return "";
@@ -34,6 +36,27 @@ import { Bot, Bell, MessageCircle, Settings, Car, Users, Wrench, ShieldCheck} fr
       }
     ]);
   }, [showAI]);
+
+  const [profilePhoto, setProfilePhoto] = useState(
+    localStorage.getItem("profilePhoto") || null
+  );
+  
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+  
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setProfilePhoto(reader.result);
+      localStorage.setItem("profilePhoto", reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+  
+  const handleRemovePhoto = () => {
+    setProfilePhoto(null);
+    localStorage.removeItem("profilePhoto");
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -149,9 +172,20 @@ import { Bot, Bell, MessageCircle, Settings, Car, Users, Wrench, ShieldCheck} fr
                onClick={() => setShowProfileMenu(!showProfileMenu)}
                className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full hover:bg-gray-200 transition"
              >
-               <div className="w-8 h-8 rounded-full bg-[#017FE6] text-white flex items-center justify-center text-sm font-bold">
-                 {user?.initials}
-               </div>
+              <div className="w-8 h-8 rounded-full overflow-hidden bg-[#017FE6] flex items-center justify-center">
+            {profilePhoto ? (
+                <img
+                src={profilePhoto}
+                alt="Profile"
+                className="w-full h-full object-cover"
+                />
+            ) : (
+                <span className="text-white text-sm font-bold">
+                {user?.initials}
+                </span>
+            )}
+            </div>
+
                <span className="text-sm font-medium">
                  {user?.name}
                </span>
@@ -165,10 +199,11 @@ import { Bot, Bell, MessageCircle, Settings, Car, Users, Wrench, ShieldCheck} fr
                        <p className="text-sm text-gray-400">{user?.email}</p>
                      </div>
              
-                     <button
-                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition">
-                      <Settings size={18} />
-                      Account Settings
+                     <button onClick={() => {
+                        setShowProfileMenu(false);
+                        onNavigateToAccountSettings();}}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition">
+                        <Settings size={18} />  Account Settings
                       </button>
              
                      <button onClick={onNavigateToBookingHistory}

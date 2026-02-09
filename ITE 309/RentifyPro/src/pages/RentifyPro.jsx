@@ -46,7 +46,6 @@ const RentifyPro = ({
   const [isTyping, setIsTyping] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
-
   const getInitials = (firstName, lastName) => {
   if (!firstName || !lastName) return "";
   return `${firstName[0]}${lastName[0]}`.toUpperCase();
@@ -64,6 +63,27 @@ const RentifyPro = ({
         ]);
       }
     }, [showAI]);
+
+    const [profilePhoto, setProfilePhoto] = useState(
+      localStorage.getItem("profilePhoto") || null
+    );
+    
+    const handlePhotoUpload = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+    
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProfilePhoto(reader.result);
+        localStorage.setItem("profilePhoto", reader.result);
+      };
+      reader.readAsDataURL(file);
+    };
+    
+    const handleRemovePhoto = () => {
+      setProfilePhoto(null);
+      localStorage.removeItem("profilePhoto");
+    };
 
     const locations = [
       "Urdaneta City, Pangasinan",
@@ -388,9 +408,20 @@ const formatCoding = (day) => {
     onClick={() => setShowProfileMenu(!showProfileMenu)}
     className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full hover:bg-gray-200 transition">
       
-      <div className="w-8 h-8 rounded-full bg-[#017FE6] text-white flex items-center justify-center text-sm font-bold">
-        {user?.initials}
-      </div>
+      <div className="w-8 h-8 rounded-full overflow-hidden bg-[#017FE6] flex items-center justify-center">
+            {profilePhoto ? (
+                <img
+                src={profilePhoto}
+                alt="Profile"
+                className="w-full h-full object-cover"
+                />
+            ) : (
+                <span className="text-white text-sm font-bold">
+                {user?.initials}
+                </span>
+            )}
+            </div>
+
     <span className="text-sm font-medium">
       {user?.name}
     </span>
@@ -656,13 +687,13 @@ const formatCoding = (day) => {
           <button
               onClick={() => {
                 if (!isValidDateTime()) {
-  alert(
-    pickupDate === returnDate
-      ? "Return date must be at least 1 day after pick-up date."
-      : "Pick-up time must not be in the past."
-  );
-  return;
-}
+            alert(
+                pickupDate === returnDate
+                  ? "Return date must be at least 1 day after pick-up date."
+                  : "Pick-up time must not be in the past."
+              );
+              return;
+              }
 
                 onSearch({
                   location,
@@ -674,7 +705,7 @@ const formatCoding = (day) => {
                 });
               }}
 
-            className="flex items-center gap-3 bg-[#017FE6] text-white px-10 py-3 rounded-xl font-semibold text-lg hover:bg-[#0165B8] transition">
+              className="flex items-center gap-3 bg-[#017FE6] text-white px-10 py-3 rounded-xl font-semibold text-lg hover:bg-[#0165B8] transition">
               <Search size={22} className="stroke-[2.5]" />
               Search Available Vehicles
           </button>

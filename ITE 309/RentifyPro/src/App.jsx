@@ -199,6 +199,7 @@ const App = () => {
         onNavigateToSignIn={() => setCurrentPage("signin")}
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToAbout={() => setCurrentPage("about")}
+        onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
         onLogout={() => {
           setIsLoggedIn(false);
           setUser(null);
@@ -216,6 +217,7 @@ const App = () => {
     onNavigateToVehicles={() => setCurrentPage("vehicles")}
     onNavigateToBookingHistory={() => setCurrentPage("signin")}
     onNavigateToSignIn={() => setCurrentPage("signin")}
+    onNavigateToAbout={() => setCurrentPage("about")}
     onLogout={() => {
       setIsLoggedIn(false);
       setUser(null);
