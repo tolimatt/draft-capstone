@@ -15,10 +15,6 @@ import {
   MessageCircle as ChatIcon,
 } from "lucide-react";
 
-/* =========================================================
-   ✅ FIX: Move these components OUTSIDE AccountSettings
-   so inputs won't lose focus on each keystroke.
-========================================================= */
 const InputField = React.memo(function InputField({
   label,
   type = "text",
@@ -121,6 +117,7 @@ const AccountSettings = ({
   onNavigateToAbout,
   onNavigateToBookingHistory,
   onNavigateToAccountSettings,
+  onNavigateToVehicleOwnerProceed,
   isLoggedIn,
   user,
   onLogout,
@@ -538,9 +535,13 @@ const AccountSettings = ({
                 Start building your rental fleet today.
               </p>
 
-              <button className="w-full bg-[#017FE6] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#0165B8] transition">
+              <button
+                onClick={() => onNavigateToVehicleOwnerProceed()}
+                className="w-full bg-[#017FE6] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#0165B8] transition"
+              >
                 Register as Vehicle Owner
               </button>
+
             </div>
           </aside>
 

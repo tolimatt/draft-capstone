@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-const RegisterOTP = ({ onNavigateToSignIn, onNavigateToRegister, email, phone }) => {
+const RegisterOTP = ({ onNavigateToSignIn, onNavigateToRegister, email, phone, role, }) => {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [timer, setTimer] = useState(60);
   const [error, setError] = useState("");
@@ -85,8 +85,11 @@ const maskPhone = (phone) => {
 
     // Auto redirect to Sign In after 2 seconds
     setTimeout(() => {
-      onNavigateToSignIn();
-    }, 2000);
+  if (role === "owner") {
+    localStorage.setItem("isNewOwner", "true"); // 👈 persist owner session
+  }
+  onNavigateToSignIn();
+}, 2000);
   }, 1500);
 };
 

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect} from "react";
 import RentifyPro from "./pages/RentifyPro";
 import SignInPage from "./pages/SignInPage";
 import VehiclesPage from "./pages/VehiclesPage";
@@ -10,6 +10,14 @@ import ForgotPasswordOTP from "./Verification/ForgotPasswordOTP";
 import ResetPassword from "./Verification/ResetPassword";
 import AboutPage from "./pages/AboutPage";
 import AccountSettings from "./pages/AccountSettings";
+import ProceedVehicleOwner from "./pages/ProceedVehicleOwner";
+import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
+import RegisterOwnerPage from "./pages/RegisterOwnerPage";
+
+
+//OWNER UI
+import OwnerLayout from "./Owner/OwnerLayout";
+
 
 
 const App = () => {
@@ -37,6 +45,29 @@ const App = () => {
   const [forgotEmail, setForgotEmail] = useState("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
+  const [isOwnerLoggedIn, setIsOwnerLoggedIn] = useState(false);
+  const [registerRole, setRegisterRole] = useState("user"); 
+
+
+  useEffect(() => {
+  if (localStorage.getItem("isNewOwner") === "true") {
+    setIsOwnerLoggedIn(true);
+    setCurrentPage("owner-dashboard");
+  }
+}, []);
+
+
+  useEffect(() => {
+  const switchToUser = () => {
+    setIsOwnerLoggedIn(false);
+    setCurrentPage("home"); // or "vehicles"
+  };
+
+  window.addEventListener("switch-to-user", switchToUser);
+  return () => window.removeEventListener("switch-to-user", switchToUser);
+}, []);
+
+
 
   return (
     <>
@@ -80,10 +111,18 @@ const App = () => {
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToForgotPassword={() => setCurrentPage("forgot-email")}
         onLoginSuccess={(userData) => {
-        setIsLoggedIn(true);
-        setUser(userData); // DIRECT NA
-        setCurrentPage("home");
-        }}
+        setUser(userData);
+
+        if (userData.role === "owner") {
+          setIsOwnerLoggedIn(true);
+          localStorage.setItem("isNewOwner", "true");
+          setCurrentPage("owner-dashboard");
+        } else {
+          setIsLoggedIn(true);
+          setCurrentPage("home");
+        }
+      }}
+
       />
     )}
 
@@ -169,16 +208,32 @@ const App = () => {
        onNavigateToRegisterOTP={(email, phone) => {
         setRegisteredEmail(email);
         setRegisteredPhone(phone);
+        setRegisterRole("user");
         setCurrentPage("registerotp");
        }}
+       onNavigateToOwnerRegister={() => setCurrentPage("register-owner")}
      />
    )}
+
+  {currentPage === "register-owner" && (
+  <RegisterOwnerPage
+    onBack={() => setCurrentPage("register")}
+    onNavigateToSignIn={() => setCurrentPage("signin")}
+    onNavigateToRegisterOTP={(email, phone) => {
+      setRegisteredEmail(email);
+      setRegisteredPhone(phone);
+      setRegisterRole("owner"); 
+      setCurrentPage("registerotp");
+    }}
+  />
+)}
    
    {/* REGISTER 2FA */}
    {currentPage === "registerotp" && (
      <RegisterOTP
         email={registeredEmail}
         phone={registeredPhone}
+        role={registerRole} 
         onNavigateToSignIn={() => setCurrentPage("signin")}
         onNavigateToRegister={() => setCurrentPage("register")}
      />
@@ -217,6 +272,8 @@ const App = () => {
     onNavigateToVehicles={() => setCurrentPage("vehicles")}
     onNavigateToBookingHistory={() => setCurrentPage("signin")}
     onNavigateToSignIn={() => setCurrentPage("signin")}
+    onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+     onNavigateToVehicleOwnerProceed={() => setCurrentPage("vehicle-owner-proceed")}
     onNavigateToAbout={() => setCurrentPage("about")}
     onLogout={() => {
       setIsLoggedIn(false);
@@ -226,6 +283,36 @@ const App = () => {
   />
 )}
 
+{/* PROCEED AS VEHICLE OWNER */}
+{currentPage === "vehicle-owner-proceed" && (
+  <ProceedVehicleOwner
+  onBack={() => setCurrentPage("account-settings")}
+  onDoLater={() => setCurrentPage("account-settings")}
+  onProceed={() => setCurrentPage("vehicle-owner-verification")}
+  onNavigateToHome={() => setCurrentPage("home")}
+/>
+
+)}
+
+{currentPage === "vehicle-owner-verification" && (
+  <VehicleOwnerVerification
+  onNavigateToHome={() => setCurrentPage("home")}
+  onBack={() => setCurrentPage("vehicle-owner-proceed")}
+  onSubmit={() => {
+  localStorage.setItem("isNewOwner", "true");
+  setIsOwnerLoggedIn(true);
+  setCurrentPage("owner-dashboard");
+}}
+
+/>
+)}
+
+{currentPage === "owner-dashboard" && isOwnerLoggedIn && (
+  <OwnerLayout />
+)}
+
+
+  
 
   </>
 );

@@ -49,10 +49,15 @@ const SignInPage = ({ onNavigateToHome, onNavigateToRegister, onNavigateToForgot
   console.log("Sign in with:", email, password);
 
   const users = JSON.parse(localStorage.getItem("users")) || [];
+const ownerUsers = JSON.parse(localStorage.getItem("ownerUsers")) || [];
 
-const foundUser = users.find(
-  (user) => user.email === email && user.password === password
-);
+const foundUser =
+  users.find(
+    (user) => user.email === email && user.password === password
+  ) ||
+  ownerUsers.find(
+    (user) => user.email === email && user.password === password
+  );
 
 if (!foundUser) {
   setErrors({
@@ -64,11 +69,15 @@ if (!foundUser) {
 
 {/* IF THE LOGIN SUCCESS */}
 onLoginSuccess({
-  name: `${foundUser.firstName} ${foundUser.lastName}`,
-  initials:
-    foundUser.firstName.charAt(0) + foundUser.lastName.charAt(0),
+  name: foundUser.name || `${foundUser.firstName} ${foundUser.lastName}`,
+  initials: foundUser.initials
+    || (foundUser.name
+      ? foundUser.name.split(" ").map(n => n[0]).join("")
+      : foundUser.firstName.charAt(0) + foundUser.lastName.charAt(0)),
   email: foundUser.email,
+  role: foundUser.role || "user",
 });
+
 
 }
 
@@ -148,11 +157,9 @@ onLoginSuccess({
                   `}
                   placeholder="Enter your email"
                 />
-                {errors.email && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.email}
-                  </p>
-                )}
+                <p className="text-red-500 text-xs min-h-[1rem]">
+                  {errors.email || ""}
+                </p>
 
                 <p className="text-xs text-gray-400 mt-1">
                   Supported providers: Gmail, Yahoo, Outlook, Hotmail
@@ -192,14 +199,9 @@ onLoginSuccess({
                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
-
-                {errors.password && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.password}
-                  </p>
-                  
-                )}
-
+                  <p className="text-red-500 text-xs min-h-[1rem]">
+                  {errors.password || ""}
+                </p>
               
               </div>
 

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, User, Car } from "lucide-react";
 
-const RegisterPage = ({ onNavigateToHome, onNavigateToSignIn, onNavigateToRegisterOTP }) => {
+const RegisterPage = ({ onNavigateToHome, onNavigateToSignIn, onNavigateToRegisterOTP,  onNavigateToOwnerRegister,}) => {
 
   const [form, setForm] = useState({
     firstName: "",
@@ -18,6 +18,15 @@ const RegisterPage = ({ onNavigateToHome, onNavigateToSignIn, onNavigateToRegist
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [errors, setErrors] = useState({});
+  const [accountType, setAccountType] = useState("user"); 
+  const handleAccountSelect = (type) => {
+  if (type === "renter") {
+    onNavigateToOwnerRegister();
+    return;
+  }
+  setAccountType(type);
+};
+
 
   const nameRegex = /^[A-Za-z\s]+$/;
   const emailRegex = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
@@ -124,6 +133,7 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
     email: form.email,
     phone: form.phone,
     password: form.password, 
+    role: accountType,
   });
 
   localStorage.setItem("users", JSON.stringify(users));
@@ -161,15 +171,93 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
       </div>
 
       {/* RIGHT SIDE */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
-        <div className="w-full max-w-md">
-          <div className="bg-white rounded-3xl border-2 border-gray-300 p-8 shadow-lg">
-            <h2 className="text-3xl font-bold text-center mb-2">Register</h2>
-            <p className="text-gray-600 text-center mb-8">
+      <div className="w-full lg:w-1/2 flex justify-center p-8 bg-white overflow-y-auto max-h-screen">
+        <div className="w-full max-w-[620px]">
+          <div className="bg-white rounded-3xl border border-gray-300 p-6 shadow-lg max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold text-center mb-1">Register</h2>
+            <p className="text-gray-600 text-center mb-4 text-sm">
               Create an account to get started.
             </p>
 
-            <div className="space-y-5">
+            {/* REGISTER AS */}
+            <div className="space-y-2 mb-4">
+              <label className="font-semibold text-gray-700 block">
+                Register as
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+              <button
+              type="button"
+              onClick={() => handleAccountSelect("user")}
+              className={`w-full flex items-center gap-3 p-4 rounded-xl border transition
+                ${accountType === "user"
+                  ? "border-[#017FE6] bg-blue-50"
+                  : "border-gray-300 hover:border-[#017FE6]"}
+              `}
+            >
+              {/* CHECK */}
+              <div
+                className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0
+                  ${accountType === "user"
+                    ? "border-[#017FE6] bg-[#017FE6] text-white"
+                    : "border-gray-400"}
+                `}
+              >
+                {accountType === "user" && "✓"}
+              </div>
+
+              {/* CONTENT */}
+              <div className="flex items-center gap-3">
+                <span className="text-xl"><User size={18} /></span>
+                <div className="text-left">
+                  <p className="font-semibold text-gray-800 text-sm">
+                    User
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    Rent vehicles 
+                  </p>
+                </div>
+              </div>
+            </button>
+
+              <button
+              type="button"
+              onClick={() => handleAccountSelect("renter")}
+              className={`w-full flex items-center gap-3 p-4 rounded-xl border transition
+                ${accountType === "renter"
+                  ? "border-[#017FE6] bg-blue-50"
+                  : "border-gray-300 hover:border-[#017FE6]"}
+              `}
+            >
+              {/* CHECK */}
+              <div
+                className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0
+                  ${accountType === "renter"
+                    ? "border-[#017FE6] bg-[#017FE6] text-white"
+                    : "border-gray-400"}
+                `}
+              >
+                {accountType === "renter" && "✓"}
+              </div>
+
+              {/* CONTENT */}
+              <div className="flex items-center gap-3">
+                <span className="text-xl"><Car size={18} /></span>
+                <div className="text-left">
+                  <p className="font-semibold text-gray-800 text-sm">
+                    Renter
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    List vehicles 
+                  </p>
+                </div>
+              </div>
+            </button>
+              </div>
+            </div>
+
+
+            <div className="space-y-3">
               {/* NAME */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -178,14 +266,17 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 border-2 rounded-xl focus:border-[#017FE6]"
+                    className={`w-full px-4 py-2 border rounded-lg text-sm focus:border-[#017FE6]
+                      ${errors.firstName ? "border-red-500" : "border-gray-300"}
+                    `}
                     onChange={(e) =>
                       handleChange("firstName", e.target.value)
                     }
                   />
-                  {errors.firstName && (
-                    <p className="text-red-500 text-sm">{errors.firstName}</p>
-                  )}
+                  <p className="text-red-500 text-xs min-h-[1rem]">
+                    {errors.firstName || ""}
+                  </p>
+
                 </div>
 
                 <div>
@@ -194,14 +285,17 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 border-2 rounded-xl focus:border-[#017FE6]"
+                   className={`w-full px-4 py-2 border rounded-lg text-sm focus:border-[#017FE6]
+                      ${errors.lastName ? "border-red-500" : "border-gray-300"}
+                    `}
                     onChange={(e) =>
                       handleChange("lastName", e.target.value)
                     }
                   />
-                  {errors.lastName && (
-                    <p className="text-red-500 text-sm">{errors.lastName}</p>
-                  )}
+                  <p className="text-red-500 text-xs min-h-[1rem]">
+                    {errors.lastName || ""}
+                  </p>
+
                 </div>
               </div>
 
@@ -212,12 +306,15 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                 </label>
                 <input
                   type="email"
-                  className="w-full px-4 py-3 border-2 rounded-xl focus:border-[#017FE6]"
+                  className={`w-full px-4 py-2 border rounded-lg text-sm focus:border-[#017FE6]
+                    ${errors.email ? "border-red-500" : "border-gray-300"}
+                  `}
                   onChange={(e) => handleChange("email", e.target.value)}
                 />
-                {errors.email && (
-                  <p className="text-red-500 text-sm">{errors.email}</p>
-                )}
+                <p className="text-red-500 text-xs min-h-[1rem]">
+                  {errors.email || ""}
+                </p>
+
               </div>
 
               {/* PHONE */}
@@ -227,12 +324,14 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                 </label>
                 <input
                   type="tel"
-                  className="w-full px-4 py-3 border-2 rounded-xl focus:border-[#017FE6]"
+                  className={`w-full px-4 py-2 border rounded-lg text-sm focus:border-[#017FE6]
+                    ${errors.phone ? "border-red-500" : "border-gray-300"}
+                  `}
                   onChange={(e) => handleChange("phone", e.target.value)}
                 />
-                {errors.phone && (
-                  <p className="text-red-500 text-sm">{errors.phone}</p>
-                )}
+                <p className="text-red-500 text-xs min-h-[1rem]">
+                  {errors.phone || ""}
+                </p>
               </div>
 
               {/* PASSWORD */}
@@ -243,7 +342,9 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                 <div className="relative">
                   <input
                     type={showPassword ? "text" : "password"}
-                    className="w-full px-4 py-3 border-2 rounded-xl pr-12 focus:border-[#017FE6]"
+                    className={`w-full px-4 py-2 border rounded-lg text-sm focus:border-[#017FE6]
+                    ${errors.password ? "border-red-500" : "border-gray-300"}
+                  `}
                     onChange={(e) =>
                       handleChange("password", e.target.value)
                     }
@@ -256,9 +357,10 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                     {showPassword ? <EyeOff /> : <Eye />}
                   </button>
                 </div>
-                {errors.password && (
-                  <p className="text-red-500 text-sm">{errors.password}</p>
-                )}
+               <p className="text-red-500 text-xs min-h-[1rem]">
+                  {errors.password || ""}
+                </p>
+
               </div>
 
               {/* CONFIRM PASSWORD */}
@@ -269,7 +371,9 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                 <div className="relative">
                   <input
                     type={showConfirm ? "text" : "password"}
-                    className="w-full px-4 py-3 border-2 rounded-xl pr-12 focus:border-[#017FE6]"
+                   className={`w-full px-4 py-2 border rounded-lg text-sm focus:border-[#017FE6]
+                    ${errors.confirmPassword ? "border-red-500" : "border-gray-300"}
+                  `}
                     onChange={(e) =>
                       handleChange("confirmPassword", e.target.value)
                     }
@@ -282,35 +386,39 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
                     {showConfirm ? <EyeOff /> : <Eye />}
                   </button>
                 </div>
-                {errors.confirmPassword && (
-                  <p className="text-red-500 text-sm">
-                    {errors.confirmPassword}
-                  </p>
-                )}
+                <p className="text-red-500 text-xs min-h-[1rem]">
+                  {errors.confirmPassword || ""}
+                </p>
+
               </div>
 
               {/* TERMS */}
-              <div className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  onChange={(e) =>
-                    handleChange("agree", e.target.checked)
-                  }
-                />
-                <span>
-                  I agree to the{" "}
-                  <span className="text-blue-600 font-semibold">
-                    Terms & Conditions
-                  </span>{" "}
-                  and{" "}
-                  <span className="text-blue-600 font-semibold">
-                    Privacy Policy
-                  </span>
-                </span>
-              </div>
-              {errors.agree && (
-                <p className="text-red-500 text-sm">{errors.agree}</p>
-              )}
+                  <div>
+                    <label className="flex items-start gap-3 mb-1">
+                     <input
+                      type="checkbox"
+                      checked={form.agree}
+                      onChange={(e) => handleChange("agree", e.target.checked)}
+                      className="mt-1"
+                    />
+
+                      <span className="text-sm text-gray-700">
+                        I agree to the{" "}
+                        <span className="text-[#017FE6] font-semibold">
+                          Terms of Condition
+                        </span>{" "}
+                        and{" "}
+                        <span className="text-[#017FE6] font-semibold">
+                          Privacy Policy
+                        </span>
+                      </span>
+                    </label>
+                    {errors.agree && (
+                      <p className="text-red-500 text-sm mt-1">
+                        {errors.agree}
+                      </p>
+                    )}
+                  </div>
 
               {/* SUBMIT */}
               <button
