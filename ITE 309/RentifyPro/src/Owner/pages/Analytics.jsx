@@ -97,6 +97,15 @@ export default function Analytics() {
             ))}
           </div>
         </Card>
+
+        <Card title="Vehicle Review Performance">
+        <div className="space-y-3">
+          <ReviewRow vehicle="Toyota Vios 2022" rating={4.8} reviews={23} />
+          <ReviewRow vehicle="Honda Click 160" rating={4.1} reviews={15} />
+          <ReviewRow vehicle="Toyota Fortuner" rating={3.2} reviews={9} />
+        </div>
+      </Card>
+
       </div>
     </div>
   );
@@ -116,6 +125,25 @@ function Card({ title, children }) {
     <div className="bg-white rounded-xl p-4 border">
       <h3 className="font-semibold mb-4">{title}</h3>
       {children}
+    </div>
+  );
+}
+
+function ReviewRow({ vehicle, rating, reviews }) {
+  return (
+    <div>
+      <div className="flex justify-between text-sm">
+        <span>{vehicle}</span>
+        <span>{rating} ★ ({reviews})</span>
+      </div>
+      <div className="w-full bg-gray-200 h-2 rounded-full mt-1">
+        <div
+          className={`h-2 rounded-full ${
+            rating >= 4 ? "bg-green-500" : rating >= 3 ? "bg-yellow-400" : "bg-red-500"
+          }`}
+          style={{ width: `${(rating / 5) * 100}%` }}
+        />
+      </div>
     </div>
   );
 }

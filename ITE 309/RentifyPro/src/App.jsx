@@ -50,11 +50,11 @@ const App = () => {
 
 
   useEffect(() => {
-  if (localStorage.getItem("isNewOwner") === "true") {
-    setIsOwnerLoggedIn(true);
-    setCurrentPage("owner-dashboard");
-  }
+  setCurrentPage("home");
+  setIsOwnerLoggedIn(false);
+  localStorage.removeItem("isNewOwner");
 }, []);
+
 
 
   useEffect(() => {
