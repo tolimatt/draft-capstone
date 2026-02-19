@@ -29,12 +29,14 @@ export default function OwnerLayout() {
         
         {/* TOPBAR */}
         <Topbar
-          title={activePage}
-          onSwitchToUser={() => {
-            localStorage.removeItem("isNewOwner");
-            window.dispatchEvent(new Event("switch-to-user"));
-          }}
-        />
+  title={activePage}
+  canSwitchToUser={
+    localStorage.getItem("hasUserAccount") === "true"
+  }
+  onSwitchToUser={() => {
+    window.dispatchEvent(new Event("switch-to-user"));
+  }}
+/>
 
         {/* PAGE CONTENT */}
         <main className="flex-1 overflow-y-auto p-6">

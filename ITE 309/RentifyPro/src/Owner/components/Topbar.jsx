@@ -5,7 +5,7 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 
-export default function Topbar({ title, onSwitchToUser }) {
+export default function Topbar({ title, onSwitchToUser, canSwitchToUser }) {
   return (
     <header
   className="sticky top-0 z-40 bg-[#017FE6] border-b border-white/20"
@@ -64,19 +64,22 @@ export default function Topbar({ title, onSwitchToUser }) {
           </button>
 
           {/* SWITCH TO USER */}
-          <button
-            onClick={onSwitchToUser}
-            className="
-              h-10 px-4 rounded-xl
-              bg-white/15 border border-white/20
-              text-white text-sm font-semibold
-              hover:bg-white/25 transition
-              flex items-center gap-2
-            "
-          >
-            <ArrowLeftRight size={16} />
-            Switch to User
-          </button>
+          {canSwitchToUser && (
+  <button
+    onClick={onSwitchToUser}
+    className="
+      h-10 px-4 rounded-xl
+      bg-white/15 border border-white/20
+      text-white text-sm font-semibold
+      hover:bg-white/25 transition
+      flex items-center gap-2
+    "
+  >
+    <ArrowLeftRight size={16} />
+    Switch to User
+  </button>
+)}
+
 
           {/* ADD VEHICLE */}
           <button

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Bot, Users, Settings, Fuel, Car, Wallet, Receipt, Camera, Bell, MessageCircle, BadgeCheck } from "lucide-react";
+import VehicleOwnerProfilePage from "./VehicleOwnerProfilePage";
 
 const VehicleDetailsPage = ({
 vehicle,
@@ -58,6 +59,15 @@ vehicle,
               setProfilePhoto(null);
               localStorage.removeItem("profilePhoto");
             };
+
+            const [selectedOwner, setSelectedOwner] = useState(null);
+            const [page, setPage] = useState("vehicleDetails");
+
+            const onNavigateToOwnerProfile = (owner) => {
+              setSelectedOwner(owner);
+              setPage("ownerProfile");
+            };
+
         
 
     const dailyRate = vehicle?.price || 0;
@@ -69,78 +79,88 @@ vehicle,
       { src: "/interior-4.png", label: "USB Charging Port" },
     ]);
 
-// combine date + time → Date object
-const getDateTime = (date, time) => new Date(`${date}T${time}`);
+      // combine date + time → Date object
+      const getDateTime = (date, time) => new Date(`${date}T${time}`);
 
-// calculate duration in days (minimum 1 day)
-  const calculateDays = () => {
-  const start = getDateTime(pickupDate, pickupTime);
-  const end = getDateTime(returnDate, returnTime);
+      // calculate duration in days (minimum 1 day)
+        const calculateDays = () => {
+        const start = getDateTime(pickupDate, pickupTime);
+        const end = getDateTime(returnDate, returnTime);
 
-  if (end <= start) return 1;
+        if (end <= start) return 1;
 
-  const diffMs = end - start;
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  return diffDays;
-};
+        const diffMs = end - start;
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        return diffDays;
+      };
 
-    const durationDays = calculateDays();
-    const totalPrice = durationDays * dailyRate;
-    const DOWNPAYMENT_RATE = 0.30;
-    const downpaymentFee = Math.round(dailyRate * DOWNPAYMENT_RATE);
+          const durationDays = calculateDays();
+          const totalPrice = durationDays * dailyRate;
+          const DOWNPAYMENT_RATE = 0.30;
+          const downpaymentFee = Math.round(dailyRate * DOWNPAYMENT_RATE);
 
-    const reviews = [
-  {
-    id: 1,
-    name: "John Doe",
-    avatar: "/owner-profile.png",
-    rating: 1,
-    comment: "Very Comfortable, Amazing!",
-    date: "2026-01-03",
-  },
-  {
-    id: 2,
-    name: "John Doe",
-    avatar: "/owner-profile.png",
-    rating: 5,
-    comment: "Very Comfortable, Amazing!",
-    date: "2026-01-03",
-  },
-  {
-    id: 3,
-    name: "John Doe",
-    avatar: "/owner-profile.png",
-    rating: 2,
-    comment: "Very Comfortable, Amazing!",
-    date: "2026-01-03",
-  },
-];
+          const reviews = [
+        {
+          id: 1,
+          name: "John Doe",
+          avatar: "/owner-profile.png",
+          rating: 1,
+          comment: "Very Comfortable, Amazing!",
+          date: "2026-01-03",
+        },
+        {
+          id: 2,
+          name: "John Doe",
+          avatar: "/owner-profile.png",
+          rating: 5,
+          comment: "Very Comfortable, Amazing!",
+          date: "2026-01-03",
+        },
+        {
+          id: 3,
+          name: "John Doe",
+          avatar: "/owner-profile.png",
+          rating: 2,
+          comment: "Very Comfortable, Amazing!",
+          date: "2026-01-03",
+        },
+      ];
 
- const totalReviews = reviews.length;
+      const totalReviews = reviews.length;
 
-const averageRating =
-  totalReviews > 0
-    ? (
-        reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
-      ).toFixed(1)
-    : "0.0";
+      const averageRating =
+        totalReviews > 0
+          ? (
+              reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+            ).toFixed(1)
+          : "0.0";
 
-    const processedReviews = (() => {
-  if (sortOption === "highest") {
-    const maxRating = Math.max(...reviews.map(r => r.rating));
-    return reviews.filter(r => r.rating === maxRating);
-  }
+          const processedReviews = (() => {
+        if (sortOption === "highest") {
+          const maxRating = Math.max(...reviews.map(r => r.rating));
+          return reviews.filter(r => r.rating === maxRating);
+        }
 
-  if (sortOption === "lowest") {
-    const minRating = Math.min(...reviews.map(r => r.rating));
-    return reviews.filter(r => r.rating === minRating);
-  }
+        if (sortOption === "lowest") {
+          const minRating = Math.min(...reviews.map(r => r.rating));
+          return reviews.filter(r => r.rating === minRating);
+        }
 
-  // Most Recent (default)
-  return [...reviews].sort(
-    (a, b) => new Date(b.date) - new Date(a.date)
+        // Most Recent (default)
+        return [...reviews].sort(
+          (a, b) => new Date(b.date) - new Date(a.date)
+        );
+      })();
+
+      if (page === "ownerProfile") {
+  return (
+    <VehicleOwnerProfilePage
+      owner={selectedOwner}
+      onBack={() => setPage("vehicleDetails")}
+    />
   );
-})();
+}
+
 
 
   return (
@@ -369,16 +389,26 @@ const averageRating =
                </div>
 
                {/* VEHICLE OWNER */}
-              <div className="bg-white rounded-xl border p-6 flex items-center gap-4">
-                
-                {/* AVATAR */}
-                <img
-                  src={vehicle.owner?.avatar || "/owner-profile.png"}
-                  alt={vehicle.owner?.name}
-                  className="w-16 h-16 rounded-full object-cover border"
-                />
+                <div
+                  onClick={() => {
+                  if (!isLoggedIn) {
+                    onNavigateToSignIn();
+                    return;
+                  }
+                  if (!vehicle?.owner) return;
+                  onNavigateToOwnerProfile(vehicle.owner);
+                }}
 
-                {/* INFO */}
+                  className="bg-white rounded-xl border p-6 flex items-center gap-4 cursor-pointer hover:bg-gray-50 transition"
+                >
+                  {/* AVATAR */}
+                  <img
+                    src={vehicle.owner?.avatar || "/owner-profile.png"}
+                    alt={vehicle.owner?.name}
+                    className="w-16 h-16 rounded-full object-cover border"
+                  />
+
+                  {/* INFO */}
                 <div className="flex-1">
                    {/* LISTED BY LABEL */}
                     <p className="text-sm text-gray-400 mb-1">
@@ -414,7 +444,7 @@ const averageRating =
                     <span>{vehicle.owner?.vehicles || 40} Vehicles</span>
                   </div>
                 </div>
-              </div>
+                </div>
 
                
                {/* INTERIOR */}

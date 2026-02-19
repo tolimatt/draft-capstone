@@ -5,7 +5,7 @@ const ProceedVehicleOwner = ({ onBack, onProceed, onDoLater, onNavigateToHome, }
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
       {/* OUTER CONTAINER */}
-      <div className="bg-white rounded-2xl shadow-lg max-w-5xl w-full overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-lg max-w-4xl w-full overflow-hidden">
         
         {/* HEADER INSIDE CARD */}
         <div className="relative h-16 flex items-center border-b px-6">

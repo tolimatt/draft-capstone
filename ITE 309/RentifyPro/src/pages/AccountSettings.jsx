@@ -546,7 +546,7 @@ const AccountSettings = ({
           </aside>
 
           {/* RIGHT CONTENT */}
-          <main className="flex-1 space-y-8">
+          <main className="flex-1 space-y-8 pb-24">
             <div className="pb-6 mb-6 border-b">
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
                 Account Settings

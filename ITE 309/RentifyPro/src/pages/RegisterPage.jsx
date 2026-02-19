@@ -124,6 +124,12 @@ const existingEmails = ["test@gmail.com", "admin@yahoo.com"];
   setErrors(newErrors);
 
   if (Object.keys(newErrors).length === 0) {
+    // 🔴 IMPORTANT RESET (NORMAL USER IS NOT OWNER)
+  localStorage.removeItem("isVehicleOwner");
+  localStorage.setItem("activeRole", "user");
+  localStorage.setItem("hasUserAccount", "true");
+
+
   const users = JSON.parse(localStorage.getItem("users")) || [];
 
   {/* SAVE DATA FOR NEW USER */}

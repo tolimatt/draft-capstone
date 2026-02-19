@@ -52,7 +52,6 @@ const App = () => {
   useEffect(() => {
   setCurrentPage("home");
   setIsOwnerLoggedIn(false);
-  localStorage.removeItem("isNewOwner");
 }, []);
 
 
@@ -101,6 +100,11 @@ const App = () => {
           setUser(null);
           setCurrentPage("home");
         }}
+
+         onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
      />
     )}
     

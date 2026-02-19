@@ -173,6 +173,10 @@ useEffect(() => {
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
   const [searchQuery, setSearchQuery] = useState("");
   
+  const [driverFilter, setDriverFilter] = useState("both");
+// "self" | "with-driver" | "both"
+
+
   const filterKeyToVehicleType = {
     cars: "car",
     motor: "motor",
@@ -203,6 +207,7 @@ useEffect(() => {
     rating: 4.8,
     available: true,
     codingDay: "Wednesday",
+    driverOption: "both",
 
     owner: {
     name: "Anya Forger",
@@ -229,6 +234,7 @@ useEffect(() => {
     rating: 4.6,
     available: true,
     codingDay: "Thursday",
+    driverOption: "self",
 
     owner: {
     name: "Anya Forger",
@@ -256,6 +262,7 @@ useEffect(() => {
     rating: 4.7,
     available: true,
     codingDay: "Saturday",
+    driverOption: "with-driver",
 
     owner: {
     name: "Anya Forger",
@@ -282,6 +289,7 @@ useEffect(() => {
     rating: 4.5,
     available: true,
     codingDay: "Monday",
+    driverOption: "both",
 
     owner: {
     name: "Anya Forger",
@@ -346,6 +354,8 @@ const formatCoding = (day) => {
     vans: false,
     truck: false,
   });
+
+  setDriverFilter("both");
 };
 
 
@@ -380,6 +390,11 @@ const matchFuel =
   (fuelType.gasoline && vehicle.fuel.toLowerCase() === "gasoline") ||
   (fuelType.diesel && vehicle.fuel.toLowerCase() === "diesel");
 
+  // DRIVER OPTION FILTER
+const matchDriver =
+  driverFilter === "both" ||
+  vehicle.driverOption === driverFilter;
+
 
   // PRICE RANGE
   const minPrice = priceRange.min ? Number(priceRange.min) : 0;
@@ -406,7 +421,8 @@ const matchSubType =
     matchFuel &&
     matchPrice &&
     matchSearch &&
-    matchLocation
+    matchLocation &&
+    matchDriver
   );
 });
 
@@ -603,28 +619,28 @@ const matchSubType =
             </div>
 
             {/* Location */}
-<div className="mb-6">
-  <label className="block text-sm font-semibold mb-2">Location</label>
+            <div className="mb-6">
+              <label className="block text-sm font-semibold mb-2">Location</label>
 
-  <div className="relative">
-    <MapPin
-      size={18}
-      className="absolute left-3 top-1/2 -translate-y-1/2 text-[#017FE6]"
-    />
+              <div className="relative">
+                <MapPin
+                  size={18}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[#017FE6]"
+                />
 
-    <input
-      type="text"
-      placeholder="Enter location..."
-      value={locationFilter}
-      onChange={(e) => setLocationFilter(e.target.value)}
-      className="
-        w-full border border-gray-300 rounded-lg
-        pl-10 pr-3 py-2 text-sm
-        focus:outline-none focus:ring-2 focus:ring-[#017FE6]
-      "
-    />
-  </div>
-</div>
+                <input
+                  type="text"
+                  placeholder="Enter location..."
+                  value={locationFilter}
+                  onChange={(e) => setLocationFilter(e.target.value)}
+                  className="
+                    w-full border border-gray-300 rounded-lg
+                    pl-10 pr-3 py-2 text-sm
+                    focus:outline-none focus:ring-2 focus:ring-[#017FE6]
+                  "
+                />
+              </div>
+            </div>
 
             
             {/* Vehicle Type */}
@@ -809,6 +825,53 @@ const matchSubType =
               </div>
             </div>
 
+           {/* Driver Option */}
+<div className="mb-6">
+  <label className="block text-sm font-semibold mb-2">
+    Driver Option
+  </label>
+
+  <div className="space-y-2">
+    <label className="flex items-center">
+      <input
+        type="radio"
+        name="driverOption"
+        value="with-driver"
+        checked={driverFilter === "with-driver"}
+        onChange={() => setDriverFilter("with-driver")}
+        className="mr-2"
+      />
+      <span className="text-sm">With Driver only</span>
+    </label>
+
+    <label className="flex items-center">
+      <input
+        type="radio"
+        name="driverOption"
+        value="self"
+        checked={driverFilter === "self"}
+        onChange={() => setDriverFilter("self")}
+        className="mr-2"
+      />
+      <span className="text-sm">Self-drive only</span>
+    </label>
+
+    <label className="flex items-center">
+      <input
+        type="radio"
+        name="driverOption"
+        value="both"
+        checked={driverFilter === "both"}
+        onChange={() => setDriverFilter("both")}
+        className="mr-2"
+      />
+      <span className="text-sm">Self-drive / With Driver (Both)</span>
+    </label>
+  </div>
+</div>
+
+
+
             {/* Price Range */}
             <div className="mb-6">
               <label className="block text-sm font-semibold mb-2">Price Range (per day)</label>
@@ -919,23 +982,24 @@ const matchSubType =
                   <MapPin size={14} className="text-[#017FE6]" />
                   <span>{vehicle.location}</span>
                 </div>
+                
 
                   {/* CODING DAY (FIGMA STYLE) */}
+                  <div className="flex flex-wrap gap-2 mb-3">
                   {vehicle.codingDay && (
-                   <span className="
-                    inline-flex
-                    w-fit
-                    mb-3
-                    px-3 py-1
-                    text-xs
-                    bg-gray-200
-                    text-gray-700
-                    rounded-full
-                    font-medium
-                  ">
-                    {formatCoding(vehicle.codingDay)}
-                  </span>
+                    <span className="px-3 py-1 text-xs bg-gray-200 text-gray-700 rounded-full">
+                      {formatCoding(vehicle.codingDay)}
+                    </span>
                   )}
+
+                  <span className="px-3 py-1 text-xs rounded-full
+                    bg-blue-100 text-blue-700">
+                    {vehicle.driverOption === "self" && "Self Drive only"}
+                    {vehicle.driverOption === "with-driver" && "With Driver Only"}
+                    {vehicle.driverOption === "both" && "Self / With Driver"}
+                  </span>
+                </div>
+
 
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-3 text-sm text-gray-600">
 
@@ -953,6 +1017,8 @@ const matchSubType =
                     <Fuel size={16} className="text-[#017FE6]" />
                     {vehicle.fuel}
                   </span>
+
+                  
                 </div>
 
                 {/* PRICE */} 
@@ -974,9 +1040,9 @@ const matchSubType =
                   <button
                       onClick={() => {
                         if (!isValidDateTime()) {
-  alert("Please make sure pick-up is not in the past and return is after pick-up.");
-  return;
-}
+                        alert("Please make sure pick-up is not in the past and return is after pick-up.");
+                        return;
+                      }
                         isLoggedIn ? onViewDetails(vehicle) : onNavigateToSignIn();
                       }}
                       className="flex-1 bg-[#017FE6] text-white py-2 rounded-lg hover:bg-[#0165B8]"

@@ -188,7 +188,18 @@ const [isAddressEdited, setIsAddressEdited] = useState(false);
     name: `${form.firstName} ${form.lastName}`,
   });
 
-  localStorage.setItem("ownerUsers", JSON.stringify(ownerUsers));
+  // ✅ SAVE OWNER
+  localStorage.setItem(
+    "ownerUsers",
+    JSON.stringify(ownerUsers)
+  );
+
+  // 🔐 SET ROLE STATE FOR OWNER REGISTRATION
+  localStorage.setItem("activeRole", "owner");
+  localStorage.setItem("isVehicleOwner", "true");
+
+  // Owner registered directly → no user account yet
+  localStorage.setItem("hasUserAccount", "false");
 
   onNavigateToRegisterOTP(
     form.businessEmail,

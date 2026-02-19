@@ -49,15 +49,16 @@ const SignInPage = ({ onNavigateToHome, onNavigateToRegister, onNavigateToForgot
   console.log("Sign in with:", email, password);
 
   const users = JSON.parse(localStorage.getItem("users")) || [];
-const ownerUsers = JSON.parse(localStorage.getItem("ownerUsers")) || [];
+  const ownerUsers = JSON.parse(localStorage.getItem("ownerUsers")) || [];
 
-const foundUser =
-  users.find(
-    (user) => user.email === email && user.password === password
-  ) ||
-  ownerUsers.find(
+
+const foundUser = users.find(
+  (user) => user.email === email && user.password === password
+);
+ownerUsers.find(
     (user) => user.email === email && user.password === password
   );
+
 
 if (!foundUser) {
   setErrors({
@@ -68,12 +69,36 @@ if (!foundUser) {
 }
 
 {/* IF THE LOGIN SUCCESS */}
+// ✅ LOGIN SUCCESS — SYNC ROLE STATE
+if (foundUser.role === "owner") {
+  localStorage.setItem("activeRole", "owner");
+  localStorage.setItem("isVehicleOwner", "true");
+
+  // owner may or may not have user account
+  const hasUser = users.some(
+    (u) => u.email === foundUser.email
+  );
+  localStorage.setItem("hasUserAccount", hasUser ? "true" : "false");
+} else {
+  // normal user
+  localStorage.setItem("activeRole", "user");
+  localStorage.removeItem("isVehicleOwner");
+  localStorage.setItem("hasUserAccount", "true");
+}
+
 onLoginSuccess({
-  name: foundUser.name || `${foundUser.firstName} ${foundUser.lastName}`,
-  initials: foundUser.initials
-    || (foundUser.name
-      ? foundUser.name.split(" ").map(n => n[0]).join("")
-      : foundUser.firstName.charAt(0) + foundUser.lastName.charAt(0)),
+  name:
+    foundUser.name ||
+    `${foundUser.firstName} ${foundUser.lastName}`,
+  initials:
+    foundUser.initials ||
+    (foundUser.name
+      ? foundUser.name
+          .split(" ")
+          .map((n) => n[0])
+          .join("")
+      : foundUser.firstName.charAt(0) +
+        foundUser.lastName.charAt(0)),
   email: foundUser.email,
   role: foundUser.role || "user",
 });
@@ -157,9 +182,11 @@ onLoginSuccess({
                   `}
                   placeholder="Enter your email"
                 />
-                <p className="text-red-500 text-xs min-h-[1rem]">
-                  {errors.email || ""}
-                </p>
+                {errors.email && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.email}
+                  </p>
+                )}
 
                 <p className="text-xs text-gray-400 mt-1">
                   Supported providers: Gmail, Yahoo, Outlook, Hotmail
@@ -199,9 +226,14 @@ onLoginSuccess({
                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
-                  <p className="text-red-500 text-xs min-h-[1rem]">
-                  {errors.password || ""}
-                </p>
+
+                {errors.password && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.password}
+                  </p>
+                  
+                )}
+
               
               </div>
 
