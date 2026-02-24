@@ -188,88 +188,85 @@ const isValidDateTime = () => {
   },
 ];
 
-{/* BASTA FEATURED TO */}
-const featuredVehicles = [
+const [vehicles, setVehicles] = useState([
   {
     id: 1,
     name: "BMW X5",
+    category: "BMW • SUV",
     location: "Dagupan City, Pangasinan",
     image: "/bmw-x5.png",
-    type: "car",
-    subType: "SUV",
-    category: "BMW • SUV",
     seats: 7,
     transmission: "Automatic",
     fuel: "Gasoline",
     price: 5500,
     rating: 4.8,
-    available: true,
+    rentals: 204,
+    status: "Available",
     codingDay: "Wednesday",
-
-    owner: {
-      name: "Anya Forger",
-      avatar: "/owner-profile.png",
-      verified: true,
-      rating: 4.8,
-      rentals: 204,
-      vehicles: 40,
-    }
-    
+    driverOption: "both",
   },
   {
     id: 2,
     name: "Yamaha R3",
+    category: "Yamaha • Sport",
     location: "Lingayen, Pangasinan",
     image: "/yamaha-r3.png",
-    type: "motor",
-    subType: "Sport",
-    category: "Yamaha • Sport",
     seats: 2,
     transmission: "Manual",
     fuel: "Gasoline",
     price: 1200,
     rating: 4.6,
-    available: true,
+    rentals: 156,
+    status: "Available",
     codingDay: "Thursday",
-
-    owner: {
-      name: "Anya Forger",
-      avatar: "/owner-profile.png",
-      verified: true,
-      rating: 4.8,
-      rentals: 204,
-      vehicles: 40,
-      
-    }
-    
+    driverOption: "self",
   },
 
   {
-    id: 3,
-    name: "Toyota HiAce",
-    location: "San Carlos City, Pangasinan",
-    image: "/toyota-hiAce.png",
-    type: "van",
-    subType: "Passenger",
-    category: "Toyota • Van",
-    seats: 12,
-    transmission: "Manual",
-    fuel: "Diesel",
-    price: 4800,
-    rating: 4.7,
-    available: true,
-    codingDay: "Saturday",
+  id: 3,
+  name: "Toyota HiAce",
+  category: "Toyota • Passenger Van",
+  location: "San Carlos City, Pangasinan",
+  image: "/toyota-hiAce.png",
+  seats: 12,
+  transmission: "Manual",
+  fuel: "Diesel",
+  price: 4800,
+  rating: 4.7,
+  rentals: 120, // IMPORTANT
+  status: "Available",
+  codingDay: "Saturday",
+  driverOption: "with-driver",
+}
+]);
 
-    owner: {
-      name: "Anya Forger",
-      avatar: "/owner-profile.png",
-      verified: true,
-      rating: 4.8,
-      rentals: 204,
-      vehicles: 40,
+const isFeatured = (vehicle) => {
+  return (
+    vehicle.status === "Available" &&
+    vehicle.rating >= 4.5 &&
+    vehicle.rentals >= 20
+  );
+};
+
+const featuredVehicles = vehicles
+  .filter(isFeatured)
+  .sort((a, b) => {
+    if (b.rating !== a.rating) {
+      return b.rating - a.rating; // mas mataas rating = una
     }
-  },
-];
+    return b.rentals - a.rentals; // pag tie, mas maraming rent
+  })
+  .slice(0, 6); // max 6 featured
+
+  const handleBook = (vehicleId) => {
+  setVehicles((prev) =>
+    prev.map((v) =>
+      v.id === vehicleId
+        ? { ...v, rentals: v.rentals + 1 }
+        : v
+    )
+  );
+};
 
 const formatCoding = (day) => {
   if (!day) return null;
@@ -300,16 +297,26 @@ const formatCoding = (day) => {
   localStorage.getItem("isVehicleOwner") === "true"
 );
 
+// Sync when login state changes — catches same-tab logout
+useEffect(() => {
+  if (!isLoggedIn) {
+    setIsVehicleOwner(false);
+  } else {
+    setIsVehicleOwner(localStorage.getItem("isVehicleOwner") === "true");
+  }
+}, [isLoggedIn]);
+
+// Sync across tabs
 useEffect(() => {
   const syncOwnerStatus = () => {
     setIsVehicleOwner(
-      localStorage.getItem("isVehicleOwner") === "true"
+      isLoggedIn && localStorage.getItem("isVehicleOwner") === "true"
     );
   };
 
   window.addEventListener("storage", syncOwnerStatus);
   return () => window.removeEventListener("storage", syncOwnerStatus);
-}, []);
+}, [isLoggedIn]);
 
 
   return (
@@ -832,11 +839,11 @@ useEffect(() => {
             {featuredVehicles.map((vehicle, index) => (
               <div key={index} className="group bg-white rounded-xl shadow-md overflow-hidden hover:shadow-xl transition-all">
                 <div className="relative">
-                  {vehicle.available && (
-                    <span className="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold">
-                      Available
-                    </span>
-                  )}
+                  {vehicle.status === "Available" && (
+                <span className="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold">
+                  Available
+                </span>
+              )}
                   <span className="absolute top-4 right-4 bg-gray-900 text-white px-3 py-1 rounded-full text-sm font-semibold">
                    <span className="text-yellow-400"> ★ </span>
                 <span className="text-white">{vehicle.rating}</span>
@@ -870,20 +877,21 @@ useEffect(() => {
 
                       
                       {/* CODING DAY (FIGMA STYLE) */}
+                       <div className="flex flex-wrap gap-2 mb-3">
                         {vehicle.codingDay && (
-                          <span className="
-                          inline-block
-                          mb-3
-                          px-3 py-1
-                          text-xs
-                          bg-gray-200
-                          text-gray-700
-                          rounded-full
-                          font-medium
-                          ">
+                          <span className="px-3 py-1 text-xs bg-gray-200 text-gray-700 rounded-full font-medium">
                             {formatCoding(vehicle.codingDay)}
-                            </span>
-                          )}
+                          </span>
+                        )}
+
+                        {vehicle.driverOption && (
+                          <span className="px-3 py-1 text-xs rounded-full bg-blue-100 text-blue-700 font-medium">
+                            {vehicle.driverOption === "self" && "Self Drive only"}
+                            {vehicle.driverOption === "with-driver" && "With Driver Only"}
+                            {vehicle.driverOption === "both" && "Self / With Driver"}
+                          </span>
+                        )}
+                      </div>
 
                  <div className="flex items-center gap-5 mb-4 text-sm text-gray-600">
                     <span className="flex items-center gap-1">
@@ -915,14 +923,15 @@ useEffect(() => {
                     </button>
 
                     <button
-                        onClick={() =>
-                          isLoggedIn
-                            ? onViewDetails(vehicle)
-                            : onNavigateToSignIn()
-                        }
-                        className="flex-1 bg-[#017FE6] text-white py-2 rounded-lg hover:bg-[#0165B8]">
-                        Book Now
-                    </button>
+                    onClick={() => {
+                      handleBook(vehicle.id);
+                      onViewDetails(vehicle);
+                    }}
+                    className="flex-1 bg-[#017FE6] text-white py-2 rounded-lg hover:bg-[#0165B8]"
+                  >
+                    Book Now
+                  </button>
+
                   </div>
                 </div>
               </div>

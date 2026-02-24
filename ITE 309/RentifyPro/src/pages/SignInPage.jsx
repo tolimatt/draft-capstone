@@ -19,7 +19,6 @@ const SignInPage = ({ onNavigateToHome, onNavigateToRegister, onNavigateToForgot
  const handleSignIn = () => {
   const newErrors = {};
 
-  {/* EMAIL */}
   if (!email) {
     newErrors.email = "Email is required";
   } else if (!emailRegex.test(email)) {
@@ -27,16 +26,11 @@ const SignInPage = ({ onNavigateToHome, onNavigateToRegister, onNavigateToForgot
   } else {
     const parts = email.split("@");
     const domain = parts.length === 2 ? parts[1] : "";
-
     if (!allowedDomains.includes(domain)) {
-      newErrors.email =
-       "Please use a valid email address from a supported provider.";
+      newErrors.email = "Please use a valid email address from a supported provider.";
     }
-
-    
   }
 
-  {/* PASSWORD */}
   if (!password) {
     newErrors.password = "Password is required";
   } else if (password.length < 8) {
@@ -51,62 +45,51 @@ const SignInPage = ({ onNavigateToHome, onNavigateToRegister, onNavigateToForgot
   const users = JSON.parse(localStorage.getItem("users")) || [];
   const ownerUsers = JSON.parse(localStorage.getItem("ownerUsers")) || [];
 
+  const foundUser =
+    users.find((u) => u.email === email && u.password === password) ||
+    ownerUsers.find((u) => u.email === email && u.password === password);
 
-const foundUser = users.find(
-  (user) => user.email === email && user.password === password
-);
-ownerUsers.find(
-    (user) => user.email === email && user.password === password
-  );
+  if (!foundUser) {
+    setErrors({
+      email: "Invalid email or password",
+      password: "Invalid email or password",
+    });
+    return;
+  }
 
+  // ✅ ONLY THIS BLOCK — delete the old if (foundUser.role === "owner") block
+  const isOwner =
+    foundUser.role === "owner" ||
+    ownerUsers.some((u) => u.email === foundUser.email);
 
-if (!foundUser) {
-  setErrors({
-    email: "Invalid email or password",
-    password: "Invalid email or password",
+  if (isOwner) {
+    localStorage.setItem("activeRole", "owner");
+    localStorage.setItem("isVehicleOwner", "true");
+    const hasUser = users.some((u) => u.email === foundUser.email);
+    localStorage.setItem("hasUserAccount", hasUser ? "true" : "false");
+  } else {
+    localStorage.setItem("activeRole", "user");
+    localStorage.setItem("hasUserAccount", "true");
+    if (foundUser.isVehicleOwner) {
+      localStorage.setItem("isVehicleOwner", "true");
+    } else {
+      localStorage.removeItem("isVehicleOwner");
+    }
+  }
+
+  onLoginSuccess({
+    name: foundUser.name || `${foundUser.firstName} ${foundUser.lastName}`,
+    initials:
+      foundUser.initials ||
+      (foundUser.name
+        ? foundUser.name.split(" ").map((n) => n[0]).join("")
+        : foundUser.firstName.charAt(0) + foundUser.lastName.charAt(0)),
+    email: foundUser.email,
+    role: isOwner ? "owner" : "user",
   });
-  return;
 }
-
-{/* IF THE LOGIN SUCCESS */}
-// ✅ LOGIN SUCCESS — SYNC ROLE STATE
-if (foundUser.role === "owner") {
-  localStorage.setItem("activeRole", "owner");
-  localStorage.setItem("isVehicleOwner", "true");
-
-  // owner may or may not have user account
-  const hasUser = users.some(
-    (u) => u.email === foundUser.email
-  );
-  localStorage.setItem("hasUserAccount", hasUser ? "true" : "false");
-} else {
-  // normal user
-  localStorage.setItem("activeRole", "user");
-  localStorage.removeItem("isVehicleOwner");
-  localStorage.setItem("hasUserAccount", "true");
-}
-
-onLoginSuccess({
-  name:
-    foundUser.name ||
-    `${foundUser.firstName} ${foundUser.lastName}`,
-  initials:
-    foundUser.initials ||
-    (foundUser.name
-      ? foundUser.name
-          .split(" ")
-          .map((n) => n[0])
-          .join("")
-      : foundUser.firstName.charAt(0) +
-        foundUser.lastName.charAt(0)),
-  email: foundUser.email,
-  role: foundUser.role || "user",
-});
-
-
-}
-
 };
+
 
 
   return (

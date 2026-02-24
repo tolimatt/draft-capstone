@@ -19,6 +19,7 @@ const getCurrentTime = () => {
 
 
 const VehiclesPage = ({ 
+  onBookNow,
   bookingData, 
   setBookingData, 
   isLoggedIn, 
@@ -37,6 +38,9 @@ const VehiclesPage = ({
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const users = JSON.parse(localStorage.getItem("users")) || [];
+const currentUser = users.find(u => u.email === user?.email);
+const isVerified = !!currentUser?.isVerified;
   
   const normalize = (str = "") =>
   str
@@ -145,6 +149,14 @@ useEffect(() => {
   }
 }, [pickupDate, pickupTime]);
 
+const getMinReturnDate = (pickupDate) => {
+  if (!pickupDate) return getTomorrowDate();
+
+  const d = new Date(pickupDate);
+  d.setDate(d.getDate() + 1); // +1 DAY
+  return d.toLocaleDateString("en-CA");
+};
+
 
   const [locationFilter, setLocationFilter] = useState(location || "");
 useEffect(() => {
@@ -173,8 +185,8 @@ useEffect(() => {
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
   const [searchQuery, setSearchQuery] = useState("");
   
-  const [driverFilter, setDriverFilter] = useState("both");
-// "self" | "with-driver" | "both"
+  const [driverFilter, setDriverFilter] = useState("all");
+// "all" | "self" | "with-driver"
 
 
   const filterKeyToVehicleType = {
@@ -207,7 +219,7 @@ useEffect(() => {
     rating: 4.8,
     available: true,
     codingDay: "Wednesday",
-    driverOption: "both",
+    driverOption: "self",
 
     owner: {
     name: "Anya Forger",
@@ -289,7 +301,7 @@ useEffect(() => {
     rating: 4.5,
     available: true,
     codingDay: "Monday",
-    driverOption: "both",
+    driverOption: "with-driver",
 
     owner: {
     name: "Anya Forger",
@@ -355,7 +367,7 @@ const formatCoding = (day) => {
     truck: false,
   });
 
-  setDriverFilter("both");
+  setDriverFilter("all");
 };
 
 
@@ -392,9 +404,8 @@ const matchFuel =
 
   // DRIVER OPTION FILTER
 const matchDriver =
-  driverFilter === "both" ||
+  driverFilter === "all" ||
   vehicle.driverOption === driverFilter;
-
 
   // PRICE RANGE
   const minPrice = priceRange.min ? Number(priceRange.min) : 0;
@@ -756,7 +767,7 @@ const matchSubType =
               <input
                 type="date"
                 value={returnDate}
-                min={pickupDate}
+                min={getMinReturnDate(pickupDate)} 
                 onChange={(e) =>
                   setBookingData({ ...bookingData, returnDate: e.target.value })
                 }
@@ -836,6 +847,17 @@ const matchSubType =
       <input
         type="radio"
         name="driverOption"
+        checked={driverFilter === "all"}
+        onChange={() => setDriverFilter("all")}
+        className="mr-2"
+      />
+      <span className="text-sm">All</span>
+    </label>
+
+    <label className="flex items-center">
+      <input
+        type="radio"
+        name="driverOption"
         value="with-driver"
         checked={driverFilter === "with-driver"}
         onChange={() => setDriverFilter("with-driver")}
@@ -854,18 +876,6 @@ const matchSubType =
         className="mr-2"
       />
       <span className="text-sm">Self-drive only</span>
-    </label>
-
-    <label className="flex items-center">
-      <input
-        type="radio"
-        name="driverOption"
-        value="both"
-        checked={driverFilter === "both"}
-        onChange={() => setDriverFilter("both")}
-        className="mr-2"
-      />
-      <span className="text-sm">Self-drive / With Driver (Both)</span>
     </label>
   </div>
 </div>
@@ -986,18 +996,18 @@ const matchSubType =
 
                   {/* CODING DAY (FIGMA STYLE) */}
                   <div className="flex flex-wrap gap-2 mb-3">
-                  {vehicle.codingDay && (
-                    <span className="px-3 py-1 text-xs bg-gray-200 text-gray-700 rounded-full">
-                      {formatCoding(vehicle.codingDay)}
-                    </span>
-                  )}
+                    {vehicle.codingDay && (
+                      <span className="px-3 py-1 text-xs bg-gray-200 text-gray-700 rounded-full font-medium">
+                        {formatCoding(vehicle.codingDay)}
+                      </span>
+                    )}
 
-                  <span className="px-3 py-1 text-xs rounded-full
-                    bg-blue-100 text-blue-700">
-                    {vehicle.driverOption === "self" && "Self Drive only"}
-                    {vehicle.driverOption === "with-driver" && "With Driver Only"}
-                    {vehicle.driverOption === "both" && "Self / With Driver"}
-                  </span>
+                    {vehicle.driverOption && (
+                      <span className="px-3 py-1 text-xs rounded-full bg-blue-100 text-blue-700 font-medium">
+                        {vehicle.driverOption === "self" && "Self Drive only"}
+                        {vehicle.driverOption === "with-driver" && "With Driver Only"}
+                      </span>
+                    )}
                 </div>
 
 
@@ -1038,17 +1048,23 @@ const matchSubType =
             View Details
           </button>
                   <button
-                      onClick={() => {
-                        if (!isValidDateTime()) {
-                        alert("Please make sure pick-up is not in the past and return is after pick-up.");
-                        return;
-                      }
-                        isLoggedIn ? onViewDetails(vehicle) : onNavigateToSignIn();
-                      }}
-                      className="flex-1 bg-[#017FE6] text-white py-2 rounded-lg hover:bg-[#0165B8]"
-                    >
-                      Book Now
-                  </button>
+  onClick={() => {
+    if (!isValidDateTime()) {
+      alert("Please make sure pick-up is not in the past and return is after pick-up.");
+      return;
+    }
+
+    if (!isLoggedIn) {
+      onNavigateToSignIn();
+      return;
+    }
+
+    onBookNow(vehicle); // ✅ GO TO CHECKOUT
+  }}
+  className="flex-1 bg-[#017FE6] text-white py-2 rounded-lg hover:bg-[#0165B8]"
+>
+  Book Now
+</button>
                     </div>
                   </div>
                 </div>

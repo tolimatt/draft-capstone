@@ -10,6 +10,7 @@ vehicle,
   onNavigateToHome,
   onNavigateToSignIn,
   onNavigateToRegister,
+  onContinueToCheckout,
   onNavigateToBookingHistory,
   onNavigateToAbout,
   onNavigateToAccountSettings,
@@ -26,7 +27,64 @@ vehicle,
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [showReviewsModal, setShowReviewsModal] = useState(false);
     const [sortOption, setSortOption] = useState("recent");
+    
+    const today = new Date().toISOString().split("T")[0];
 
+const getTodayDate = () => {
+  return new Date().toLocaleDateString("en-CA");
+};
+
+const getTomorrowDate = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toLocaleDateString("en-CA");
+};
+
+const getCurrentTime = () => {
+  return new Date().toTimeString().slice(0, 5);
+};
+
+useEffect(() => {
+  if (!pickupDate || !pickupTime) return;
+
+  const todayDate = getTodayDate();
+  if (pickupDate !== todayDate) return;
+
+  const now = getCurrentTime();
+
+  // If user selects a past time today → auto-fix
+  if (pickupTime < now) {
+    setBookingData((prev) => ({
+      ...prev,
+      pickupTime: now,
+    }));
+  }
+}, [pickupDate, pickupTime]);
+
+const getMinReturnDate = (pickupDate) => {
+  if (!pickupDate) return today;
+  const d = new Date(pickupDate);
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split("T")[0];
+};
+
+   useEffect(() => {
+  if (!pickupDate) return;
+
+  const pickup = new Date(pickupDate);
+  const currentReturn = returnDate ? new Date(returnDate) : null;
+
+  // If return date is missing or same/before pickup → auto set to next day
+  if (!currentReturn || currentReturn <= pickup) {
+    const nextDay = new Date(pickup);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    setBookingData((prev) => ({
+      ...prev,
+      returnDate: nextDay.toLocaleDateString("en-CA"),
+    }));
+  }
+}, [pickupDate, returnDate]);
 
       useEffect(() => {
           if (showAI) {
@@ -646,6 +704,7 @@ vehicle,
                       <input
                         type="date"
                         value={pickupDate}
+                        min={today}
                         onChange={(e) => setBookingData({ ...bookingData, pickupDate: e.target.value })}
                         className="w-full rounded-xl border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
                       />
@@ -653,6 +712,7 @@ vehicle,
                       <input
                         type="time"
                         value={pickupTime}
+                        min={pickupDate === today ? getCurrentTime() : undefined}
                         onChange={(e) => setBookingData({ ...bookingData, pickupTime: e.target.value })}
                         className="w-full rounded-xl border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
                       />
@@ -669,7 +729,7 @@ vehicle,
                       <input
                         type="date"
                         value={returnDate}
-                        min={pickupDate}
+                        min={getMinReturnDate(pickupDate)}
                         onChange={(e) => setBookingData({ ...bookingData, returnDate: e.target.value })}
                         className="w-full rounded-xl border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#017FE6]"
                       />
@@ -706,14 +766,30 @@ vehicle,
 
             {/* CTA */}
             <button
-            onClick={() => {
-              // TEMP: redirect to Sign In first
-              onNavigateToSignIn();
-            }}
-            className="mt-6 w-full bg-[#017FE6] hover:bg-[#0165B8] text-white py-4 rounded-xl text-base font-semibold"
-          >
-            Continue to Booking
-          </button>
+  onClick={() => {
+    // STEP 1: check login
+    if (!isLoggedIn) {
+      onNavigateToSignIn();
+      return;
+    }
+
+    // STEP 2: validate dates
+    if (
+      !bookingData.pickupDate ||
+      !bookingData.pickupTime ||
+      !bookingData.returnDate ||
+      !bookingData.returnTime
+    ) {
+      alert("Please select pickup and return date & time.");
+      return;
+    }
+
+    onContinueToCheckout();
+  }}
+  className="mt-6 w-full bg-[#017FE6] hover:bg-[#0165B8] text-white py-4 rounded-xl font-semibold"
+>
+  Continue to Booking
+</button>
 
           </div>
         </div>

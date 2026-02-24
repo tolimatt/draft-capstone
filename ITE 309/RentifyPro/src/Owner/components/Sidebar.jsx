@@ -8,6 +8,8 @@ import {
   Wallet,
   BarChart3,
   Link2,
+  Bell,
+  Activity,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -31,8 +33,11 @@ function Sidebar({ activePage, setActivePage }) {
     { id: "Messages", label: "Messages", icon: MessageSquare },
     { id: "Reviews", label: "Reviews", icon: Star },
     { id: "Earnings", label: "Earnings", icon: Wallet },
+    { id: "Notifications", label: "Notifications", icon: Bell },
     { id: "Analytics", label: "Analytics", icon: BarChart3 },
+    { id: "Activity Logs", label: "Activity Logs", icon: Activity },
     { id: "Blockchain", label: "Blockchain Records", icon: Link2 },
+    
   ];
 
   const handleLogout = () => {
@@ -41,9 +46,9 @@ function Sidebar({ activePage, setActivePage }) {
   };
 
   return (
-    <aside className="w-72 h-full bg-white flex flex-col border-r border-gray-200">
+    <aside className="w-72 h-screen bg-white flex flex-col border-r overflow-y-auto">
       {/* HEADER */}
-      <div className="h-20 px-10 text-white flex items-center border-b border-blue/20">
+    <div className="py-5 px-9 flex items-center border-b border-blue/20">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#017FE6] text-white flex items-center justify-center font-bold">
             R
@@ -101,7 +106,22 @@ function Sidebar({ activePage, setActivePage }) {
       </nav>
 
       {/* FOOTER */}
-      <div className="px-4 py-4 border-t">
+      
+      <div className="px-4 py-4 border-t space-y-1">
+
+         {/* SETTINGS */}
+          <div
+            onClick={() => setActivePage("Settings")}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer ${
+              activePage === "Settings"
+                ? "bg-[#017FE6] text-white"
+                : "text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            <Settings className="w-5 h-5" />
+            <span className="text-sm font-medium">Settings</span>
+          </div>
+
         <div
           onClick={handleLogout}
           className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-red-600 hover:bg-red-50"

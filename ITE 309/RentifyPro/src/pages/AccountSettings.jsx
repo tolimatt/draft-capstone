@@ -129,6 +129,8 @@ const AccountSettings = ({
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [activeTab, setActiveTab] = useState("Profile Settings");
   const [showPhotoMenu, setShowPhotoMenu] = useState(false);
+  const [showVerifiedModal, setShowVerifiedModal] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
 
   // PSGC lists
   const [regions, setRegions] = useState([]);
@@ -179,20 +181,37 @@ const AccountSettings = ({
   }, [showAI]);
 
   // Load user data from localStorage users
-  useEffect(() => {
-    if (!user?.email) return;
-    const users = JSON.parse(localStorage.getItem("users")) || [];
-    const registeredUser = users.find((u) => u.email === user.email);
+ useEffect(() => {
+  if (!user?.email) return;
 
-    if (registeredUser) {
-      setProfile({
-        firstName: registeredUser.firstName || "",
-        lastName: registeredUser.lastName || "",
-        email: registeredUser.email || "",
-        phone: registeredUser.phone || "",
-      });
-    }
-  }, [user]);
+  const users = JSON.parse(localStorage.getItem("users")) || [];
+  const registeredUser = users.find((u) => u.email === user.email);
+
+  if (!registeredUser) return;
+
+  setProfile({
+    firstName: registeredUser.firstName || "",
+    lastName: registeredUser.lastName || "",
+    email: registeredUser.email || "",
+    phone: registeredUser.phone || "",
+  });
+
+  if (registeredUser.profile) {
+    setExtraProfile({
+      dob: registeredUser.profile.dob || "",
+      gender: registeredUser.profile.gender || "",
+      address: registeredUser.profile.address || "",
+      region: registeredUser.profile.region || "",
+      province: registeredUser.profile.province || "",
+      city: registeredUser.profile.city || "",
+      barangay: registeredUser.profile.barangay || "",
+      zip: registeredUser.profile.zip || "",
+      emergencyName: registeredUser.profile.emergencyName || "",
+      emergencyPhone: registeredUser.profile.emergencyPhone || "",
+      emergencyRelation: registeredUser.profile.emergencyRelation || "",
+    });
+  }
+}, [user]);
 
   // Photo upload/remove
   const handlePhotoUpload = (e) => {
@@ -322,24 +341,83 @@ const AccountSettings = ({
   ]);
 
   // Save/Edit button handler
-  const toggleEdit = (sectionKey) => {
-    if (editingSection === sectionKey) {
-      // SAVE
-      setExtraProfile((prev) => ({
-        ...prev,
-        ...(draftProfile || {}),
-      }));
+  // Save/Edit button handler
+const toggleEdit = (sectionKey) => {
+  if (editingSection === sectionKey) {
+    // SAVE
+    const updatedProfile = {
+      ...extraProfile,
+      ...(draftProfile || {}),
+    };
 
-      setEditingSection(null);
-      setDraftProfile(null);
-      setIsAddressEdited(false);
-    } else {
-      // EDIT
-      setDraftProfile({ ...extraProfile });
-      setEditingSection(sectionKey);
-      setIsAddressEdited(false);
+    setExtraProfile(updatedProfile);
+
+    const users = JSON.parse(localStorage.getItem("users")) || [];
+    const currentUser = users.find((u) => u.email === user.email);
+
+    const verified =
+      updatedProfile.dob &&
+      updatedProfile.gender &&
+      updatedProfile.address &&
+      updatedProfile.region &&
+      updatedProfile.province &&
+      updatedProfile.city &&
+      updatedProfile.barangay &&
+      updatedProfile.emergencyName &&
+      updatedProfile.emergencyPhone &&
+      updatedProfile.emergencyRelation;
+
+    const updatedUsers = users.map((u) =>
+  u.email === user.email
+    ? {
+        ...u,
+        isVerified: verified,
+        profile: {
+          dob: updatedProfile.dob,
+          gender: updatedProfile.gender,
+          address: updatedProfile.address,
+          region: updatedProfile.region,
+          province: updatedProfile.province,
+          city: updatedProfile.city,
+          barangay: updatedProfile.barangay,
+          emergencyName: updatedProfile.emergencyName,
+          emergencyPhone: updatedProfile.emergencyPhone,
+          emergencyRelation: updatedProfile.emergencyRelation,
+        },
+      }
+    : u
+);
+
+localStorage.setItem("users", JSON.stringify(updatedUsers));
+
+    if (verified) {
+  setIsVerified(true);
+}
+
+    // ✅ SHOW MODAL ONLY ON FIRST VERIFICATION
+    if (verified && !currentUser?.isVerified) {
+      setShowVerifiedModal(true);
     }
-  };
+
+    setEditingSection(null);
+    setDraftProfile(null);
+    setIsAddressEdited(false);
+  } else {
+    // EDIT
+    setDraftProfile({ ...extraProfile });
+    setEditingSection(sectionKey);
+    setIsAddressEdited(false);
+  }
+};
+
+useEffect(() => {
+  if (!user?.email) return;
+
+  const users = JSON.parse(localStorage.getItem("users")) || [];
+  const currentUser = users.find(u => u.email === user.email);
+
+  setIsVerified(!!currentUser?.isVerified);
+}, [user, showVerifiedModal]);
 
   return (
     <div className="min-h-screen bg-white">
@@ -614,15 +692,21 @@ const AccountSettings = ({
 
               <div>
                 <h2 className="text-xl font-semibold flex items-center gap-2">
-                  {user?.name}
-                  <BadgeCheck size={18} className="text-[#017FE6]" />
-                </h2>
+  {user?.name}
+  {isVerified && (
+    <BadgeCheck size={18} className="text-[#017FE6]" />
+  )}
+</h2>
 
                 <p className="text-m text-gray-500">{user?.email}</p>
 
-                <span className="text-sm text-[#017FE6] font-medium">
-                  Verified User
-                </span>
+                <span
+  className={`text-sm font-medium ${
+    isVerified ? "text-[#017FE6]" : "text-red-500"
+  }`}
+>
+  {isVerified? "Verified User" : "Unverified User"}
+</span>
               </div>
             </div>
 
@@ -949,10 +1033,45 @@ const AccountSettings = ({
           </div>
         </div>
       )}
+
+      {showVerifiedModal && (
+  <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 text-center">
+      
+      <BadgeCheck size={40} className="text-green-600 mx-auto mb-4" />
+
+      <h2 className="text-xl font-bold mb-2">
+        Account Verified 🎉
+      </h2>
+
+      <p className="text-gray-600 text-sm mb-6">
+        You can now proceed with booking.
+      </p>
+
+      <button
+        onClick={() => {
+          const returnPage =
+            localStorage.getItem("returnAfterVerification") || "vehicles";
+
+          localStorage.removeItem("returnAfterVerification");
+          setShowVerifiedModal(false);
+
+          // 🔁 GO BACK
+          if (returnPage === "checkout") {
+            onNavigateToVehicles(); // or checkout page
+          } else {
+            onNavigateToVehicles();
+          }
+        }}
+        className="w-full bg-[#017FE6] text-white py-3 rounded-lg font-semibold hover:bg-[#0165B8]"
+      >
+        OK
+      </button>
+    </div>
+  </div>
+)}
     </div>
   );
 };
 
 export default AccountSettings;
-
-

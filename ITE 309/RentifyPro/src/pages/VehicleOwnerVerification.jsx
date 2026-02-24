@@ -134,15 +134,19 @@ const VehicleOwnerVerification = ({
             <button
             disabled={!isComplete}
             onClick={() => {
-              // mark user as vehicle owner
-              localStorage.setItem("isVehicleOwner", "true");
+            localStorage.setItem("isVehicleOwner", "true");
+            localStorage.setItem("activeRole", "owner");
 
-              // optional: set default role
-              localStorage.setItem("activeRole", "owner");
+            // ✅ Persist to user record so it survives logout/login
+            const users = JSON.parse(localStorage.getItem("users")) || [];
+            const currentEmail = localStorage.getItem("currentUserEmail"); 
+            const updatedUsers = users.map((u) =>
+              u.email === currentEmail ? { ...u, isVehicleOwner: true } : u
+            );
+            localStorage.setItem("users", JSON.stringify(updatedUsers));
 
-              // proceed to next step / success
-              onSubmit();
-            }}
+            onSubmit();
+          }}
             className={`w-full py-3 rounded-lg font-semibold transition ${
               isComplete
                 ? "bg-[#017FE6] text-white hover:bg-[#0165B8]"

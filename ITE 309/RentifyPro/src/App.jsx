@@ -13,6 +13,7 @@ import AccountSettings from "./pages/AccountSettings";
 import ProceedVehicleOwner from "./pages/ProceedVehicleOwner";
 import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
 import RegisterOwnerPage from "./pages/RegisterOwnerPage";
+import BookingCheckout from "./pages/BookingCheckout";
 
 
 //OWNER UI
@@ -21,7 +22,6 @@ import OwnerLayout from "./Owner/OwnerLayout";
 
 
 const App = () => {
-  // Helper function to get default booking data with local timezone
   const getDefaultBookingData = () => {
     const today = new Date();
     const tomorrow = new Date();
@@ -34,7 +34,11 @@ const App = () => {
       pickupTime: today.toTimeString().slice(0, 5), // HH:mm
       returnDate: tomorrow.toLocaleDateString("en-CA"), // Tomorrow's date
       returnTime: today.toTimeString().slice(0, 5), // Same time as pickup
+      insuranceType: "basic",     // basic | standard | premium
+      refundableDeposit: 3000,    // fixed for now
     };
+
+    
   };
 
   const [currentPage, setCurrentPage] = useState("home");
@@ -59,14 +63,24 @@ const App = () => {
   useEffect(() => {
   const switchToUser = () => {
     setIsOwnerLoggedIn(false);
-    setCurrentPage("home"); // or "vehicles"
+    setCurrentPage("home"); 
   };
 
   window.addEventListener("switch-to-user", switchToUser);
   return () => window.removeEventListener("switch-to-user", switchToUser);
 }, []);
 
-
+const days =
+  bookingData.pickupDate && bookingData.returnDate
+    ? Math.max(
+        1,
+        Math.ceil(
+          (new Date(bookingData.returnDate) -
+            new Date(bookingData.pickupDate)) /
+            (1000 * 60 * 60 * 24)
+        )
+      )
+    : 1;
 
   return (
     <>
@@ -78,7 +92,6 @@ const App = () => {
         onNavigateToSignIn={() => setCurrentPage("signin")}
          onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
         onNavigateToVehicles={() => {
-          // Reset to fresh defaults when navigating to vehicles without search
           setBookingData(getDefaultBookingData());
           setCurrentPage("vehicles");
         }}
@@ -96,10 +109,12 @@ const App = () => {
         }}
         
         onLogout={() => {
-          setIsLoggedIn(false);
-          setUser(null);
-          setCurrentPage("home");
-        }}
+        setIsLoggedIn(false);
+        setUser(null);
+        localStorage.removeItem("isVehicleOwner");  
+        localStorage.removeItem("activeRole");      
+        setCurrentPage("home");
+      }}
 
          onSwitchToOwner={() => {
       setIsOwnerLoggedIn(true);
@@ -116,6 +131,7 @@ const App = () => {
         onNavigateToForgotPassword={() => setCurrentPage("forgot-email")}
         onLoginSuccess={(userData) => {
         setUser(userData);
+         localStorage.setItem("currentUserEmail", userData.email);
 
         if (userData.role === "owner") {
           setIsOwnerLoggedIn(true);
@@ -178,8 +194,24 @@ const App = () => {
         onLogout={() => {
           setIsLoggedIn(false);
           setUser(null);
+          localStorage.removeItem("isVehicleOwner"); 
+          localStorage.removeItem("activeRole");       
           setCurrentPage("home");
         }}
+
+       onBookNow={(vehicle) => {
+  const users = JSON.parse(localStorage.getItem("users")) || [];
+  const currentUser = users.find(u => u.email === user?.email);
+
+  if (!currentUser?.isVerified) {
+    alert("Please complete your Account Settings to get verified before booking.");
+    setCurrentPage("account-settings");
+    return;
+  }
+
+  setSelectedVehicle(vehicle);
+  setCurrentPage("checkout");
+}}
       />
     )}
 
@@ -194,15 +226,51 @@ const App = () => {
         onBack={() => setCurrentPage("vehicles")}
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToSignIn={() => setCurrentPage("signin")}
+        onContinueToCheckout={() => setCurrentPage("checkout")}
         onNavigateToAbout={() => setCurrentPage("about")}
         onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
         onLogout={() => {
           setIsLoggedIn(false);
           setUser(null);
+          localStorage.removeItem("isVehicleOwner");  
+          localStorage.removeItem("activeRole");      
           setCurrentPage("home");
         }}
       />
     )}
+
+
+     {currentPage === "checkout" && selectedVehicle && (
+  <BookingCheckout
+    vehicle={selectedVehicle}
+    days={days}
+    bookingData={bookingData}   // ✅ ADD THIS
+    setBookingData={setBookingData} // ✅ ADD THIS
+    /* NAVIGATION */
+    onNavigateToHome={() => setCurrentPage("home")}
+    onNavigateToSignIn={() => setCurrentPage("signin")}
+    onNavigateToVehicles={() => {
+      setBookingData(getDefaultBookingData());
+      setCurrentPage("vehicles");
+    }}
+    onNavigateToRegister={() => setCurrentPage("register")}
+    onNavigateToAbout={() => setCurrentPage("about")}
+    onNavigateToBookingHistory={() => setCurrentPage("signin")}
+    onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+
+    /* AUTH */
+    isLoggedIn={isLoggedIn}
+    user={user}
+    onLogout={() => {
+      setIsLoggedIn(false);
+      setUser(null);
+      localStorage.removeItem("isVehicleOwner");
+      localStorage.removeItem("activeRole");
+      setCurrentPage("home");
+    }}
+  />
+)}
+
 
     {/* REGISTER */}
     {currentPage === "register" && (
@@ -250,7 +318,6 @@ const App = () => {
         user={user}
         onNavigateToHome={() => setCurrentPage("home")}
         onNavigateToVehicles={() => {
-          // Reset to fresh defaults when navigating to vehicles from About page
           setBookingData(getDefaultBookingData());
           setCurrentPage("vehicles");
         }}
@@ -259,66 +326,82 @@ const App = () => {
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToAbout={() => setCurrentPage("about")}
         onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
-        onLogout={() => {
-          setIsLoggedIn(false);
-          setUser(null);
-          setCurrentPage("home");
-        }}
+       onLogout={() => {
+        setIsLoggedIn(false);
+        setUser(null);
+        localStorage.removeItem("isVehicleOwner");  
+        localStorage.removeItem("activeRole");       
+        setCurrentPage("home");
+      }}
       />
     )}
 
     {/* ACCOUNT SETTINGS */}
-{currentPage === "account-settings" && (
-  <AccountSettings
-    isLoggedIn={isLoggedIn}
-    user={user}
-    onNavigateToHome={() => setCurrentPage("home")}
-    onNavigateToVehicles={() => setCurrentPage("vehicles")}
-    onNavigateToBookingHistory={() => setCurrentPage("signin")}
-    onNavigateToSignIn={() => setCurrentPage("signin")}
-    onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
-     onNavigateToVehicleOwnerProceed={() => setCurrentPage("vehicle-owner-proceed")}
-    onNavigateToAbout={() => setCurrentPage("about")}
-    onLogout={() => {
+    {currentPage === "account-settings" && (
+      <AccountSettings
+        isLoggedIn={isLoggedIn}
+        user={user}
+        onNavigateToHome={() => setCurrentPage("home")}
+        onNavigateToVehicles={() => setCurrentPage("vehicles")}
+        onNavigateToBookingHistory={() => setCurrentPage("signin")}
+        onNavigateToSignIn={() => setCurrentPage("signin")}
+        onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+        onNavigateToVehicleOwnerProceed={() => setCurrentPage("vehicle-owner-proceed")}
+        onNavigateToAbout={() => setCurrentPage("about")}
+        onLogout={() => {
       setIsLoggedIn(false);
       setUser(null);
+      localStorage.removeItem("isVehicleOwner");  
+      localStorage.removeItem("activeRole");       
       setCurrentPage("home");
     }}
+      />
+    )}
+
+  {/* PROCEED AS VEHICLE OWNER */}
+  {currentPage === "vehicle-owner-proceed" && (
+    <ProceedVehicleOwner
+    onBack={() => setCurrentPage("account-settings")}
+    onDoLater={() => setCurrentPage("account-settings")}
+    onProceed={() => setCurrentPage("vehicle-owner-verification")}
+    onNavigateToHome={() => setCurrentPage("home")}
   />
-)}
 
-{/* PROCEED AS VEHICLE OWNER */}
-{currentPage === "vehicle-owner-proceed" && (
-  <ProceedVehicleOwner
-  onBack={() => setCurrentPage("account-settings")}
-  onDoLater={() => setCurrentPage("account-settings")}
-  onProceed={() => setCurrentPage("vehicle-owner-verification")}
-  onNavigateToHome={() => setCurrentPage("home")}
-/>
+  )}
 
-)}
-
-{currentPage === "vehicle-owner-verification" && (
-  <VehicleOwnerVerification
-  onNavigateToHome={() => setCurrentPage("home")}
-  onBack={() => setCurrentPage("vehicle-owner-proceed")}
-  onSubmit={() => {
+  {currentPage === "vehicle-owner-verification" && (
+    <VehicleOwnerVerification
+    onNavigateToHome={() => setCurrentPage("home")}
+    onBack={() => setCurrentPage("vehicle-owner-proceed")}
+    onSubmit={() => {
   localStorage.setItem("isNewOwner", "true");
+  localStorage.setItem("isVehicleOwner", "true");
+  localStorage.setItem("hasUserAccount", "true"); 
+
+  // Persist isVehicleOwner to the user's record
+  const users = JSON.parse(localStorage.getItem("users")) || [];
+  const currentEmail = localStorage.getItem("currentUserEmail");
+  const updatedUsers = users.map((u) =>
+    u.email === currentEmail ? { ...u, isVehicleOwner: true } : u
+  );
+  localStorage.setItem("users", JSON.stringify(updatedUsers));
+
   setIsOwnerLoggedIn(true);
   setCurrentPage("owner-dashboard");
 }}
+    
 
-/>
-)}
+  />
+  )}
 
-{currentPage === "owner-dashboard" && isOwnerLoggedIn && (
-  <OwnerLayout />
-)}
+  {currentPage === "owner-dashboard" && isOwnerLoggedIn && (
+    <OwnerLayout />
+  )}
 
 
-  
+    
 
-  </>
+    </>
 );
 };
 

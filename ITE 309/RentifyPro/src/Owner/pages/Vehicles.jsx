@@ -1,5 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
-
+import React, { useEffect, useState } from "react";
+import {
+  MapPin,
+  Users,
+  Settings,
+  Fuel,
+  Star,
+  Car,
+  Bike
+} from "lucide-react";
 
 /* =======================
    DATA
@@ -7,21 +15,25 @@ import React, { useEffect, useMemo, useState } from "react";
 
 const initialVehicles = [
   {
-    id: "v1",
-    name: "Toyota Camry 2024",
-    category: "Car",
-    subtype: "Sedan",
-    plate: "ABC-1234",
-    transmission: "Automatic",
-    fuel: "Gasoline",
-    price: 75,
-    rating: 4.8,
-    rentals: 156,
-    status: "Available",
-    featured: true,
-    driverAvailable: true,
-    icon: "🚗",
-  },
+  id: "v1",
+  image: "/placeholder-bike.png",
+  brand: "Yamaha",
+  name: "R3",
+  category: "Motorcycle",
+  subtype: "Sport",
+  location: "Lingayen City, Pangasinan",
+  codingDay: "Thursday",
+  seats: 2,
+  plate: "ABC-1234",
+  transmission: "Manual",
+  fuel: "Gasoline",
+  price: 1200,
+  rating: 4.6,
+  rentals: 156,
+  status: "Available",
+  driverAvailability: "Self Drive only",
+  icon: "🏍️",
+}
 ];
 
 /* =======================
@@ -225,10 +237,13 @@ export default function Vehicles() {
   })
   .map((v) => (
     <VehicleCard
-      key={v.id}
-      vehicle={v}
-      onClick={() => setSelected(v)}
-    />
+  key={v.id}
+  vehicle={v}
+  onEdit={() => setSelected(v)}
+  onRemove={() =>
+    setVehicles((prev) => prev.filter((x) => x.id !== v.id))
+  }
+/>
   ))}
 
       </div>
@@ -280,72 +295,126 @@ export default function Vehicles() {
    VEHICLE CARD
 ======================= */
 
-function VehicleCard({ vehicle, onClick }) {
+function VehicleCard({ vehicle, onEdit, onRemove }) {
   return (
     <div
-  onClick={onClick}
-  className="relative bg-white rounded-2xl border border-gray-300 shadow-sm hover:shadow-xl transition cursor-pointer overflow-hidden"
+  onClick={onEdit}
+  className="
+    group
+    bg-white rounded-xl shadow-md overflow-hidden
+    hover:shadow-xl transition-shadow
+    flex flex-col cursor-pointer
+  "
 >
-  {/* TOP BANNER */}
-  <div className="h-32 flex items-center justify-center text-5xl bg-gradient-to-br from-blue-50 to-blue-100">
-    {vehicle.icon}
-  </div>
+      
+     <div className="relative bg-gray-50 h-40 overflow-hidden flex items-center justify-center">
+  {vehicle.image ? (
+    <img
+      src={vehicle.image}
+      alt={vehicle.name}
+      className="
+        h-full
+        max-w-[93%]
+        object-contain
+        mx-auto
+        transition-transform duration-300
+        group-hover:scale-105
+      "
+    />
+  ) : vehicle.category === "Motorcycle" ? (
+    <Bike size={56} className="text-gray-400" />
+  ) : (
+    <Car size={56} className="text-gray-400" />
+  )}
 
-  {/* STATUS BADGE */}
+  {vehicle.status === "Available" && (
+    <span className="absolute top-4 left-4 bg-green-500 text-white px-3 py-1 rounded-full text-xs font-semibold">
+      Available
+    </span>
+  )}
 
-  {/* RATING */}
-  <span className="absolute top-3 right-3 text-sm text-yellow-500 font-medium">
-    ★ {vehicle.rating}
+  <span className="absolute top-4 right-4 bg-gray-900 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
+    <Star size={14} className="text-yellow-400 fill-yellow-400" />
+    <span className="text-white">{vehicle.rating}</span>
   </span>
-
-  {/* BODY */}
-  <div className="p-4 space-y-2">
-    {/* STATUS */}
-<span
-  className={`inline-block text-xs font-medium px-2 py-1 rounded-full ${
-    statusStyles[vehicle.status]
-  }`}
->
-  {vehicle.status}
-</span>
-
-    <h3 className="font-semibold text-gray-900 leading-tight">
-      {vehicle.name}
-    </h3>
-
-    <p className="text-xs text-gray-600">
-      {vehicle.subtype} • {vehicle.transmission} • {vehicle.fuel}
-    </p>
-    {vehicle.description && (
-  <p className="text-xs text-gray-500 line-clamp-2">
-    {vehicle.description}
-  </p>
-)}
-
-
-    <div className="flex items-center justify-between pt-2">
-      <span className="font-bold text-[#017FE6]">
-        ${vehicle.price}
-        <span className="text-xs text-gray-500 font-medium"> /day</span>
-      </span>
-
-      {/* EDIT BUTTON (matches image) */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onClick();
-        }}
-        className="px-3 py-1.5 text-sm rounded-lg bg-[#017FE6]/10 text-[#017FE6] hover:bg-[#017FE6]/20"
-      >
-        Edit
-      </button>
-    </div>
-  </div>
 </div>
 
+      {/* CONTENT */}
+      <div className="p-4 flex flex-col flex-1">
+        {/* BRAND + NAME */}
+        <h3 className="text-xl font-bold leading-tight">
+          {vehicle.brand} {vehicle.name}
+        </h3>
+
+        <p className="text-gray-500 text-sm mb-2">
+          {vehicle.brand} • {vehicle.subtype}
+        </p>
+
+        {/* LOCATION */}
+        <div className="flex items-center gap-1 text-sm text-gray-500 mb-2">
+          <MapPin size={14} /> {vehicle.location}
+        </div>
+
+        {/* TAGS */}
+        <div className="flex flex-wrap gap-2 mb-3">
+          {vehicle.codingDay && (
+            <span className="px-3 py-1 text-xs bg-gray-200 rounded-full">
+              Coding every {vehicle.codingDay}
+            </span>
+          )}
+
+          <span className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full">
+            {vehicle.driverAvailability}
+          </span>
+        </div>
+
+        {/* SPECS */}
+        <div className="flex flex-wrap gap-6 text-sm text-gray-600 mb-3">
+        <span className="flex items-center gap-1">
+          <Users size={14} /> {vehicle.seats} seats
+        </span>
+        <span className="flex items-center gap-1">
+          <Settings size={14} /> {vehicle.transmission}
+        </span>
+        <span className="flex items-center gap-1">
+          <Fuel size={14} /> {vehicle.fuel}
+        </span>
+      </div>
+
+        {/* PRICE */}
+        <div className="text-lg font-bold text-[#017FE6] mb-4">
+          ₱{vehicle.price.toLocaleString()} / day
+        </div>
+
+        {/* ACTIONS */}
+        <div className="flex gap-2 mt-auto">
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+      onEdit();
+    }}
+    className="flex-1 border border-[#017FE6] text-[#017FE6] py-2 rounded-lg text-sm font-semibold hover:bg-blue-50"
+  >
+    Edit
+  </button>
+
+  <button
+    onClick={(e) => {
+      e.stopPropagation();
+
+      if (window.confirm("Are you sure you want to remove this vehicle?")) {
+        onRemove(); // ✅ ACTUAL DELETE
+      }
+    }}
+    className="flex-1 bg-red-500 text-white py-2 rounded-lg text-sm font-semibold hover:bg-red-600"
+  >
+    Remove
+  </button>
+</div>
+      </div>
+    </div>
   );
 }
-
 const statusStyles = {
   Available: "bg-green-100 text-green-700",
   Rented: "bg-orange-100 text-orange-700",
@@ -462,15 +531,6 @@ function VehicleDetailsModal({ vehicle, onClose, onRemove, onCycleStatus }) {
             
           )}
 
-            {/* DESCRIPTION */}
-                {vehicle.description && (
-                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-700">
-                    <p className="font-medium mb-1">Description</p>
-                    <p>{vehicle.description}</p>
-                </div>
-                )}
-
-
                         {/* ACTIONS */}
             <div className="grid grid-cols-2 gap-4 pt-4">
             <button
@@ -531,6 +591,10 @@ function GalleryTile({ emoji }) {
 }
 function AddVehicleModal({ onClose, onAdd }) {
   const [form, setForm] = useState({
+    brand: "",
+location: "",
+codingDay: "",
+seats: 2,
   name: "",
   plate: "",
   category: "Car",
@@ -538,9 +602,9 @@ function AddVehicleModal({ onClose, onAdd }) {
   transmission: "Automatic",
   fuel: "Gasoline",
   price: "",
-  description: "",
   status: "Available",
   driverAvailability: "Self-Drive Only",
+   vehicleImage: null,    
   interiorImages: [],   
   orcrFile: null,      
 });
@@ -583,6 +647,42 @@ function AddVehicleModal({ onClose, onAdd }) {
                 setForm({ ...form, name: e.target.value })
               }
             />
+
+            <input
+  className="px-4 py-2 rounded-xl border"
+  placeholder="Brand (e.g. Yamaha)"
+  value={form.brand}
+  onChange={(e) => setForm({ ...form, brand: e.target.value })}
+/>
+
+<input
+  className="px-4 py-2 rounded-xl border"
+  placeholder="Location (City, Province)"
+  value={form.location}
+  onChange={(e) => setForm({ ...form, location: e.target.value })}
+/>
+
+<select
+  className="px-3 py-2 rounded-xl border"
+  value={form.codingDay}
+  onChange={(e) => setForm({ ...form, codingDay: e.target.value })}
+>
+  <option value="">Coding Day</option>
+  <option>Monday</option>
+  <option>Tuesday</option>
+  <option>Wednesday</option>
+  <option>Thursday</option>
+  <option>Friday</option>
+</select>
+
+<input
+  type="number"
+  min="1"
+  className="px-4 py-2 rounded-xl border"
+  placeholder="Seats"
+  value={form.seats}
+  onChange={(e) => setForm({ ...form, seats: Number(e.target.value) })}
+/>
 
             <select
             className="px-3 py-2 rounded-xl border"
@@ -664,7 +764,68 @@ function AddVehicleModal({ onClose, onAdd }) {
             }
             />
 
+        <div className="mt-4">
+          <label className="text-sm font-medium text-gray-600 block mb-1">
+            Driver Availability
+          </label>
+
+          <select
+            value={form.driverAvailability}
+            onChange={(e) =>
+              setForm({ ...form, driverAvailability: e.target.value })
+            }
+            className="w-full px-4 py-2 rounded-xl border"
+          >
+            <option>Self-Drive Only</option>
+            <option>With Driver Only</option>
+            <option>Self-Drive / With Driver</option>
+          </select>
+        </div>
+
           </div>
+
+          {/* VEHICLE IMAGE */}
+{/* VEHICLE IMAGE */}
+<div className="col-span-2">
+  <label className="text-sm font-medium text-gray-600 block mb-1">
+    Vehicle Image <span className="text-red-500">*</span>
+  </label>
+
+  <input
+    type="file"
+    accept="image/*"
+    required
+    onChange={(e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setForm({
+        ...form,
+        vehicleImage: {
+          file,
+          preview: URL.createObjectURL(file),
+        },
+      });
+    }}
+    className="block w-full text-sm"
+  />
+
+  {form.vehicleImage && (
+    <div className="mt-2 relative w-48">
+      <img
+        src={form.vehicleImage.preview}
+        className="h-28 w-full rounded-lg object-cover border"
+      />
+      <button
+        type="button"
+        onClick={() => setForm({ ...form, vehicleImage: null })}
+        className="absolute top-1 right-1 bg-red-500 text-white text-xs px-1 rounded"
+      >
+        ×
+      </button>
+    </div>
+  )}
+</div>
 
           <div className="col-span-2 mt-4">
           <label className="text-sm font-medium text-gray-600 block mb-1">
@@ -785,94 +946,51 @@ function AddVehicleModal({ onClose, onAdd }) {
         )}
         </div>
 
-
-        <textarea
-          className="
-            mt-4
-            px-5 py-4
-            rounded-xl
-            border
-            w-full
-            resize-none
-            text-sm
-            leading-relaxed
-            focus:outline-none
-            focus:ring-2
-            focus:ring-[#017FE6]/40
-          "
-          rows={5}
-          placeholder="Vehicle features and description..."
-          value={form.description}
-          onChange={(e) =>
-            setForm({ ...form, description: e.target.value })
-          }
-        />
-
-
-        <div className="flex items-center gap-4 mt-4">
-        <div className="mt-4">
-          <label className="text-sm font-medium text-gray-600 block mb-1">
-            Driver Availability
-          </label>
-
-          <select
-            value={form.driverAvailability}
-            onChange={(e) =>
-              setForm({ ...form, driverAvailability: e.target.value })
-            }
-            className="w-full px-4 py-2 rounded-xl border"
-          >
-            <option>Self-Drive Only</option>
-            <option>With Driver Only</option>
-            <option>Self-Drive / With Driver</option>
-          </select>
-        </div>
-
-        </div>
         </div>
 
           {/* FOOTER */}
           <div className="flex justify-end gap-3 px-6 py-4 border-t bg-white/80">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50"
-            >
-              Cancel
-            </button>
+  <button
+    onClick={onClose}
+    className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50"
+  >
+    Cancel
+  </button>
 
-            <button
-              onClick={() => {
-                if (form.interiorImages.length !== 4) {
-            alert("Exactly 4 interior photos are required.");
-            return;
-          }
+  <button
+    onClick={() => {
+      if (
+        !form.brand ||
+        !form.name ||
+        !form.location ||
+        !form.codingDay ||
+        !form.seats ||
+        !form.price ||
+        !form.vehicleImage ||
+        !form.orcrFile ||
+        form.interiorImages.length !== 4
+      ) {
+        alert("Please complete all required fields.");
+        return;
+      }
 
-          if (!form.orcrFile) {
-            alert("Please upload the OR/CR document.");
-            return;
-          }
+      onAdd({
+        id: Date.now().toString(),
+        rating: 0,
+        rentals: 0,
+        image: form.vehicleImage.preview,
+        images: { interior: form.interiorImages },
+        documents: { orcr: form.orcrFile.preview },
+        price: Number(form.price),
+        ...form,
+      });
 
-          onAdd({
-            id: Date.now().toString(),
-            rating: 0,
-            rentals: 0,
-            icon: "🚗",
-            price: Number(form.price),
-            images: {
-              interior: form.interiorImages,
-            },
-            documents: {
-            orcr: form.orcrFile.preview, // image preview URL
-          },
-            ...form,
-          });
-
-
-              }}
-              className="px-5 py-2 rounded-xl bg-[#017FE6] text-white hover:bg-[#017FE6]/90"
-            >
-              Add Vehicle
-            </button>
+      onClose();
+    }}
+    className="px-5 py-2 rounded-xl bg-[#017FE6] text-white hover:bg-[#017FE6]/90"
+  >
+    Add Vehicle
+  </button>
           </div>
         </div>
       </div>
