@@ -117,6 +117,23 @@ const isFormValid =
 
 const dailyRate = vehicle.price;
 
+useEffect(() => {
+  if (!isLoggedIn) return;
+  if (driveType !== "with-driver") return;
+  if (!user?.email) return;
+
+  const users = JSON.parse(localStorage.getItem("users")) || [];
+  const currentUser = users.find((u) => u.email === user.email);
+
+  if (!currentUser?.profile) return;
+
+  setEmergencyContact({
+    name: currentUser.profile.emergencyName || "",
+    phone: currentUser.profile.emergencyPhone || "",
+    relationship: currentUser.profile.emergencyRelation || "",
+  });
+}, [driveType, isLoggedIn, user]);
+
 // insurance per day
 // insurance prices
 const INSURANCE_PRICES = {
@@ -168,6 +185,7 @@ const handleBack = () => {
   setShowFormError(false);
   onNavigateToVehicles();
 };
+
 
    const getInitials = (firstName, lastName) => {
      if (!firstName || !lastName) return "";
@@ -588,11 +606,10 @@ const handleBack = () => {
         <input
           type="text"
           value={emergencyContact.name}
-          onChange={(e) =>
-            setEmergencyContact({ ...emergencyContact, name: e.target.value })
-          }
-          className="w-full border rounded-lg px-3 py-2 mt-1"
+          readOnly
+           className="w-full border rounded-lg px-3 py-2 mt-1 bg-gray-100"
         />
+        
       </div>
 
       <div>
@@ -600,10 +617,8 @@ const handleBack = () => {
         <input
           type="tel"
           value={emergencyContact.phone}
-          onChange={(e) =>
-            setEmergencyContact({ ...emergencyContact, phone: e.target.value })
-          }
-          className="w-full border rounded-lg px-3 py-2 mt-1"
+          readOnly
+         className="w-full border rounded-lg px-3 py-2 mt-1 bg-gray-100"
         />
       </div>
 
@@ -612,13 +627,8 @@ const handleBack = () => {
         <input
           type="text"
           value={emergencyContact.relationship}
-          onChange={(e) =>
-            setEmergencyContact({
-              ...emergencyContact,
-              relationship: e.target.value,
-            })
-          }
-          className="w-full border rounded-lg px-3 py-2 mt-1"
+          readOnly
+          className="w-full border rounded-lg px-3 py-2 mt-1 bg-gray-100"
         />
       </div>
 
