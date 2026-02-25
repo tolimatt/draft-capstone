@@ -15,6 +15,7 @@ import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
 import RegisterOwnerPage from "./pages/RegisterOwnerPage";
 import BookingCheckout from "./pages/BookingCheckout";
 import PaymentPage from "./pages/PaymentPage";
+import PaymentComplete from "./pages/PaymentComplete";
 
 
 //OWNER UI
@@ -52,6 +53,7 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [isOwnerLoggedIn, setIsOwnerLoggedIn] = useState(false);
   const [registerRole, setRegisterRole] = useState("user"); 
+  
 
 
   useEffect(() => {
@@ -89,6 +91,8 @@ const goToPayment = (payload) => {
   setPaymentPayload(payload);
   setCurrentPage("payment"); 
 };
+
+const [completedPayment, setCompletedPayment] = useState(null);
 
   return (
     <>
@@ -306,9 +310,41 @@ const goToPayment = (payload) => {
     }}
 
     onBack={() => setCurrentPage("checkout")}
-    onPay={(method) => {
-      console.log("PAYMENT METHOD:", method);
-      setCurrentPage("booking-history");
+    onPay={(paymentResult) => {
+  setCompletedPayment({
+    vehicle: paymentPayload.vehicle,
+    bookingData: paymentPayload.bookingData,
+    days: paymentPayload.days,
+    ...paymentResult,
+  });
+
+  setCurrentPage("payment-complete");
+}}
+  />
+)}
+
+{currentPage === "payment-complete" && completedPayment && (
+  <PaymentComplete
+    {...completedPayment}
+
+    onNavigateToHome={() => setCurrentPage("home")}
+    onNavigateToVehicles={() => {
+      setBookingData(getDefaultBookingData());
+      setCurrentPage("vehicles");
+    }}
+    onNavigateToBookingHistory={() => setCurrentPage("booking-history")}
+    onNavigateToAbout={() => setCurrentPage("about")}
+    onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+
+    isLoggedIn={isLoggedIn}
+    user={user}
+
+    onLogout={() => {
+      setIsLoggedIn(false);
+      setUser(null);
+      localStorage.removeItem("isVehicleOwner");
+      localStorage.removeItem("activeRole");
+      setCurrentPage("home");
     }}
   />
 )}

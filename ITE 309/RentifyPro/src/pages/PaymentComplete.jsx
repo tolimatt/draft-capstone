@@ -1,92 +1,32 @@
 import React, { useState, useEffect } from "react";
-import {
-  Bot,
-  Bell,
-  MessageCircle,
-  Settings,
-  Car,
-  ShieldCheck,
-  User,
-  LogOut,
-  CreditCard,
-  Lock,
-  Wallet
-} from "lucide-react";
+import { Bot, Bell, MessageCircle, Settings, Car, Check} from "lucide-react";
 
-const PaymentPage = ({
-  vehicle,
+  const PaymentComplete = ({
+    vehicle,
   bookingData,
   days,
 
+  paymentOption,
+  paymentMethod,
   payableNow,
   payableOnPickup,
+
   insuranceTotal,
   vehicleTotal,
   refundableDeposit,
-  paymentOption,
-
-  onPay,
-  onBack,
 
   onNavigateToHome,
-  onNavigateToVehicles,
-  onNavigateToAbout,
-  onNavigateToBookingHistory,
-  onNavigateToAccountSettings,
-
-  isLoggedIn,
-  user,
-  onLogout,
-}) => {
-
-  const [paymentMethod, setPaymentMethod] = useState(null);
-
-  const isDownpayment = paymentOption === "downpayment";
-
-const pickupAmount = isDownpayment ? refundableDeposit : 0;
-
-const [cardDetails, setCardDetails] = useState({
-  number: "",
-  expiry: "",
-  cvc: "",
-  name: "",
-});
-
-const isCardInvalid =
-  paymentMethod === "card" &&
-  (!cardDetails.number ||
-    !cardDetails.expiry ||
-    !cardDetails.cvc ||
-    !cardDetails.name);
+    onNavigateToSignIn,
+    onNavigateToVehicles,
+    onNavigateToRegister,
+    onNavigateToAbout,
+    onNavigateToBookingHistory,
+    onNavigateToAccountSettings,
+    isLoggedIn,
+    user,
+    onLogout,
+  }) => {
     
-
-  const {
-    pickupDate,
-    pickupTime,
-    returnDate,
-    returnTime,
-    insuranceType,
-  } = bookingData;
-
-  const INSURANCE_LABELS = {
-  basic: {
-    label: "Basic Coverage",
-    desc: "Free",
-    color: "text-green-600",
-  },
-  standard: {
-    label: "Standard Coverage",
-    desc: "Collision & Theft",
-    color: "text-blue-600",
-  },
-  premium: {
-    label: "Premium Coverage",
-    desc: "Full Coverage + PA + Roadside",
-    color: "text-purple-600",
-  },
-};
-
-const insuranceInfo = INSURANCE_LABELS[insuranceType] || INSURANCE_LABELS.basic;
 
   const [showAI, setShowAI] = useState(false);
   const [userMessage, setUserMessage] = useState("");
@@ -94,7 +34,14 @@ const insuranceInfo = INSURANCE_LABELS[insuranceType] || INSURANCE_LABELS.basic;
   const [isTyping, setIsTyping] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
-  // Format date to: January 13, 2026
+  const {
+  pickupDate,
+  pickupTime,
+  returnDate,
+  returnTime,
+} = bookingData;
+
+// Format date → January 13, 2026
 const formatDate = (dateStr) => {
   if (!dateStr) return "";
   return new Date(dateStr).toLocaleDateString("en-US", {
@@ -104,19 +51,32 @@ const formatDate = (dateStr) => {
   });
 };
 
-// Format time to: 9:00 pm
+// Format time → 9:00 PM
 const formatTime = (timeStr) => {
   if (!timeStr) return "";
   const [hour, minute] = timeStr.split(":");
   const d = new Date();
   d.setHours(hour, minute);
-
   return d.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
 };
+
+if (!vehicle || !bookingData) {
+  return (
+    <div className="pt-40 text-center">
+      <p className="text-gray-500">No payment data found.</p>
+      <button
+        onClick={onNavigateToHome}
+        className="mt-4 px-4 py-2 bg-[#017FE6] text-white rounded"
+      >
+        Go Home
+      </button>
+    </div>
+  );
+}
   
 
   const getInitials = (firstName, lastName) => {
@@ -172,7 +132,7 @@ const formatTime = (timeStr) => {
             <button onClick={onNavigateToHome} className="hover:text-[#017FE6]">Home</button>
             <button onClick={onNavigateToVehicles} className="hover:text-[#017FE6]">Vehicles</button>
             <button onClick={onNavigateToBookingHistory} className="hover:text-[#017FE6]">Booking History</button>
-            <button onClick={onNavigateToAbout} className="hover:text-[#017FE6]">About</button>
+            <button onClick={onNavigateToAbout} className="text-[#017FE6] border-b-2 border-[#017FE6]">About</button>
             <a href="#contacts" className="hover:text-[#017FE6]">Contacts</a>
           </div>
 
@@ -324,270 +284,152 @@ const formatTime = (timeStr) => {
                    </div>
       </nav>
 
-      {/* PAGE CONTENT */}
-<div className="pt-24 pb-16 bg-gray-50">
-  <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {/* MAIN CONTENT */}
+<div className="pt-24 px-6 pb-16 flex justify-center">
+  <div className="w-full max-w-5xl">
 
-    {/* LEFT — BOOKING SUMMARY */}
-    <div className="space-y-6">
+    {/* SUCCESS HEADER */}
+    <div className="flex flex-col items-center text-center mb-10">
+      <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mb-4">
+        <svg
+          className="w-10 h-10 text-green-600"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
 
-      <h2 className="text-xl font-semibold">Booking Summary</h2>
+      <h1 className="text-3xl font-bold text-green-600">
+        Payment Successful
+      </h1>
+      <p className="text-gray-500 mt-2">
+        Your Booking has been successfully <span className="font-semibold">Confirmed</span>
+      </p>
+    </div>
 
-      {/* VEHICLE CARD */}
-      <div className="bg-white rounded-xl shadow p-5">
+    {/* CONTENT GRID */}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-7">
+
+      {/* BOOKING DETAILS */}
+      <div className="md:col-span-2 bg-white rounded-xl shadow p-9">
+        <div className="flex justify-between items-center mb-4">
+          <span className="bg-gray-200 text-sm px-4 py-1 rounded-full font-medium">
+            Booking Details
+          </span>
+          <span className="text-sm text-gray-500 font-semibold">
+            BKID-2026
+          </span>
+        </div>
+
         <div className="flex gap-5">
           <img
             src={vehicle?.image || "/car-placeholder.png"}
             alt={vehicle?.name}
-            className="w-48 h-30 object-cover rounded-xl"
+            className="w-48 h-auto object-contain"
           />
 
-          <div>
-            <h3 className="font-semibold text-xl">{vehicle?.name}</h3>
-            <p className="text-l text-gray-500">
-              {vehicle?.category}
+          <div className="flex-1">
+            <h2 className="text-xl font-bold">{vehicle?.name}</h2>
+            <p className="text-gray-500 text-sm mb-4">
+            {vehicle?.brand} • {vehicle?.category}
             </p>
+            <div className="space-y-1 text-sm text-gray-600">
+              <p className="text-gray-500">
+            <span className="font-medium text-gray-700">Pickup:</span>{" "}
+            {formatDate(pickupDate)} | {formatTime(pickupTime)}
+            </p>
+
+              <p className="text-gray-500">
+                <span className="font-medium text-gray-700">Return:</span>{" "}
+                {formatDate(returnDate)} | {formatTime(returnTime)}
+             </p>
+            </div>
           </div>
         </div>
 
-        <div className="mt-5 space-y-3 text-sm">
-          <p className="text-gray-500">
-          <span className="font-medium text-gray-700">Pickup:</span>{" "}
-          {formatDate(pickupDate)} | {formatTime(pickupTime)}
-        </p>
+        <div className="border-t mt-5 pt-4 flex justify-between items-start">
+  <div>
+    <p className="text-l text-[#017FE6] font-medium">Amount Paid</p>
 
-        <p className="text-gray-500">
-          <span className="font-medium text-gray-700">Return:</span>{" "}
-          {formatDate(returnDate)} | {formatTime(returnTime)}
-        </p>
+    {paymentOption === "downpayment" && (
+      <p className="text-xs text-gray-400 mt-1">
+        • Refundable Deposit of ₱{refundableDeposit?.toLocaleString()} will be
+        collected upon vehicle pickup
+      </p>
+    )}
+  </div>
 
-          <div className={`flex items-center gap-2 ${insuranceInfo.color}`}>
-            <ShieldCheck size={16} />
-            <span>
-              {insuranceInfo.label}
-              {insuranceType === "basic"
-                ? " (Free)"
-                : ` (₱${(insuranceTotal / days).toLocaleString()} / day)`}
+  <div className="text-xl font-bold text-[#017FE6]">
+    ₱{payableNow?.toLocaleString()}
+  </div>
+</div>
+      </div>
+
+      {/* PAYMENT SUMMARY */}
+      <div className="bg-white rounded-xl shadow p-6">
+        <h3 className="font-semibold mb-4">Payment Summary</h3>
+
+        <div className="flex items-center gap-2 mb-5">
+          <img
+            src={
+                paymentMethod === "gcash"
+                ? "/gcash.png"
+                : paymentMethod === "paymaya"
+                ? "/paymaya.png"
+                : "/card.png"
+            }
+            className="h-6"
+            />
+
+            <span className="font-medium capitalize">
+            {paymentMethod}
+            </span>
+        </div>
+
+        <div className="space-y-3 text-sm text-gray-600">
+          <div className="flex justify-between">
+            <span>Paid Via:</span>
+            <span className="font-medium">PMYNT ID-2026</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span>Date:</span>
+            <span className="font-medium">
+              January 12, 2026 | 10:30 pm
             </span>
           </div>
         </div>
 
-        <div className="mt-4 flex justify-between items-center border-t pt-4">
-          <span className="font-medium">Total Price:</span>
-          <span className="text-[#017FE6] font-semibold text-lg">
-            ₱{(vehicleTotal + insuranceTotal).toLocaleString()}
-          </span>
-        </div>
-      </div>
-
-      {/* PAYMENT BREAKDOWN */}
-      <div className="bg-white rounded-xl shadow p-5">
-        <h3 className="font-semibold mb-4">Payment Breakdown</h3>
-
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="text-gray-500">Vehicle Rental</span>
-            <span>₱{vehicleTotal.toLocaleString()}</span>
-          </div>
-
-          <div className="flex justify-between">
-          <span className="text-gray-500">
-            Insurance ({insuranceInfo.label})
-          </span>
-          <span>₱{insuranceTotal.toLocaleString()}</span>
-        </div>
-
-        <div className="flex justify-between">
-          <span className="text-gray-500">Refundable Deposit</span>
-          <span>₱{refundableDeposit.toLocaleString()}</span>
-        </div>
-      </div>
-
-        <div className="mt-4 border-t pt-4 flex justify-between items-center text-[#017FE6]">
-          <span className="font-semibold">
-            {paymentOption === "downpayment"
-              ? "Downpayment (Pay Now)"
-              : "Full Payment (Pay Now)"}
-          </span>
-
-          <span className="text-[#017FE6] font-semibold text-lg">
-            ₱{payableNow.toLocaleString()}
-          </span>
-        </div>
-
-          {isDownpayment && (
-  <div className="flex justify-between text-sm text-gray-600 mt-2">
-    <span>Refundable Deposit (Pay on Pickup)</span>
-    <span>₱{refundableDeposit.toLocaleString()}</span>
-  </div>
-)}
-        </div>
-      </div>
-
-    {/* RIGHT — PAYMENT METHOD */}
-<div className="space-y-6 lg:mt-[42px]">
-
-  <div className="bg-white rounded-xl shadow p-5 space-y-6">
-        <p className="text-sm font-semibold text-gray-700">
-          Choose Online Method
-        </p>
-
-        <label className="flex items-center gap-3 cursor-pointer">
-        <input
-          type="radio"
-          name="method"
-          checked={paymentMethod === "gcash"}
-          onChange={() => setPaymentMethod("gcash")}
-        />
-        <img
-          src="/gcash.png"
-          alt="GCash"
-          className="w-6 h-6 object-contain"
-        />
-        <span className="font-medium">GCash</span>
-      </label>
-
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="radio"
-            name="method"
-            checked={paymentMethod === "paymaya"}
-            onChange={() => setPaymentMethod("paymaya")}
-          />
-          <img
-            src="/paymaya.png"
-            alt="PayMaya"
-            className="w-6 h-6 object-contain"
-          />
-          <span className="font-medium">PayMaya</span>
-        </label>
-
-       <label className="flex items-center gap-3 cursor-pointer">
-        <input
-          type="radio"
-          name="method"
-          checked={paymentMethod === "card"}
-          onChange={() => setPaymentMethod("card")}
-        />
-        <CreditCard size={20} className="text-gray-700" />
-        <span className="font-medium">Credit / Debit Card</span>
-      </label>
-
-        {paymentMethod === "card" && (
-        <div className="mt-4 space-y-4">
-          
-          {/* CARD NUMBER */}
-          <div>
-            <label className="text-sm text-gray-600">Card Number</label>
-            <input
-              type="text"
-              placeholder="1234 5678 9012 3456"
-              value={cardDetails.number}
-              onChange={(e) =>
-                setCardDetails({ ...cardDetails, number: e.target.value })
-              }
-              className="w-full mt-1 border rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#017FE6]"
-            />
-          </div>
-
-          {/* EXPIRY + CVC */}
-          <div className="flex gap-4">
-            <div className="w-1/2">
-              <label className="text-sm text-gray-600">MM / YY</label>
-              <input
-                type="text"
-                placeholder="MM / YY"
-                value={cardDetails.expiry}
-                onChange={(e) =>
-                  setCardDetails({ ...cardDetails, expiry: e.target.value })
-                }
-                className="w-full mt-1 border rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#017FE6]"
-              />
-            </div>
-
-            <div className="w-1/2 relative">
-              <label className="text-sm text-gray-600">CVC</label>
-              <input
-                type="text"
-                placeholder="CVC"
-                value={cardDetails.cvc}
-                onChange={(e) =>
-                  setCardDetails({ ...cardDetails, cvc: e.target.value })
-                }
-                className="w-full mt-1 border rounded-xl px-4 py-3 pr-10 focus:ring-2 focus:ring-[#017FE6]"
-              />
-              <CreditCard
-                size={18}
-                className="absolute right-3 top-[42px] text-gray-400"
-              />
-            </div>
-          </div>
-
-          {/* CARDHOLDER NAME */}
-          <div>
-            <label className="text-sm text-gray-600">Cardholder Name</label>
-            <input
-              type="text"
-              placeholder="Full Name"
-              value={cardDetails.name}
-              onChange={(e) =>
-                setCardDetails({ ...cardDetails, name: e.target.value })
-              }
-              className="w-full mt-1 border rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#017FE6]"
-            />
-          </div>
-        </div>
-      )}
-          
-        {/* BACK BUTTON */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        
-        {/* BACK BUTTON */}
         <button
-          onClick={onBack}
-          className="w-full border border-gray-300 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-100"
+          onClick={onNavigateToBookingHistory}
+          className="mt-6 w-full bg-[#017FE6] text-white py-3 rounded-lg hover:bg-[#0165B8] transition"
         >
-          ← Back
+          Booking History
         </button>
 
-        {/* PAY / CONFIRM BUTTON */}
         <button
-        disabled={!paymentMethod || isCardInvalid}
-        onClick={() =>
-          onPay({
-            vehicle,
-            bookingData,
-            days,
-            insuranceTotal,
-            vehicleTotal,
-            refundableDeposit,
-            paymentOption,                // "downpayment" | "fullpayment"
-            paymentMethod,                // gcash | paymaya | card
-            payableNow,                   // online paid amount
-            payableOnPickup: pickupAmount // deposit if downpayment
-          })
-        }
-        className={`w-full py-3 rounded-xl text-lg font-semibold transition ${
-          !paymentMethod || isCardInvalid
-            ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-            : "bg-[#017FE6] hover:bg-[#0165B8] text-white"
-        }`}
-      >
-        Pay ₱{payableNow.toLocaleString()}
-      </button>
+          onClick={onNavigateToHome}
+          className="mt-3 w-full border py-3 rounded-lg hover:bg-gray-50 transition"
+        >
+          Back to Home
+        </button>
       </div>
+    </div>
 
-      </div>
-      <p className="text-sm text-gray-500 flex items-center justify-center gap-2 mt-2">
-        <Lock size={14} className="text-[#017FE6]" />
-        <span>
-          Secure payment powered by
-          <span className="font-medium text-[#017FE6]"> RentifyPro</span>
-        </span>
-      </p>
-    </div>  
-  </div>   
-</div>   
+    {/* PENDING APPROVAL */}
+    <div className="mt-6 bg-green-100 border border-green-200 rounded-lg px-6 py-4 text-sm text-green-700 flex items-center gap-3">
+      <Check size={18} className="text-green-600 flex-shrink-0" />
+      <span>
+        <strong>Pending Approval:</strong> Your booking has been successfully submitted and is currently under review.
+         You will be notified once approval is completed.
+      </span>
+    </div>
+
+  </div>
+</div>
 
         {showAI && (
     <div className="
@@ -689,4 +531,4 @@ const formatTime = (timeStr) => {
   );
 };
 
-export default PaymentPage;
+export default PaymentComplete;
