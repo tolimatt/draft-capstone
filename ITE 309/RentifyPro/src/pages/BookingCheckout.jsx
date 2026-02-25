@@ -13,6 +13,7 @@
      onNavigateToAbout,
      onNavigateToBookingHistory,
      onNavigateToAccountSettings,
+     onNavigateToPayment,
      isLoggedIn,
      user,
      onLogout,
@@ -177,8 +178,17 @@ const payableOnPickup =
 
   setShowFormError(false);
 
-  // ✅ dito ka mag-navigate or submit
-  console.log("FORM VALID — PROCEED");
+  onNavigateToPayment({
+    vehicle,
+    bookingData,
+    days,
+    payableNow,
+    payableOnPickup,
+    insuranceTotal,
+    vehicleTotal,
+    refundableDeposit,
+    paymentOption,
+  });
 };
 
 const handleBack = () => {
@@ -753,11 +763,11 @@ const handleBack = () => {
 
   {/* CONTINUE BUTTON */}
   <button
-    onClick={handleContinue}
-    className="w-full bg-[#017FE6] text-white py-3 rounded-lg font-semibold hover:bg-[#0165B8]"
-  >
-    Continue
-  </button>
+  onClick={handleContinue}
+  className="w-full bg-[#017FE6] text-white py-3 rounded-lg font-semibold hover:bg-[#0165B8]"
+>
+  Continue
+</button>
 </div>
   </div>
 </div>

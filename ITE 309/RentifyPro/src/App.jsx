@@ -14,6 +14,7 @@ import ProceedVehicleOwner from "./pages/ProceedVehicleOwner";
 import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
 import RegisterOwnerPage from "./pages/RegisterOwnerPage";
 import BookingCheckout from "./pages/BookingCheckout";
+import PaymentPage from "./pages/PaymentPage";
 
 
 //OWNER UI
@@ -81,6 +82,13 @@ const days =
         )
       )
     : 1;
+
+const [paymentPayload, setPaymentPayload] = useState(null);
+
+const goToPayment = (payload) => {
+  setPaymentPayload(payload);
+  setCurrentPage("payment"); 
+};
 
   return (
     <>
@@ -240,25 +248,27 @@ const days =
     )}
 
 
-     {currentPage === "checkout" && selectedVehicle && (
+    {currentPage === "checkout" && selectedVehicle && (
   <BookingCheckout
     vehicle={selectedVehicle}
     days={days}
-    bookingData={bookingData}   // ✅ ADD THIS
-    setBookingData={setBookingData} // ✅ ADD THIS
-    /* NAVIGATION */
+    bookingData={bookingData}
+    setBookingData={setBookingData}
+
     onNavigateToHome={() => setCurrentPage("home")}
     onNavigateToSignIn={() => setCurrentPage("signin")}
     onNavigateToVehicles={() => {
       setBookingData(getDefaultBookingData());
       setCurrentPage("vehicles");
     }}
+
+    onNavigateToPayment={goToPayment}
+
     onNavigateToRegister={() => setCurrentPage("register")}
     onNavigateToAbout={() => setCurrentPage("about")}
     onNavigateToBookingHistory={() => setCurrentPage("signin")}
     onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
 
-    /* AUTH */
     isLoggedIn={isLoggedIn}
     user={user}
     onLogout={() => {
@@ -272,6 +282,36 @@ const days =
 )}
 
 
+{currentPage === "payment" && paymentPayload && (
+  <PaymentPage
+    {...paymentPayload}
+
+    onNavigateToHome={() => setCurrentPage("home")}
+    onNavigateToVehicles={() => {
+      setBookingData(getDefaultBookingData());
+      setCurrentPage("vehicles");
+    }}
+    onNavigateToAbout={() => setCurrentPage("about")}
+    onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+
+    isLoggedIn={isLoggedIn}
+    user={user}
+
+    onLogout={() => {
+      setIsLoggedIn(false);
+      setUser(null);
+      localStorage.removeItem("isVehicleOwner");
+      localStorage.removeItem("activeRole");
+      setCurrentPage("home");
+    }}
+
+    onBack={() => setCurrentPage("checkout")}
+    onPay={(method) => {
+      console.log("PAYMENT METHOD:", method);
+      setCurrentPage("booking-history");
+    }}
+  />
+)}
     {/* REGISTER */}
     {currentPage === "register" && (
       <RegisterPage
