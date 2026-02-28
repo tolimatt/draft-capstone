@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Bot, Bell, MessageCircle, Settings, Car, Check} from "lucide-react";
+import { Bot, Bell, MessageCircle, Settings, Car, Check, ArrowLeftRight} from "lucide-react";
 
   const PaymentComplete = ({
     vehicle,
@@ -22,6 +22,8 @@ import { Bot, Bell, MessageCircle, Settings, Car, Check} from "lucide-react";
     onNavigateToAbout,
     onNavigateToBookingHistory,
     onNavigateToAccountSettings,
+    onSwitchToOwner,
+    
     isLoggedIn,
     user,
     onLogout,
@@ -33,6 +35,31 @@ import { Bot, Bell, MessageCircle, Settings, Car, Check} from "lucide-react";
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+   const [isVehicleOwner, setIsVehicleOwner] = useState(
+             localStorage.getItem("isVehicleOwner") === "true"
+           );
+           
+           // Sync when login state changes
+           useEffect(() => {
+             if (!isLoggedIn) {
+               setIsVehicleOwner(false);
+             } else {
+               setIsVehicleOwner(localStorage.getItem("isVehicleOwner") === "true");
+             }
+           }, [isLoggedIn]);
+           
+           // Sync across tabs
+           useEffect(() => {
+             const syncOwnerStatus = () => {
+               setIsVehicleOwner(
+                 isLoggedIn && localStorage.getItem("isVehicleOwner") === "true"
+               );
+             };
+           
+             window.addEventListener("storage", syncOwnerStatus);
+             return () => window.removeEventListener("storage", syncOwnerStatus);
+           }, [isLoggedIn]);
 
   const {
   pickupDate,
@@ -132,7 +159,7 @@ if (!vehicle || !bookingData) {
             <button onClick={onNavigateToHome} className="hover:text-[#017FE6]">Home</button>
             <button onClick={onNavigateToVehicles} className="hover:text-[#017FE6]">Vehicles</button>
             <button onClick={onNavigateToBookingHistory} className="hover:text-[#017FE6]">Booking History</button>
-            <button onClick={onNavigateToAbout} className="text-[#017FE6] border-b-2 border-[#017FE6]">About</button>
+            <button onClick={onNavigateToAbout} className="hover:text-[#017FE6]">About</button>
             <a href="#contacts" className="hover:text-[#017FE6]">Contacts</a>
           </div>
 
@@ -269,6 +296,20 @@ if (!vehicle || !bookingData) {
                      >
                        <Car size={18} /> My Bookings
                      </button>
+
+                      {isVehicleOwner && (
+                       <button
+                         onClick={() => {
+                         localStorage.setItem("activeRole", "owner");
+                         setShowProfileMenu(false);
+                           onSwitchToOwner();}}
+                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition border-t">
+                          <ArrowLeftRight size={18} className="text-[#017FE6]" />
+                          <span className="text-[#017FE6] font-medium">
+                           Switch to Owner
+                          </span>
+                        </button>
+                      )}
              
                      <button onClick={onLogout} 
                      className="w-full px-4 py-3 text-red-500 hover:bg-red-50"> ⎋ Sign Out 

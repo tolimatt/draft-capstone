@@ -203,6 +203,8 @@ const [completedPayment, setCompletedPayment] = useState(null);
           setSelectedVehicle(vehicle);
           setCurrentPage("vehicle-details");
         }}
+
+        
         onLogout={() => {
           setIsLoggedIn(false);
           setUser(null);
@@ -224,7 +226,13 @@ const [completedPayment, setCompletedPayment] = useState(null);
   setSelectedVehicle(vehicle);
   setCurrentPage("checkout");
 }}
+
+  onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
       />
+      
     )}
 
     {/* VEHICLE DETAILS */}
@@ -241,6 +249,12 @@ const [completedPayment, setCompletedPayment] = useState(null);
         onContinueToCheckout={() => setCurrentPage("checkout")}
         onNavigateToAbout={() => setCurrentPage("about")}
         onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+
+         onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
+
         onLogout={() => {
           setIsLoggedIn(false);
           setUser(null);
@@ -273,6 +287,11 @@ const [completedPayment, setCompletedPayment] = useState(null);
     onNavigateToBookingHistory={() => setCurrentPage("signin")}
     onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
 
+    onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
+
     isLoggedIn={isLoggedIn}
     user={user}
     onLogout={() => {
@@ -300,6 +319,11 @@ const [completedPayment, setCompletedPayment] = useState(null);
 
     isLoggedIn={isLoggedIn}
     user={user}
+
+    onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
 
     onLogout={() => {
       setIsLoggedIn(false);
@@ -338,6 +362,11 @@ const [completedPayment, setCompletedPayment] = useState(null);
 
     isLoggedIn={isLoggedIn}
     user={user}
+
+    onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
 
     onLogout={() => {
       setIsLoggedIn(false);
@@ -402,6 +431,12 @@ const [completedPayment, setCompletedPayment] = useState(null);
         onNavigateToRegister={() => setCurrentPage("register")}
         onNavigateToAbout={() => setCurrentPage("about")}
         onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+
+        onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
+
        onLogout={() => {
         setIsLoggedIn(false);
         setUser(null);
@@ -424,6 +459,12 @@ const [completedPayment, setCompletedPayment] = useState(null);
         onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
         onNavigateToVehicleOwnerProceed={() => setCurrentPage("vehicle-owner-proceed")}
         onNavigateToAbout={() => setCurrentPage("about")}
+
+        onSwitchToOwner={() => {
+      setIsOwnerLoggedIn(true);
+      setCurrentPage("owner-dashboard");
+    }}
+    
         onLogout={() => {
       setIsLoggedIn(false);
       setUser(null);

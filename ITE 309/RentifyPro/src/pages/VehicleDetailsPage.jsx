@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Bot, Users, Settings, Fuel, Car, Wallet, Receipt, Camera, Bell, MessageCircle, BadgeCheck } from "lucide-react";
+import { Bot, Users, Settings, Fuel, Car, Wallet, Receipt, Camera, Bell, MessageCircle, BadgeCheck,  ArrowLeftRight } from "lucide-react";
 import VehicleOwnerProfilePage from "./VehicleOwnerProfilePage";
 
 const VehicleDetailsPage = ({
@@ -14,6 +14,7 @@ vehicle,
   onNavigateToBookingHistory,
   onNavigateToAbout,
   onNavigateToAccountSettings,
+  onSwitchToOwner,
   isLoggedIn,
   user,
   onLogout,
@@ -27,6 +28,31 @@ vehicle,
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [showReviewsModal, setShowReviewsModal] = useState(false);
     const [sortOption, setSortOption] = useState("recent");
+
+    const [isVehicleOwner, setIsVehicleOwner] = useState(
+      localStorage.getItem("isVehicleOwner") === "true"
+    );
+    
+    // Sync when login state changes
+    useEffect(() => {
+      if (!isLoggedIn) {
+        setIsVehicleOwner(false);
+      } else {
+        setIsVehicleOwner(localStorage.getItem("isVehicleOwner") === "true");
+      }
+    }, [isLoggedIn]);
+    
+    // Sync across tabs
+    useEffect(() => {
+      const syncOwnerStatus = () => {
+        setIsVehicleOwner(
+          isLoggedIn && localStorage.getItem("isVehicleOwner") === "true"
+        );
+      };
+    
+      window.addEventListener("storage", syncOwnerStatus);
+      return () => window.removeEventListener("storage", syncOwnerStatus);
+    }, [isLoggedIn]);
     
     const today = new Date().toISOString().split("T")[0];
 
@@ -381,6 +407,22 @@ const getMinReturnDate = (pickupDate) => {
               className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition">
               <Car size={18} /> My Bookings
             </button>
+
+            {isVehicleOwner && (
+          <button
+            onClick={() => {
+              localStorage.setItem("activeRole", "owner");
+              setShowProfileMenu(false);
+              onSwitchToOwner();
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition border-t"
+          >
+            <ArrowLeftRight size={18} className="text-[#017FE6]" />
+            <span className="text-[#017FE6] font-medium">
+              Switch to Owner
+            </span>
+          </button>
+        )}
     
             <button
               onClick={onLogout}

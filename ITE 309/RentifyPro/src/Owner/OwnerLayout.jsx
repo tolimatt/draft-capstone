@@ -17,6 +17,10 @@ import Notifications from "./pages/Notifications";
 export default function OwnerLayout() {
   const [activePage, setActivePage] = useState("Dashboard");
 
+  const handleAddVehicle = () => {
+  window.dispatchEvent(new Event("open-add-vehicle"));
+};
+
   return (
     <div className="flex h-screen bg-gray-100">
       
@@ -38,6 +42,9 @@ export default function OwnerLayout() {
         onSwitchToUser={() => {
           window.dispatchEvent(new Event("switch-to-user"));
         }}
+
+          showAddVehicle={activePage === "Vehicles"}
+          onAddVehicle={handleAddVehicle}
       />
 
         {/* PAGE CONTENT */}

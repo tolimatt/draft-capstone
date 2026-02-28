@@ -102,18 +102,18 @@ const ForgotPasswordOTP = ({ email, onVerified, onNavigateToForgotPassword }) =>
         )}
 
      {/* RESEND (SAME AS REGISTER OTP) */}
-{timer > 0 ? (
-  <p className="text-xs text-gray-400 mb-4">
-    Resend code in {timer}s
-  </p>
-) : (
-  <button
-    onClick={handleResend}
-    className="text-sm text-[#017FE6] font-semibold mb-4"
-  >
-    Resend Code
-  </button>
-)}
+      {timer > 0 ? (
+        <p className="text-xs text-gray-400 mb-4">
+          Resend code in {timer}s
+        </p>
+      ) : (
+        <button
+          onClick={handleResend}
+          className="text-sm text-[#017FE6] font-semibold mb-4"
+        >
+          Resend Code
+        </button>
+      )}
 
 
         {/* VERIFY BUTTON */}

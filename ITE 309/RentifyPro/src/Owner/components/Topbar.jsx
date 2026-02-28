@@ -5,16 +5,15 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 
-export default function Topbar({ title, onSwitchToUser, canSwitchToUser }) {
+export default function Topbar({
+  title,
+  onSwitchToUser,
+  canSwitchToUser,
+  showAddVehicle,
+  onAddVehicle,
+}) {
   return (
-    <header
-  className="sticky top-0 z-40 bg-[#017FE6] border-b border-white/20"
-      style={{
-        background: "#017FE6",
-        borderBottom: "1px solid rgba(255,255,255,0.20)",
-      }}
-    >
-      {/* MATCH SIDEBAR HEIGHT */}
+    <header className="sticky top-0 z-40 bg-[#017FE6] border-b border-white/20">
       <div className="h-20 px-6 flex items-center justify-between gap-6">
 
         {/* LEFT */}
@@ -65,46 +64,38 @@ export default function Topbar({ title, onSwitchToUser, canSwitchToUser }) {
 
           {/* SWITCH TO USER */}
           {canSwitchToUser && (
-  <button
-    onClick={onSwitchToUser}
-    className="
-      h-10 px-4 rounded-xl
-      bg-white/15 border border-white/20
-      text-white text-sm font-semibold
-      hover:bg-white/25 transition
-      flex items-center gap-2
-    "
-  >
-    <ArrowLeftRight size={16} />
-    Switch to User
-  </button>
-)}
+            <button
+              onClick={onSwitchToUser}
+              className="
+                h-10 px-4 rounded-xl
+                bg-white/15 border border-white/20
+                text-white text-sm font-semibold
+                hover:bg-white/25 transition
+                flex items-center gap-2
+              "
+            >
+              <ArrowLeftRight size={16} />
+              Switch to User
+            </button>
+          )}
 
-
-          {/* ADD VEHICLE */}
-          <button
-            onClick={() => {
-              window.dispatchEvent(
-                new CustomEvent("navigate", { detail: "Vehicles" })
-              );
-              setTimeout(() => {
-                window.dispatchEvent(new Event("open-add-vehicle"));
-              }, 0);
-            }}
-            className="
-              h-10 px-4 rounded-xl
-              bg-white text-[#017FE6]
-              font-semibold
-              hover:bg-white/90 transition
-              flex items-center gap-2
-            "
-            style={{
-              boxShadow: "0 10px 22px rgba(0,0,0,0.18)",
-            }}
-          >
-            <Plus size={18} />
-            Add Vehicle
-          </button>
+          {/* ADD VEHICLE — ONLY WHEN VEHICLES TAB */}
+          {showAddVehicle && (
+            <button
+              onClick={onAddVehicle}
+              className="
+                h-10 px-4 rounded-xl
+                bg-white text-[#017FE6]
+                font-semibold
+                hover:bg-white/90 transition
+                flex items-center gap-2
+              "
+              style={{ boxShadow: "0 10px 22px rgba(0,0,0,0.18)" }}
+            >
+              <Plus size={18} />
+              Add Vehicle
+            </button>
+          )}
         </div>
       </div>
     </header>

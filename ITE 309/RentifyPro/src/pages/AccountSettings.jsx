@@ -13,7 +13,36 @@ import {
   Shield,
   Camera,
   MessageCircle as ChatIcon,
+  ArrowLeftRight,
 } from "lucide-react";
+
+import ChangePassword from "./ChangePassword";
+import NotificationSettings from "./NotificationSettings";
+import VerificationSettings from "./VerificationSettings";
+import ActivityLogs from "./ActivityLogs";
+
+  const headerMap = {
+  "Profile Settings": {
+    title: "Account Settings",
+    description: "Manage your personal information and account preferences",
+  },
+  "Change Password": {
+    title: "Change Password",
+    description: "Update your account password securely",
+  },
+  "Notifications Settings": {
+    title: "Notification Settings",
+    description: "Choose how you want to receive notifications",
+  },
+  "Verification": {
+    title: "Account Verification",
+    description: "View the status of your identity verification submitted during registration",
+  },
+  "Activity Logs": {
+    title: "Activity Logs",
+    description: "Review recent login history and security activity",
+  },
+};
 
 const InputField = React.memo(function InputField({
   label,
@@ -48,6 +77,7 @@ const RadioGroupField = React.memo(function RadioGroupField({
   options,
   name,
 }) {
+
   return (
     <div className="mt-1">
       <label className="text-xs text-gray-500 block mb-2">{label}</label>
@@ -118,6 +148,7 @@ const AccountSettings = ({
   onNavigateToBookingHistory,
   onNavigateToAccountSettings,
   onNavigateToVehicleOwnerProceed,
+  onSwitchToOwner,
   isLoggedIn,
   user,
   onLogout,
@@ -131,6 +162,17 @@ const AccountSettings = ({
   const [showPhotoMenu, setShowPhotoMenu] = useState(false);
   const [showVerifiedModal, setShowVerifiedModal] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
+  const [isVehicleOwner, setIsVehicleOwner] = useState(false);
+  
+
+  useEffect(() => {
+  if (!user?.email) return;
+
+  const users = JSON.parse(localStorage.getItem("users")) || [];
+  const currentUser = users.find(u => u.email === user.email);
+
+  setIsVehicleOwner(!!currentUser?.isVehicleOwner);
+}, [user]);
 
   // PSGC lists
   const [regions, setRegions] = useState([]);
@@ -552,6 +594,22 @@ useEffect(() => {
                       <Car size={18} /> My Bookings
                     </button>
 
+                    {isVehicleOwner && (
+                      <button
+                        onClick={() => {
+                          localStorage.setItem("activeRole", "owner");
+                          setShowProfileMenu(false);
+                          onSwitchToOwner();
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition border-t"
+                      >
+                        <ArrowLeftRight size={18} className="text-[#017FE6]" />
+                        <span className="text-[#017FE6] font-medium">
+                          Switch to Owner
+                        </span>
+                      </button>
+                    )}
+
                     <button
                       onClick={onLogout}
                       className="w-full px-4 py-3 text-red-500 hover:bg-red-50"
@@ -577,7 +635,7 @@ useEffect(() => {
                 { label: "Change Password", icon: Lock },
                 { label: "Notifications Settings", icon: BellRing },
                 { label: "Verification", icon: ShieldCheck },
-                { label: "Login Activity", icon: Shield },
+                { label: "Activity Logs", icon: Shield },
               ].map(({ label, icon: Icon }) => (
                 <button
                   key={label}
@@ -595,45 +653,54 @@ useEffect(() => {
             </div>
 
             <div className="bg-white rounded-xl shadow p-5 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-[#E6F2FF] flex items-center justify-center">
-                  <Car size={18} className="text-[#017FE6]" />
-                </div>
 
-                <h4 className="font-semibold text-m text-gray-900 leading-none">
-                  Become a Vehicle Owner
-                </h4>
-              </div>
+  <div className="flex items-center gap-3">
+    <div className="w-9 h-9 rounded-lg bg-[#E6F2FF] flex items-center justify-center">
+      <Car size={18} className="text-[#017FE6]" />
+    </div>
 
-              <p className="text-sm text-gray-500 leading-relaxed">
-                List your vehicles and earn money by renting them to verified users.
-              </p>
+    <h4 className="font-semibold text-m text-gray-900 leading-none">
+      {isVehicleOwner ? "Vehicle Owner Mode" : "Become a Vehicle Owner"}
+    </h4>
+  </div>
 
-              <p className="text-sm text-gray-500">
-                Start building your rental fleet today.
-              </p>
+  <p className="text-sm text-gray-500 leading-relaxed">
+    {isVehicleOwner
+      ? "You are verified as a vehicle owner. Manage your listings and bookings."
+      : "List your vehicles and earn money by renting them to verified users."}
+  </p>
 
-              <button
-                onClick={() => onNavigateToVehicleOwnerProceed()}
-                className="w-full bg-[#017FE6] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#0165B8] transition"
-              >
-                Register as Vehicle Owner
-              </button>
+  <button
+    onClick={() => {
+      if (isVehicleOwner) {
+        localStorage.setItem("activeRole", "owner");
+        onNavigateToHome(); // or owner dashboard
+      } else {
+        onNavigateToVehicleOwnerProceed();
+      }
+    }}
+    className="w-full bg-[#017FE6] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#0165B8] transition"
+  >
+    {isVehicleOwner ? "Switch to Owner" : "Register as Vehicle Owner"}
+  </button>
 
-            </div>
+</div>
           </aside>
 
           {/* RIGHT CONTENT */}
           <main className="flex-1 space-y-8 pb-24">
             <div className="pb-6 mb-6 border-b">
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                Account Settings
+                {headerMap[activeTab]?.title}
               </h1>
+
               <p className="text-base text-gray-500 max-w-xl">
-                Manage your personal information and account preferences
+                {headerMap[activeTab]?.description}
               </p>
             </div>
 
+            {activeTab === "Profile Settings" && (
+              <>
             {/* HEADER CARD */}
             <div className="bg-white rounded-xl shadow p-6 flex items-center gap-4">
               <div className="relative">
@@ -692,21 +759,21 @@ useEffect(() => {
 
               <div>
                 <h2 className="text-xl font-semibold flex items-center gap-2">
-  {user?.name}
-  {isVerified && (
-    <BadgeCheck size={18} className="text-[#017FE6]" />
-  )}
-</h2>
+                  {user?.name}
+                  {isVerified && (
+                    <BadgeCheck size={18} className="text-[#017FE6]" />
+                  )}
+                </h2>
 
                 <p className="text-m text-gray-500">{user?.email}</p>
 
                 <span
-  className={`text-sm font-medium ${
-    isVerified ? "text-[#017FE6]" : "text-red-500"
-  }`}
->
-  {isVerified? "Verified User" : "Unverified User"}
-</span>
+              className={`text-sm font-medium ${
+                isVerified ? "text-[#017FE6]" : "text-red-500"
+              }`}
+            >
+              {isVerified? "Verified User" : "Unverified User"}
+            </span>
               </div>
             </div>
 
@@ -944,8 +1011,30 @@ useEffect(() => {
 
                 <div className="grid grid-cols-2 gap-4">{section.content}</div>
               </div>
+              
             ))}
-          </main>
+              </>
+            )}
+
+            {/* CHANGE PASSWORD */}
+            {activeTab === "Change Password" && (
+              <ChangePassword user={user} />
+            )}
+
+            {/* NOTIFICATION SETTINGS */}
+            {activeTab === "Notifications Settings" && (
+            <NotificationSettings user={user} />
+          )}
+
+          {activeTab === "Verification" && (
+          <VerificationSettings user={user} />
+        )}
+
+        {activeTab === "Activity Logs" && (
+        <ActivityLogs user={user} />
+      )}
+                  
+          </main>  
         </div>
       </div>
 
