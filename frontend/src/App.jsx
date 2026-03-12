@@ -22,6 +22,7 @@ import RegisterOTP from "./verification/RegisterOTP";
 import ForgotPasswordEmail from "./verification/ForgotPasswordEmail";
 import ForgotPasswordOTP from "./verification/ForgotPasswordOTP";
 import ResetPassword from "./verification/ResetPassword";
+import AdminAccountPage from "./pages/AdminAccountPage";
 
 // Owner pages
 import OwnerLayout from "./owner/OwnerLayout";
@@ -41,6 +42,7 @@ const ROUTE_TO_PAGE = {
   "/chat": "realtime-chat",
   "/notifications": "notifications",
   "/account-settings": "account-settings",
+  "/admin-account": "admin-account",
 };
 
 const PAGE_TO_ROUTE = Object.entries(ROUTE_TO_PAGE).reduce((map, [route, page]) => {
@@ -158,8 +160,13 @@ const App = () => {
       setUser(hydratedUser);
 
       const isOwner = storedUser.role === "owner";
+      const isAdmin = storedUser.role === "admin";
       const ownerMode = localStorage.getItem("isNewOwner") === "true";
-      if (isOwner && ownerMode) {
+      if (isAdmin) {
+        setIsOwnerLoggedIn(false);
+        setIsLoggedIn(true);
+        setCurrentPage("admin-account");
+      } else if (isOwner && ownerMode) {
         setIsOwnerLoggedIn(true);
         setIsLoggedIn(false);
         setCurrentPage("owner-dashboard");
@@ -427,6 +434,11 @@ const App = () => {
               setIsLoggedIn(false);
               localStorage.setItem("isNewOwner", "true");
               setCurrentPage("owner-dashboard");
+            } else if (userData?.role === "admin") {
+              setIsLoggedIn(true);
+              setIsOwnerLoggedIn(false);
+              localStorage.removeItem("isNewOwner");
+              setCurrentPage("admin-account");
             } else {
               setIsLoggedIn(true);
               setIsOwnerLoggedIn(false);
@@ -688,6 +700,10 @@ const App = () => {
 
       {/* owner dashboard */}
       {currentPage === "owner-dashboard" && isOwnerLoggedIn && <OwnerLayout />}
+
+      {currentPage === "admin-account" && isLoggedIn && user?.role === "admin" && (
+        <AdminAccountPage user={user} onLogout={requestLogout} />
+      )}
     </>
   );
 };

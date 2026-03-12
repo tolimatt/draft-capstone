@@ -6,6 +6,7 @@ import AuthShell from "./AuthShell";
 import { SIGN_IN_VALIDATION_RULES } from "../data/signInValidation";
 import API from "../utils/api";
 import { normalizeOwnerProfile, persistOwnerProfile } from "../owner/utils/ownerProfile";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_USER } from "../data/adminAccount";
 
 // Delay between submit attempts
 const SUBMIT_COOLDOWN_MS = 2000;
@@ -52,6 +53,20 @@ export default function SignInPage({
     setSuccessMessage("");
 
     try {
+      if (form.email === ADMIN_EMAIL && form.password === ADMIN_PASSWORD) {
+        localStorage.removeItem("token");
+        localStorage.setItem("user", JSON.stringify(ADMIN_USER));
+        setSuccessMessage("Admin login successful! Redirecting to your dashboard...");
+
+        setTimeout(() => {
+          onLoginSuccess({
+            ...ADMIN_USER,
+            initials: "SC",
+          });
+        }, 1200);
+        return;
+      }
+
       const response = await API.login({
         email: form.email,
         password: form.password,
