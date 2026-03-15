@@ -20,6 +20,12 @@ const chatMessageSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    vehicle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Vehicle",
+      default: null,
+      index: true,
+    },
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -51,6 +57,8 @@ const chatMessageSchema = new mongoose.Schema(
 );
 
 chatMessageSchema.index({ owner: 1, renter: 1, createdAt: -1 });
+chatMessageSchema.index({ owner: 1, renter: 1, vehicle: 1, createdAt: -1 });
+chatMessageSchema.index({ owner: 1, renter: 1, booking: 1, createdAt: -1 });
 chatMessageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
 
 export default mongoose.model("ChatMessage", chatMessageSchema);

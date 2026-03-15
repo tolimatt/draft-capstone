@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import sendEmail from "../utils/sendEmail.js";
 import { getMissingPreKycDocs, clearPreKycDocs } from "../utils/preKycDocs.js";
 import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
+import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
 
 const OTP_TTL_MINUTES = 5;
 const RESEND_COOLDOWN_SECONDS = 45;
@@ -16,7 +17,7 @@ const ALLOWED_EMAIL_DOMAINS = new Set([
 const ALLOWED_OWNER_TYPES = new Set(["individual", "business"]);
 const MAX_NAME_LENGTH = 50;
 const MAX_EMAIL_LENGTH = 254;
-const MAX_PHONE_LENGTH = 11;
+const MAX_PHONE_LENGTH = 10;
 const MAX_ADDRESS_LENGTH = 255;
 const MAX_REGION_LENGTH = 50;
 const MAX_BUSINESS_NAME = 120;
@@ -24,7 +25,7 @@ const MAX_PERMIT_NUMBER = 50;
 const MAX_LICENSE_NUMBER = 50;
 
 const normalizeEmail = (email = "") => email.toLowerCase().trim();
-const normalizePhone = (phone = "") => String(phone || "").trim();
+const normalizePhone = (phone = "") => normalizePhilippineMobile(phone);
 
 const buildDuplicateKeyMessage = (error) => {
   const duplicateField = Object.keys(error?.keyPattern || error?.keyValue || {})[0];
@@ -71,8 +72,10 @@ export const requestOwnerOtp = async (req, res) => {
     if (normalizedPhone.length > MAX_PHONE_LENGTH) {
       return res.status(400).json({ message: `Phone number is too long (max ${MAX_PHONE_LENGTH} digits).` });
     }
-    if (!/^[0-9]{11}$/.test(normalizedPhone)) {
-      return res.status(400).json({ message: "Phone number must be exactly 11 digits." });
+    if (!isValidPhilippineMobile(normalizedPhone)) {
+      return res
+        .status(400)
+        .json({ message: "Phone number must be exactly 10 digits and start with 9." });
     }
     if (address && address.length > MAX_ADDRESS_LENGTH) {
       return res.status(400).json({ message: `Address is too long (max ${MAX_ADDRESS_LENGTH} characters).` });
@@ -195,7 +198,7 @@ export const requestOwnerOtp = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    await sendEmail(email, otp);
+    await sendEmail(email, otp, "owner_register");
 
     return res.status(200).json({
       message: "OTP sent to email.",
@@ -236,7 +239,7 @@ export const resendOwnerOtp = async (req, res) => {
     otpDoc.lastSentAt = new Date();
     await otpDoc.save();
 
-    await sendEmail(email, otp);
+    await sendEmail(email, otp, "owner_register");
 
     return res.status(200).json({
       message: "OTP resent.",

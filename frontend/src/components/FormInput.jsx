@@ -32,6 +32,7 @@ export default function FormInput({
   maxLength,
   inputRef,
   iconPosition = "right",
+  prefixText = "",
 }) {
   const [showEmailSuggestions, setShowEmailSuggestions] = useState(false);
   const [savedEmails, setSavedEmails] = useState([]);
@@ -103,6 +104,7 @@ export default function FormInput({
 
   const hasLeftIcon = Boolean(Icon) && !isDateInput && iconPosition === "left";
   const hasRightIcon = Boolean(Icon) && (isDateInput || iconPosition !== "left");
+  const hasPrefix = Boolean(prefixText);
 
   return (
     <div className="space-y-2">
@@ -160,6 +162,8 @@ export default function FormInput({
           } ${
             hasLeftIcon ? "pl-12" : ""
           } ${
+            hasPrefix ? "pl-16" : ""
+          } ${
             isDateInput
               ? "appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:pointer-events-none"
               : ""
@@ -169,6 +173,12 @@ export default function FormInput({
               : "border-slate-200 hover:border-slate-300 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
           } ${disabled ? "cursor-not-allowed bg-slate-100 text-slate-500" : ""}`}
         />
+
+        {hasPrefix && (
+          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500">
+            {prefixText}
+          </span>
+        )}
 
         {showEmailSuggestions &&
           showEmailHint &&

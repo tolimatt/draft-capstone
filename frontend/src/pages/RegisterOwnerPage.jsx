@@ -44,6 +44,7 @@ const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const EMOJI_REGEX =
   /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
+const PH_LOCAL_MOBILE_REGEX = /^9\d{9}$/;
 
 const normalizeNameInput = (value = "") => {
   let nextValue = String(value);
@@ -57,6 +58,13 @@ const normalizeNameInput = (value = "") => {
     nextValue = `${before} ${after}`;
   }
   return nextValue;
+};
+
+const normalizePhMobileInput = (value = "") => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (!digits.startsWith("9")) return "";
+  return digits.slice(0, 10);
 };
 
 const initialForm = {
@@ -322,9 +330,15 @@ export default function RegisterOwnerPage({
 
   const handleChange = useCallback((e) => {
     const { name, value, type, checked } = e.target;
+    const normalizedPhone = name === "phone" ? normalizePhMobileInput(value) : value;
     setForm((prev) => ({
       ...prev,
-      [name]: name === "businessEmail" ? value.toLowerCase().trim() : type === "checkbox" ? checked : value,
+      [name]:
+        name === "businessEmail"
+          ? value.toLowerCase().trim()
+          : type === "checkbox"
+            ? checked
+            : normalizedPhone,
     }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
     if (name === "businessEmail") {
@@ -419,8 +433,9 @@ export default function RegisterOwnerPage({
     }
 
     if (!form.phone.trim()) next.phone = "Phone number is required.";
-    else if (!/^[0-9]{11}$/.test(form.phone)) next.phone = "Phone number must be exactly 11 digits.";
-    else if (form.phone.length > 11) next.phone = "Phone number is too long (max 11 digits).";
+    else if (!PH_LOCAL_MOBILE_REGEX.test(form.phone))
+      next.phone = "Phone number must be exactly 10 digits and start with 9.";
+    else if (form.phone.length > 10) next.phone = "Phone number is too long (max 10 digits).";
 
     if (!form.region) next.region = "Region is required.";
     if (provinces.length > 0 && !form.province) next.province = "Province is required.";
@@ -732,9 +747,10 @@ export default function RegisterOwnerPage({
         permitNumber: canShowBusinessFields ? form.permitNumber : "",
       });
 
+      const registeredEmail = String(response?.user?.email || form.businessEmail || "").trim().toLowerCase();
       setSuccessMessage(response?.message || "Registration successful. Redirecting to OTP verification...");
-      await API.sendOTP(form.businessEmail).catch(() => {});
-      setTimeout(() => onNavigateToRegisterOTP(form.businessEmail, form.phone, fullName), 1200);
+      await API.sendOTP(registeredEmail).catch(() => {});
+      setTimeout(() => onNavigateToRegisterOTP(registeredEmail, form.phone, fullName), 1200);
     } catch (error) {
       const lower = (error?.message || "").toLowerCase();
       const raw = error?.message || "";
@@ -877,9 +893,10 @@ export default function RegisterOwnerPage({
                   disabled={isLoading}
                   onlyNumbers
                   icon={Phone}
-                  placeholder="Enter Phone Number"
-                  helper="Enter Phone Number"
-                  maxLength={11}
+                  placeholder="9XXXXXXXXX"
+                  helper="Enter your 10-digit mobile number."
+                  maxLength={10}
+                  prefixText="+63"
                 />
               </div>
 
@@ -1240,6 +1257,7 @@ function Field({
   placeholder = "",
   helper = "",
   maxLength,
+  prefixText = "",
 }) {
   const handleInputChange = (e) => {
     let nextValue = e.target.value;
@@ -1255,6 +1273,11 @@ function Field({
       </label>
       {helper ? <p className="text-xs text-gray-500">{helper}</p> : null}
       <div className="relative">
+        {prefixText ? (
+          <span className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-gray-500">
+            {prefixText}
+          </span>
+        ) : null}
         <input
           type={type}
           name={name}
@@ -1263,7 +1286,7 @@ function Field({
           disabled={disabled}
           placeholder={placeholder}
           maxLength={maxLength}
-          className={`w-full h-11 rounded-xl border px-4 text-[15px] placeholder:text-gray-400 outline-none shadow-sm transition ${Icon ? "pr-11" : ""} ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
+          className={`relative z-0 w-full h-11 rounded-xl border px-4 text-[15px] placeholder:text-gray-400 outline-none shadow-sm transition ${Icon ? "pr-11" : ""} ${prefixText ? "pl-14" : ""} ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
         />
         {Icon && <Icon size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500" />}
       </div>

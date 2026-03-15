@@ -32,14 +32,19 @@ import notificationRoutes from "./routes/notification.routes.js";
 import { initSocket } from "./socket/index.js";
 import { warmupFaceService } from "./utils/faceServiceManager.js";
 import { warmupChatbotService } from "./utils/chatbotServiceManager.js";
+import { createOriginChecker } from "./utils/corsOrigins.js";
 
 const app = express();
-connectDB();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendUploadsDir = path.resolve(__dirname, "uploads");
 const cwdUploadsDir = path.resolve(process.cwd(), "uploads");
 const chatbotUrl = process.env.CHATBOT_URL || "http://localhost:8001";
+const { isAllowedOrigin, allowedOrigins, allowVercelPreviewOrigins } = createOriginChecker();
+const corsOriginHandler = (origin, callback) => {
+  if (isAllowedOrigin(origin)) return callback(null, true);
+  return callback(new Error(`Origin ${origin || "(unknown)"} is not allowed by CORS`));
+};
 const allowCrossOriginUploads = (_req, res, next) => {
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   next();
@@ -50,19 +55,15 @@ app.use(securityHeaders);
 
 // CORS
 app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-    "http://localhost:5173",
-    process.env.FRONTEND_URL,
-  ].filter(Boolean),
+  origin: corsOriginHandler,
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization", "x-internal-key"],
   maxAge: 86400,
 }));
+console.log(
+  `CORS allowlist loaded (${allowedOrigins.length} exact origins, preview wildcard enabled: ${allowVercelPreviewOrigins}).`
+);
 
 // Body parsing
 app.use(express.json({ limit: "100mb" }));
@@ -137,6 +138,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 const httpServer = http.createServer(app);
 initSocket(httpServer);
+let server = null;
 
 httpServer.on("error", (error) => {
   if (error?.code === "EADDRINUSE") {
@@ -147,7 +149,10 @@ httpServer.on("error", (error) => {
   throw error;
 });
 
-const server = httpServer.listen(PORT, () => {
+const startServer = async () => {
+  await connectDB();
+
+  server = httpServer.listen(PORT, () => {
   console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   console.log(`  RentifyPro API v2.0`);
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -160,16 +165,30 @@ const server = httpServer.listen(PORT, () => {
   console.log(`  Security:     helmet, rate-limit, nosql-sanitize, xss, hpp`);
   console.log(`  Logs:         ./logs/audit-YYYY-MM-DD.log`);
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+  });
+};
+
+startServer().catch((error) => {
+  console.error("Failed to start server:", error?.message || error);
+  process.exit(1);
 });
 
 // Clean shutdown
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled Rejection:", err);
+  if (!server) {
+    process.exit(1);
+    return;
+  }
   server.close(() => process.exit(1));
 });
 
 process.on("SIGTERM", () => {
   console.log("SIGTERM received: closing server");
+  if (!server) {
+    process.exit(0);
+    return;
+  }
   server.close(() => process.exit(0));
 });
 

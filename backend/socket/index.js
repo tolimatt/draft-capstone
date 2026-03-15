@@ -1,8 +1,10 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { createOriginChecker } from "../utils/corsOrigins.js";
 
 let ioInstance = null;
+const { isAllowedOrigin } = createOriginChecker();
 
 const getTokenFromCookieHeader = (cookieHeader = "") => {
   if (!cookieHeader) return "";
@@ -27,14 +29,10 @@ const getTokenFromCookieHeader = (cookieHeader = "") => {
 export const initSocket = (httpServer) => {
   ioInstance = new Server(httpServer, {
     cors: {
-      origin: [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://localhost:5173",
-        process.env.FRONTEND_URL,
-      ].filter(Boolean),
+      origin: (origin, callback) => {
+        if (isAllowedOrigin(origin)) return callback(null, true);
+        return callback(new Error(`Origin ${origin || "(unknown)"} is not allowed by Socket CORS`), false);
+      },
       credentials: true,
     },
   });

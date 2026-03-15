@@ -15,14 +15,40 @@ import Profile from "./pages/Profile";
 import API from "../utils/api";
 import { normalizeOwnerProfile, persistOwnerProfile } from "./utils/ownerProfile";
 
+const OWNER_ACTIVE_PAGE_STORAGE_KEY = "rentifypro:owner-active-page";
+const OWNER_PAGES = new Set([
+  "Dashboard",
+  "Vehicles",
+  "Bookings",
+  "Messages",
+  "Notifications",
+  "Reviews",
+  "Earnings",
+  "Analytics",
+  "Blockchain",
+  "Settings",
+  "Profile",
+]);
+
+const normalizeOwnerPage = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized || !OWNER_PAGES.has(normalized)) return "Dashboard";
+  return normalized;
+};
+
 export default function OwnerLayout() {
-  const [activePage, setActivePage] = useState("Dashboard");
+  const [activePage, setActivePage] = useState(() => {
+    const tabFromUrl = new URLSearchParams(window.location.search).get("tab");
+    if (tabFromUrl) return normalizeOwnerPage(tabFromUrl);
+    const tabFromStorage = sessionStorage.getItem(OWNER_ACTIVE_PAGE_STORAGE_KEY);
+    return normalizeOwnerPage(tabFromStorage);
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     const handler = (event) => {
       const page = event?.detail;
-      if (typeof page === "string") setActivePage(page);
+      if (typeof page === "string") setActivePage(normalizeOwnerPage(page));
     };
     window.addEventListener("navigate", handler);
     return () => window.removeEventListener("navigate", handler);
@@ -63,6 +89,21 @@ export default function OwnerLayout() {
 
   useEffect(() => {
     setIsSidebarOpen(false);
+  }, [activePage]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(OWNER_ACTIVE_PAGE_STORAGE_KEY, activePage);
+    } catch {
+      // Ignore storage errors.
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tab") === activePage) return;
+    params.set("tab", activePage);
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
   }, [activePage]);
 
   return (

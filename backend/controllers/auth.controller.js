@@ -13,13 +13,13 @@ import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { isValidWalletAddress, normalizeAddress } from "../utils/blockchainBooking.js";
 import { getMissingPreKycDocs, clearPreKycDocs } from "../utils/preKycDocs.js";
 import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
+import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const PASSWORD_RESET_TOKEN_EXPIRE = process.env.PASSWORD_RESET_TOKEN_EXPIRE || "15m";
 const PASSWORD_RESET_TOKEN_SECRET = process.env.PASSWORD_RESET_TOKEN_SECRET || process.env.JWT_SECRET;
 const tokenBlacklist = new Set();
 const MIN_RENTER_AGE = 18;
-const PHONE_REGEX = /^[0-9]{11}$/;
 const LOGIN_CHALLENGE_TTL_MINUTES = Number(process.env.LOGIN_CHALLENGE_TTL_MINUTES || 180);
 const LOGIN_CHALLENGE_MAX_ATTEMPTS = Number(process.env.LOGIN_CHALLENGE_MAX_ATTEMPTS || 5);
 const CLEAR_PREKYC_ON_REGISTER =
@@ -357,7 +357,8 @@ export const registerUser = async (req, res) => {
     }
 
     const normalizedEmail = normalizeEmail(email);
-    const normalizedPhone = toText(phone);
+    const hasPhone = Object.prototype.hasOwnProperty.call(req.body, "phone");
+    const normalizedPhone = normalizePhilippineMobile(phone);
     const requestedRole = role === "owner" ? "owner" : "user";
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
@@ -365,6 +366,13 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "This email is already registered.",
+      });
+    }
+
+    if (hasPhone && !normalizedPhone) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number must be exactly 10 digits and start with 9.",
       });
     }
 
@@ -439,7 +447,7 @@ export const registerUser = async (req, res) => {
       city: toText(city) || undefined,
       barangay: toText(barangay) || undefined,
       emergencyContactName: toText(emergencyContactName) || undefined,
-      emergencyContactPhone: toText(emergencyContactPhone) || undefined,
+      emergencyContactPhone: normalizePhilippineMobile(emergencyContactPhone) || undefined,
       emergencyContactRelationship: toText(emergencyContactRelationship) || undefined,
     });
 
@@ -637,11 +645,12 @@ export const sendOTP = async (req, res) => {
       });
     }
 
+    const recipientEmail = normalizeEmail(user.email);
     const otp = createOtpCode();
-    await createOtpRecord({ email: normalizedEmail, otp, purpose: "verification" });
-    await sendEmail(normalizedEmail, otp);
+    await createOtpRecord({ email: recipientEmail, otp, purpose: "verification" });
+    await sendEmail(recipientEmail, otp, "verification");
 
-    auditLog.info("AUTH", `Verification OTP sent to: ${normalizedEmail}`);
+    auditLog.info("AUTH", `Verification OTP sent to: ${recipientEmail}`);
 
     res.json({
       success: true,
@@ -742,11 +751,12 @@ export const forgotPassword = async (req, res) => {
       });
     }
 
+    const recipientEmail = normalizeEmail(user.email);
     const otp = createOtpCode();
-    await createOtpRecord({ email: normalizedEmail, otp, purpose: "password_reset" });
-    await sendEmail(normalizedEmail, otp);
+    await createOtpRecord({ email: recipientEmail, otp, purpose: "password_reset" });
+    await sendEmail(recipientEmail, otp, "password_reset");
 
-    auditLog.info("AUTH", `Password reset OTP sent to: ${normalizedEmail}`);
+    auditLog.info("AUTH", `Password reset OTP sent to: ${recipientEmail}`);
 
     res.json({
       success: true,
@@ -1116,26 +1126,42 @@ export const updateProfile = async (req, res) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "phone")) {
-      const phone = toText(req.body.phone);
-      if (phone && !PHONE_REGEX.test(phone)) {
+      const phone = normalizePhilippineMobile(req.body.phone);
+      if (!phone) {
         return res.status(400).json({
           success: false,
-          message: "Phone number must be exactly 11 digits.",
+          message: "Phone number must be exactly 10 digits and start with 9.",
         });
       }
 
-      if (phone) {
-        const existingPhone = await User.findOne({
-          phone,
-          _id: { $ne: user._id },
-        }).select("_id");
+      const existingPhone = await User.findOne({
+        phone,
+        _id: { $ne: user._id },
+      }).select("_id");
 
-        if (existingPhone) {
-          return res.status(409).json({
+      if (existingPhone) {
+        return res.status(409).json({
+          success: false,
+          message: "This phone number is already registered.",
+        });
+      }
+
+      req.body.phone = phone;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "emergencyContactPhone")) {
+      const emergencyContactPhone = toText(req.body.emergencyContactPhone);
+      if (emergencyContactPhone) {
+        const normalizedEmergencyContactPhone = normalizePhilippineMobile(emergencyContactPhone);
+        if (!isValidPhilippineMobile(normalizedEmergencyContactPhone)) {
+          return res.status(400).json({
             success: false,
-            message: "This phone number is already registered.",
+            message: "Emergency contact phone must be exactly 10 digits and start with 9.",
           });
         }
+        req.body.emergencyContactPhone = normalizedEmergencyContactPhone;
+      } else {
+        req.body.emergencyContactPhone = "";
       }
     }
 

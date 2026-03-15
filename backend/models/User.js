@@ -1,6 +1,7 @@
 // User model for regular users and owners
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
+import { normalizePhilippineMobile } from "../utils/phone.js";
 
 const userSchema = new mongoose.Schema(
   {
@@ -65,7 +66,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       set: (value) => {
-        const normalized = String(value || "").trim();
+        const normalized = normalizePhilippineMobile(value);
         return normalized || undefined;
       },
     },
@@ -81,7 +82,14 @@ const userSchema = new mongoose.Schema(
     city: { type: String },
     barangay: { type: String },
     emergencyContactName: { type: String },
-    emergencyContactPhone: { type: String },
+    emergencyContactPhone: {
+      type: String,
+      trim: true,
+      set: (value) => {
+        const normalized = normalizePhilippineMobile(value);
+        return normalized || undefined;
+      },
+    },
     emergencyContactRelationship: { type: String },
   },
   { timestamps: true }

@@ -20,6 +20,7 @@ const formatDateTime = (value) =>
     : "-";
 const appendUniqueMessage = (list, message) =>
   list.some((item) => item._id === message._id) ? list : [...list, message];
+
 const normalizePartner = (partner = {}) => {
   const name = formatDisplayName(partner?.name || "", "");
   const email = String(partner?.email || "").trim();
@@ -31,9 +32,41 @@ const normalizePartner = (partner = {}) => {
   };
 };
 
+const normalizeChatContext = (context = {}) => ({
+  bookingId: String(context?.bookingId || "").trim(),
+  vehicleId: String(context?.vehicleId || "").trim(),
+});
+
+const normalizeInitialPartner = (context = {}) => {
+  const partnerId = String(context?.partnerId || context?.userId || "").trim();
+  if (!partnerId) return null;
+
+  return normalizePartner({
+    _id: partnerId,
+    name: context?.partnerName,
+    email: context?.partnerEmail,
+    avatar: context?.partnerAvatar,
+  });
+};
+
+const messageMatchesContext = (message, context = {}) => {
+  const bookingId = String(context?.bookingId || "").trim();
+  const vehicleId = String(context?.vehicleId || "").trim();
+  if (!bookingId && !vehicleId) return true;
+
+  const messageBookingId = getId(message?.booking);
+  const messageVehicleId = getId(message?.vehicle);
+
+  if (bookingId) return messageBookingId === bookingId;
+  if (vehicleId) return messageVehicleId === vehicleId && !messageBookingId;
+  return true;
+};
+
 export default function RealtimeChatPage({
   isLoggedIn,
   user,
+  initialChatContext,
+  onChatContextHandled,
   onNavigateToHome,
   onNavigateToSignIn,
   onNavigateToRegister,
@@ -50,6 +83,7 @@ export default function RealtimeChatPage({
 
   const [conversations, setConversations] = useState([]);
   const [activePartnerId, setActivePartnerId] = useState("");
+  const [activeChatContext, setActiveChatContext] = useState({ bookingId: "", vehicleId: "" });
   const [messages, setMessages] = useState([]);
   const [messageText, setMessageText] = useState("");
   const [loadingConversations, setLoadingConversations] = useState(false);
@@ -61,15 +95,31 @@ export default function RealtimeChatPage({
     [conversations, activePartnerId]
   );
 
+  const mergeInitialPartnerConversation = (list = []) => {
+    const initialPartner = normalizeInitialPartner(initialChatContext);
+    if (!initialPartner?._id) return list;
+    if (list.some((conversation) => getId(conversation.partner) === initialPartner._id)) return list;
+    return [
+      {
+        partner: initialPartner,
+        lastMessage: null,
+        unreadCount: 0,
+      },
+      ...list,
+    ];
+  };
+
   const loadConversations = async () => {
     setLoadingConversations(true);
     setError("");
     try {
       const response = await API.getConversations();
-      const nextConversations = (response.conversations || []).map((conversation) => ({
-        ...conversation,
-        partner: normalizePartner(conversation.partner),
-      }));
+      const nextConversations = mergeInitialPartnerConversation(
+        (response.conversations || []).map((conversation) => ({
+          ...conversation,
+          partner: normalizePartner(conversation.partner),
+        }))
+      );
       setConversations(nextConversations);
       setActivePartnerId((prevId) => prevId || getId(nextConversations[0]?.partner));
       requestLiveCountersRefresh();
@@ -80,15 +130,16 @@ export default function RealtimeChatPage({
     }
   };
 
-  const loadMessages = async (partnerId) => {
+  const loadMessages = async (partnerId, context = {}) => {
     if (!partnerId) return;
 
     setLoadingMessages(true);
     setError("");
     try {
-      const response = await API.getMessagesWithUser(partnerId);
+      const normalizedContext = normalizeChatContext(context);
+      const response = await API.getMessagesWithUser(partnerId, normalizedContext);
       setMessages(response.messages || []);
-      await API.markMessagesAsRead(partnerId);
+      await API.markMessagesAsRead(partnerId, normalizedContext);
       setConversations((prev) =>
         prev.map((conversation) =>
           getId(conversation.partner) === partnerId ? { ...conversation, unreadCount: 0 } : conversation
@@ -107,8 +158,18 @@ export default function RealtimeChatPage({
   }, []);
 
   useEffect(() => {
-    loadMessages(activePartnerId);
-  }, [activePartnerId]);
+    const initialPartner = normalizeInitialPartner(initialChatContext);
+    if (!initialPartner?._id) return;
+
+    setConversations((prev) => mergeInitialPartnerConversation(prev));
+    setActivePartnerId(initialPartner._id);
+    setActiveChatContext(normalizeChatContext(initialChatContext));
+    onChatContextHandled?.();
+  }, [initialChatContext, onChatContextHandled]);
+
+  useEffect(() => {
+    loadMessages(activePartnerId, activeChatContext);
+  }, [activePartnerId, activeChatContext.bookingId, activeChatContext.vehicleId]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -116,7 +177,6 @@ export default function RealtimeChatPage({
 
     const handleIncomingMessage = (message) => {
       const senderId = getId(message.sender);
-      const receiverId = getId(message.receiver);
       const isOutgoing = senderId === String(currentUserId);
       const partner = isOutgoing ? message.receiver : message.sender;
       const partnerId = getId(partner);
@@ -140,6 +200,8 @@ export default function RealtimeChatPage({
             text: message.text,
             sender: message.sender,
             receiver: message.receiver,
+            booking: message.booking || null,
+            vehicle: message.vehicle || null,
             createdAt: message.createdAt,
           },
           unreadCount:
@@ -152,13 +214,16 @@ export default function RealtimeChatPage({
         return [nextConversation, ...rest];
       });
 
-      if ([senderId, receiverId].includes(activePartnerId)) {
-        setMessages((prev) => appendUniqueMessage(prev, message));
-        if (!isOutgoing && activePartnerId === partnerId) {
-          API.markMessagesAsRead(partnerId)
-            .then(() => requestLiveCountersRefresh())
-            .catch(() => {});
-        }
+      if (activePartnerId !== partnerId || !messageMatchesContext(message, activeChatContext)) {
+        return;
+      }
+
+      setMessages((prev) => appendUniqueMessage(prev, message));
+
+      if (!isOutgoing) {
+        API.markMessagesAsRead(partnerId, activeChatContext)
+          .then(() => requestLiveCountersRefresh())
+          .catch(() => {});
       }
     };
 
@@ -166,15 +231,21 @@ export default function RealtimeChatPage({
     return () => {
       socket.off("chat:message", handleIncomingMessage);
     };
-  }, [activePartnerId, currentUserId]);
+  }, [activePartnerId, activeChatContext, currentUserId]);
 
   const sendMessage = async () => {
     const text = messageText.trim();
     if (!activePartnerId || !text) return;
 
     try {
-      const response = await API.sendMessageToUser(activePartnerId, { text });
-      setMessages((prev) => appendUniqueMessage(prev, response.message));
+      const contextPayload = normalizeChatContext(activeChatContext);
+      const response = await API.sendMessageToUser(activePartnerId, {
+        text,
+        ...contextPayload,
+      });
+      if (messageMatchesContext(response.message, contextPayload)) {
+        setMessages((prev) => appendUniqueMessage(prev, response.message));
+      }
       setMessageText("");
       loadConversations();
     } catch (err) {
@@ -224,7 +295,10 @@ export default function RealtimeChatPage({
                 return (
                   <button
                     key={partnerId}
-                    onClick={() => setActivePartnerId(partnerId)}
+                    onClick={() => {
+                      setActivePartnerId(partnerId);
+                      setActiveChatContext({ bookingId: "", vehicleId: "" });
+                    }}
                     className={`w-full text-left px-4 py-3 border-b hover:bg-gray-100 ${
                       activePartnerId === partnerId ? "bg-gray-100" : ""
                     }`}
@@ -326,10 +400,6 @@ export default function RealtimeChatPage({
 function AvatarCircle({ name, avatar, sizeClass = "w-8 h-8" }) {
   const image = String(avatar || "").trim();
   const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [image]);
 
   if (image && !failed) {
     return (

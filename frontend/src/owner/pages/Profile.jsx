@@ -17,17 +17,31 @@ import {
 import { connectMetaMaskWallet, getEthereumProvider } from "../../blockchain/metamask";
 import { shortAddress } from "../../blockchain/config";
 
-const InputField = ({ label, value, onChange, disabled }) => (
+const normalizePhMobileInput = (value = "") => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (!digits.startsWith("9")) return "";
+  return digits.slice(0, 10);
+};
+
+const InputField = ({ label, value, onChange, disabled, prefixText = "" }) => (
   <div>
     <label className="text-xs text-gray-500">{label}</label>
-    <input
-      value={value}
-      onChange={onChange}
-      disabled={disabled}
-      className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm ${
-        disabled ? "bg-gray-100" : "bg-white"
-      }`}
-    />
+    <div className="relative">
+      {prefixText ? (
+        <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-gray-500">
+          {prefixText}
+        </span>
+      ) : null}
+      <input
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className={`relative z-0 w-full mt-1 border rounded-lg px-3 py-2 text-sm ${
+          disabled ? "bg-gray-100" : "bg-white"
+        } ${prefixText ? "pl-14" : ""}`}
+      />
+    </div>
   </div>
 );
 
@@ -352,7 +366,10 @@ export default function Profile() {
           label="Phone"
           value={profile.phone}
           disabled={!editing}
-          onChange={(event) => setProfile((prev) => ({ ...prev, phone: event.target.value }))}
+          onChange={(event) =>
+            setProfile((prev) => ({ ...prev, phone: normalizePhMobileInput(event.target.value) }))
+          }
+          prefixText="+63"
         />
       </Section>
 

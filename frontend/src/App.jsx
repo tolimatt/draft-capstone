@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentTime, getTodayDate, getTomorrowDate } from "./utils/dateUtils";
 
 // Main pages
@@ -9,6 +9,7 @@ import VehicleDetailsPage from "./pages/VehicleDetailsPage";
 import BookingsPage from "./pages/BookingsPage";
 import RealtimeChatPage from "./pages/RealtimeChatPage";
 import NotificationsPage from "./pages/NotificationsPage";
+import AboutPage from "./pages/AboutPage";
 import AccountSettings from "./pages/AccountSettings";
 import ProceedVehicleOwner from "./pages/ProceedVehicleOwner";
 import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
@@ -28,6 +29,7 @@ import OwnerLayout from "./owner/OwnerLayout";
 
 // Shared parts
 import LogoutModal from "./components/LogoutModal";
+import IdleWarningModal from "./components/IdleWarningModal";
 import { disconnectSocket } from "./utils/socket";
 import API from "./utils/api";
 import {
@@ -41,6 +43,7 @@ import {
 const ROUTE_TO_PAGE = {
   "/": "home",
   "/vehicles": "vehicles",
+  "/vehicle-details": "vehicle-details",
   "/about": "about",
   "/bookings": "booking-history",
   "/signin": "signin",
@@ -53,6 +56,8 @@ const ROUTE_TO_PAGE = {
   "/chat": "realtime-chat",
   "/notifications": "notifications",
   "/account-settings": "account-settings",
+  "/vehicle-owner-proceed": "vehicle-owner-proceed",
+  "/vehicle-owner-verification": "vehicle-owner-verification",
   "/owner-dashboard": "owner-dashboard",
 };
 
@@ -62,8 +67,59 @@ const PAGE_TO_ROUTE = Object.entries(ROUTE_TO_PAGE).reduce((map, [route, page]) 
 }, {});
 
 const resolvePageFromPath = (pathname) => {
-  const normalized = String(pathname || "/").toLowerCase();
+  const raw = String(pathname || "/").toLowerCase();
+  const normalized = raw === "/" ? raw : raw.replace(/\/+$/, "");
   return ROUTE_TO_PAGE[normalized] || "home";
+};
+
+const getVehicleIdFromSearch = (search) => {
+  const params = new URLSearchParams(String(search || ""));
+  return String(params.get("vehicleId") || "").trim();
+};
+
+const getQueryParam = (search, key) => {
+  const params = new URLSearchParams(String(search || ""));
+  return String(params.get(key) || "").trim();
+};
+
+const buildRouteWithQuery = (path, query = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    const normalized = String(value || "").trim();
+    if (normalized) params.set(key, normalized);
+  });
+  const search = params.toString();
+  return search ? `${path}?${search}` : path;
+};
+
+const FLOW_STATE_STORAGE_KEY = "rentifypro:flow-state";
+
+const readFlowState = () => {
+  try {
+    const raw = sessionStorage.getItem(FLOW_STATE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeFlowState = (nextState = {}) => {
+  try {
+    const normalized = Object.entries(nextState).reduce((acc, [key, value]) => {
+      const text = String(value || "").trim();
+      if (text) acc[key] = text;
+      return acc;
+    }, {});
+    if (!Object.keys(normalized).length) {
+      sessionStorage.removeItem(FLOW_STATE_STORAGE_KEY);
+      return;
+    }
+    sessionStorage.setItem(FLOW_STATE_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Ignore storage errors.
+  }
 };
 
 const getInitialsFromName = (name) => {
@@ -73,6 +129,25 @@ const getInitialsFromName = (name) => {
   const first = parts[0]?.charAt(0) || "";
   const last = parts.length > 1 ? parts[parts.length - 1]?.charAt(0) || "" : "";
   return `${first}${last}`.toUpperCase() || "U";
+};
+
+const normalizeChatNavigationContext = (context = null) => {
+  if (!context || typeof context !== "object") return null;
+
+  const partnerId = String(context.partnerId || context.userId || "").trim();
+  if (!partnerId) return null;
+
+  const bookingId = String(context.bookingId || "").trim();
+  const vehicleId = String(context.vehicleId || "").trim();
+
+  return {
+    partnerId,
+    partnerName: String(context.partnerName || "").trim(),
+    partnerEmail: String(context.partnerEmail || "").trim(),
+    partnerAvatar: String(context.partnerAvatar || "").trim(),
+    ...(bookingId ? { bookingId } : {}),
+    ...(vehicleId ? { vehicleId } : {}),
+  };
 };
 
 const LEGACY_AUTH_KEYS = ["token"];
@@ -86,6 +161,9 @@ const AUTH_PAGES = new Set([
   "forgot-otp",
   "reset-password",
 ]);
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const IDLE_WARNING_SECONDS = 60;
+const IDLE_ACTIVITY_EVENTS = ["keydown", "pointerdown", "touchstart", "mousemove", "scroll"];
 
 const hydrateStoredUser = (storedUser = {}) => {
   if (!storedUser || typeof storedUser !== "object") return null;
@@ -120,17 +198,32 @@ const App = () => {
   const [currentPage, setCurrentPage] = useState(() =>
     resolvePageFromPath(window.location.pathname)
   );
+  const initialFlowStateRef = useRef(readFlowState());
+  const initialFlowState = initialFlowStateRef.current;
   const [bookingData, setBookingData] = useState(getDefaultBookingData());
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [pendingScrollTarget, setPendingScrollTarget] = useState("");
+  const [chatNavigationContext, setChatNavigationContext] = useState(null);
 
-  const [registeredEmail, setRegisteredEmail] = useState("");
-  const [registeredPhone, setRegisteredPhone] = useState("");
-  const [registeredName, setRegisteredName] = useState("");
-  const [registerRole, setRegisterRole] = useState("user");
+  const [registeredEmail, setRegisteredEmail] = useState(() =>
+    String(initialFlowState.registeredEmail || "").trim()
+  );
+  const [registeredPhone, setRegisteredPhone] = useState(() =>
+    String(initialFlowState.registeredPhone || "").trim()
+  );
+  const [registeredName, setRegisteredName] = useState(() =>
+    String(initialFlowState.registeredName || "").trim()
+  );
+  const [registerRole, setRegisterRole] = useState(() =>
+    String(initialFlowState.registerRole || "").trim().toLowerCase() === "owner" ? "owner" : "user"
+  );
 
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotResetToken, setForgotResetToken] = useState("");
+  const [forgotEmail, setForgotEmail] = useState(() =>
+    String(initialFlowState.forgotEmail || "").trim()
+  );
+  const [forgotResetToken, setForgotResetToken] = useState(() =>
+    String(initialFlowState.forgotResetToken || "").trim()
+  );
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isOwnerLoggedIn, setIsOwnerLoggedIn] = useState(false);
@@ -139,6 +232,12 @@ const App = () => {
 
   // Logout modal state
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showIdleWarningModal, setShowIdleWarningModal] = useState(false);
+  const [idleCountdownSeconds, setIdleCountdownSeconds] = useState(0);
+  const lastActivityRef = useRef(Date.now());
+  const idleDeadlineRef = useRef(0);
+  const logoutInProgressRef = useRef(false);
+  const idleWarningOpenRef = useRef(false);
 
   useEffect(() => {
     const purgeLegacyStorage = () => {
@@ -236,6 +335,76 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    const selectedVehicleId = String(selectedVehicle?._id || selectedVehicle?.id || "").trim();
+    writeFlowState({
+      selectedVehicleId,
+      registeredEmail,
+      registeredPhone,
+      registeredName,
+      registerRole,
+      forgotEmail,
+      forgotResetToken,
+    });
+  }, [
+    selectedVehicle?._id,
+    selectedVehicle?.id,
+    registeredEmail,
+    registeredPhone,
+    registeredName,
+    registerRole,
+    forgotEmail,
+    forgotResetToken,
+  ]);
+
+  useEffect(() => {
+    const query = window.location.search;
+
+    if (currentPage === "registerotp") {
+      const queryEmail = getQueryParam(query, "email");
+      const queryPhone = getQueryParam(query, "phone");
+      const queryRole = getQueryParam(query, "role").toLowerCase();
+
+      if (queryEmail && queryEmail !== registeredEmail) {
+        setRegisteredEmail(queryEmail);
+      }
+      if (queryPhone && queryPhone !== registeredPhone) {
+        setRegisteredPhone(queryPhone);
+      }
+      if ((queryRole === "owner" || queryRole === "user") && queryRole !== registerRole) {
+        setRegisterRole(queryRole);
+      }
+      if (!queryEmail && !registeredEmail) {
+        setCurrentPage("register");
+      }
+      return;
+    }
+
+    if (currentPage === "forgot-otp" || currentPage === "reset-password") {
+      const queryEmail = getQueryParam(query, "email");
+      if (queryEmail && queryEmail !== forgotEmail) {
+        setForgotEmail(queryEmail);
+      }
+
+      const effectiveEmail = queryEmail || forgotEmail;
+      if (!effectiveEmail) {
+        setCurrentPage("forgot-email");
+        return;
+      }
+
+      if (currentPage === "reset-password" && !forgotResetToken) {
+        setCurrentPage("forgot-otp");
+      }
+    }
+  }, [
+    currentPage,
+    registeredEmail,
+    registeredPhone,
+    registerRole,
+    forgotEmail,
+    forgotResetToken,
+  ]);
+
+  useEffect(() => {
     const handlePopState = () => {
       setCurrentPage(resolvePageFromPath(window.location.pathname));
     };
@@ -245,12 +414,93 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    const targetRoute = PAGE_TO_ROUTE[currentPage];
-    if (!targetRoute) return;
-    if (window.location.pathname === targetRoute) return;
+    const baseRoute = PAGE_TO_ROUTE[currentPage];
+    if (!baseRoute) return;
 
+    const targetRoute = (() => {
+      if (currentPage === "vehicle-details") {
+        const queryVehicleId = getVehicleIdFromSearch(window.location.search);
+        const selectedVehicleId = String(selectedVehicle?._id || selectedVehicle?.id || "").trim();
+        const storedVehicleId = String(readFlowState().selectedVehicleId || "").trim();
+        return buildRouteWithQuery(baseRoute, {
+          vehicleId: queryVehicleId || selectedVehicleId || storedVehicleId,
+        });
+      }
+
+      if (currentPage === "registerotp") {
+        const queryEmail = getQueryParam(window.location.search, "email");
+        const queryPhone = getQueryParam(window.location.search, "phone");
+        const queryRole = getQueryParam(window.location.search, "role");
+        const role = registerRole === "owner" ? "owner" : queryRole === "owner" ? "owner" : "user";
+        return buildRouteWithQuery(baseRoute, {
+          email: registeredEmail || queryEmail,
+          phone: registeredPhone || queryPhone,
+          role,
+        });
+      }
+
+      if (currentPage === "forgot-otp" || currentPage === "reset-password") {
+        const queryEmail = getQueryParam(window.location.search, "email");
+        return buildRouteWithQuery(baseRoute, {
+          email: forgotEmail || queryEmail,
+        });
+      }
+
+      if (currentPage === "owner-dashboard") {
+        const tab = getQueryParam(window.location.search, "tab");
+        return buildRouteWithQuery(baseRoute, { tab });
+      }
+
+      return baseRoute;
+    })();
+
+    const currentRoute = `${window.location.pathname}${window.location.search}`;
+    if (currentRoute === targetRoute) return;
     window.history.pushState({ page: currentPage }, "", targetRoute);
-  }, [currentPage]);
+  }, [
+    currentPage,
+    selectedVehicle?._id,
+    selectedVehicle?.id,
+    registeredEmail,
+    registeredPhone,
+    registerRole,
+    forgotEmail,
+  ]);
+
+  useEffect(() => {
+    if (currentPage !== "vehicle-details") return undefined;
+    const storedVehicleId = String(readFlowState().selectedVehicleId || "").trim();
+    const vehicleIdFromQuery = getVehicleIdFromSearch(window.location.search) || storedVehicleId;
+    const selectedVehicleId = String(selectedVehicle?._id || selectedVehicle?.id || "").trim();
+    if (selectedVehicleId && (!vehicleIdFromQuery || vehicleIdFromQuery === selectedVehicleId)) {
+      return undefined;
+    }
+
+    if (!vehicleIdFromQuery) {
+      setCurrentPage("vehicles");
+      return undefined;
+    }
+
+    let active = true;
+    API.getPublicVehicleById(vehicleIdFromQuery)
+      .then((response) => {
+        if (!active) return;
+        const vehicle = response?.vehicle;
+        if (vehicle && (vehicle._id || vehicle.id)) {
+          setSelectedVehicle(vehicle);
+          return;
+        }
+        setCurrentPage("vehicles");
+      })
+      .catch(() => {
+        if (!active) return;
+        setCurrentPage("vehicles");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentPage, selectedVehicle?._id, selectedVehicle?.id]);
 
   useEffect(() => {
     const switchToUser = () => {
@@ -263,19 +513,20 @@ const App = () => {
     return () => window.removeEventListener("switch-to-user", switchToUser);
   }, []);
 
-  // Open the logout modal
-  const requestLogout = () => {
-    setShowLogoutModal(true);
-  };
+  const performLogout = useCallback(async ({ redirectPage = "home" } = {}) => {
+    if (logoutInProgressRef.current) return;
+    logoutInProgressRef.current = true;
 
-  // Finish logout
-  const confirmLogout = async () => {
-    setShowLogoutModal(false);
     try {
       await API.logout();
     } catch {
       // Local cleanup still runs below.
     }
+
+    setShowLogoutModal(false);
+    setShowIdleWarningModal(false);
+    setIdleCountdownSeconds(0);
+    idleWarningOpenRef.current = false;
     setIsLoggedIn(false);
     setIsOwnerLoggedIn(false);
     setUser(null);
@@ -292,12 +543,107 @@ const App = () => {
       localStorage.removeItem(key);
       sessionStorage.removeItem(key);
     });
-    setCurrentPage("home");
+
+    lastActivityRef.current = Date.now();
+    idleDeadlineRef.current = 0;
+    setSelectedVehicle(null);
+    setRegisteredEmail("");
+    setRegisteredPhone("");
+    setRegisteredName("");
+    setRegisterRole("user");
+    setForgotEmail("");
+    setForgotResetToken("");
+    writeFlowState({});
+    setCurrentPage(redirectPage);
+    logoutInProgressRef.current = false;
+  }, []);
+
+  const keepSessionActive = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    idleDeadlineRef.current = 0;
+    if (idleWarningOpenRef.current) {
+      idleWarningOpenRef.current = false;
+      setShowIdleWarningModal(false);
+      setIdleCountdownSeconds(0);
+    }
+  }, []);
+
+  // Open the logout modal
+  const requestLogout = () => {
+    setShowLogoutModal(true);
+  };
+
+  // Finish logout
+  const confirmLogout = async () => {
+    await performLogout({ redirectPage: "home" });
   };
 
   const cancelLogout = () => {
     setShowLogoutModal(false);
   };
+
+  useEffect(() => {
+    idleWarningOpenRef.current = showIdleWarningModal;
+  }, [showIdleWarningModal]);
+
+  useEffect(() => {
+    const sessionActive = isLoggedIn || isOwnerLoggedIn;
+
+    if (!sessionActive) {
+      setShowIdleWarningModal(false);
+      setIdleCountdownSeconds(0);
+      idleDeadlineRef.current = 0;
+      idleWarningOpenRef.current = false;
+      return undefined;
+    }
+
+    keepSessionActive();
+
+    const markActivity = () => {
+      if (!(isLoggedIn || isOwnerLoggedIn)) return;
+      keepSessionActive();
+    };
+
+    const tickIdleState = () => {
+      if (logoutInProgressRef.current) return;
+
+      const now = Date.now();
+      if (!idleDeadlineRef.current) {
+        const idleMs = now - lastActivityRef.current;
+        const warningWindowMs = IDLE_WARNING_SECONDS * 1000;
+        const warningTriggerMs = Math.max(0, IDLE_TIMEOUT_MS - warningWindowMs);
+        if (idleMs >= warningTriggerMs) {
+          const remainingMsBeforeLogout = Math.max(0, IDLE_TIMEOUT_MS - idleMs);
+          idleDeadlineRef.current = now + remainingMsBeforeLogout;
+          setShowIdleWarningModal(true);
+          idleWarningOpenRef.current = true;
+        } else {
+          return;
+        }
+      }
+
+      const remainingSeconds = Math.max(0, Math.ceil((idleDeadlineRef.current - now) / 1000));
+      setIdleCountdownSeconds(remainingSeconds);
+
+      if (remainingSeconds <= 0) {
+        performLogout({ redirectPage: "signin" });
+      }
+    };
+
+    IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, markActivity, { passive: true });
+    });
+
+    tickIdleState();
+    const idleTimer = window.setInterval(tickIdleState, 1000);
+
+    return () => {
+      window.clearInterval(idleTimer);
+      IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, markActivity);
+      });
+    };
+  }, [isLoggedIn, isOwnerLoggedIn, keepSessionActive, performLogout]);
 
   // Build initials from the full name
   const buildUserData = (name, email, role) => {
@@ -317,13 +663,18 @@ const App = () => {
     setCurrentPage("booking-history");
   };
 
-  const goToRealtimeChat = () => {
+  const goToRealtimeChat = (context = null) => {
     if (!isLoggedIn) {
       setCurrentPage("signin");
       return;
     }
+    setChatNavigationContext(normalizeChatNavigationContext(context));
     setCurrentPage("realtime-chat");
   };
+
+  const clearChatNavigationContext = useCallback(() => {
+    setChatNavigationContext(null);
+  }, []);
 
   const goToNotifications = () => {
     if (!isLoggedIn) {
@@ -355,6 +706,11 @@ const App = () => {
       }
     }
 
+    if (currentPage === "about") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     setPendingScrollTarget("about");
     setCurrentPage("home");
   };
@@ -373,12 +729,6 @@ const App = () => {
     return () => window.clearTimeout(timer);
   }, [currentPage, pendingScrollTarget]);
 
-  useEffect(() => {
-    if (currentPage !== "about") return;
-    setPendingScrollTarget("about");
-    setCurrentPage("home");
-  }, [currentPage]);
-
   if (isSessionBootstrapping) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center text-slate-600 text-sm">
@@ -394,6 +744,14 @@ const App = () => {
         isOpen={showLogoutModal}
         onCancel={cancelLogout}
         onConfirm={confirmLogout}
+      />
+
+      <IdleWarningModal
+        isOpen={showIdleWarningModal}
+        countdownSeconds={idleCountdownSeconds}
+        idleMinutes={15}
+        onStaySignedIn={keepSessionActive}
+        onSignOut={() => performLogout({ redirectPage: "signin" })}
       />
 
       {/* home */}
@@ -435,6 +793,12 @@ const App = () => {
           onLoginSuccess={(userData) => {
             setUser(userData);
             setSessionUser(userData);
+            setRegisteredEmail("");
+            setRegisteredPhone("");
+            setRegisteredName("");
+            setRegisterRole("user");
+            setForgotEmail("");
+            setForgotResetToken("");
 
             if (userData?.role === "owner") {
               setIsOwnerLoggedIn(true);
@@ -512,6 +876,12 @@ const App = () => {
       )}
 
       {/* vehicle details */}
+      {currentPage === "vehicle-details" && !selectedVehicle && (
+        <div className="min-h-screen bg-white flex items-center justify-center text-slate-600 text-sm">
+          Loading vehicle details...
+        </div>
+      )}
+
       {currentPage === "vehicle-details" && selectedVehicle && (
         <VehicleDetailsPage
           vehicle={selectedVehicle}
@@ -589,6 +959,11 @@ const App = () => {
                 }
               : fallbackUser;
 
+            setRegisteredEmail("");
+            setRegisteredPhone("");
+            setRegisteredName("");
+            setRegisterRole("user");
+
             if (role === "owner") {
               setIsOwnerLoggedIn(true);
               setIsLoggedIn(false);
@@ -625,6 +1000,24 @@ const App = () => {
         />
       )}
 
+      {currentPage === "about" && (
+        <AboutPage
+          isLoggedIn={isLoggedIn}
+          user={user}
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToSignIn={() => setCurrentPage("signin")}
+          onNavigateToRegister={() => setCurrentPage("register")}
+          onNavigateToVehicles={() => setCurrentPage("vehicles")}
+          onNavigateToBookingHistory={goToBookingHistory}
+          onNavigateToAbout={navigateToAbout}
+          onNavigateToContacts={navigateToContacts}
+          onNavigateToChat={goToRealtimeChat}
+          onNavigateToNotifications={goToNotifications}
+          onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onLogout={requestLogout}
+        />
+      )}
+
       {currentPage === "booking-history" && (
         <BookingsPage
           isLoggedIn={isLoggedIn}
@@ -647,6 +1040,8 @@ const App = () => {
         <RealtimeChatPage
           isLoggedIn={isLoggedIn}
           user={user}
+          initialChatContext={chatNavigationContext}
+          onChatContextHandled={clearChatNavigationContext}
           onNavigateToHome={() => setCurrentPage("home")}
           onNavigateToSignIn={() => setCurrentPage("signin")}
           onNavigateToRegister={() => setCurrentPage("register")}

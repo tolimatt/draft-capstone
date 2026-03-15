@@ -34,6 +34,12 @@ const TOTAL_STEPS = 3;
 const STEP_LABELS = ["Personal Details", "Face Verification", "Review"];
 const ACTION_COOLDOWN_MS = 2000;
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
+const normalizePhMobileInput = (value = "") => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (!digits.startsWith("9")) return "";
+  return digits.slice(0, 10);
+};
 
 // Turn service errors into user-friendly text
 function friendlyError(msg) {
@@ -653,9 +659,10 @@ export default function RegisterPage({
         password: form.password,
         role: "user",
       });
+      const registeredEmail = String(response?.user?.email || form.email || "").trim().toLowerCase();
       setSuccessMessage(response?.message || "Registration successful! Redirecting to OTP verification...");
-      await API.sendOTP(form.email).catch(() => {});
-      setTimeout(() => { onNavigateToRegisterOTP(form.email, form.phone, fullName); }, 1500);
+      await API.sendOTP(registeredEmail).catch(() => {});
+      setTimeout(() => { onNavigateToRegisterOTP(registeredEmail, form.phone, fullName); }, 1500);
     } catch (error) {
       const raw = error?.message || "";
       const lower = raw.toLowerCase();
@@ -857,7 +864,7 @@ export default function RegisterPage({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <FormInput label="Enter Email" type="email" value={form.email} onChange={(e) => handleChange("email", e.target.value.toLowerCase().trim())} error={errors.email} disabled={isLoading} placeholder="Enter Email" required icon={Mail} inputRef={emailRef} showEmailHint maxLength={254} />
-                      <FormInput label="Phone Number" type="tel" value={form.phone} onChange={(e) => handleChange("phone", e.target.value)} error={errors.phone} disabled={isLoading} placeholder="Enter Phone Number" required icon={Phone} onlyNumbers inputRef={phoneRef} maxLength={11} />
+                      <FormInput label="Phone Number" type="tel" value={form.phone} onChange={(e) => handleChange("phone", normalizePhMobileInput(e.target.value))} error={errors.phone} disabled={isLoading} placeholder="9XXXXXXXXX" required icon={Phone} onlyNumbers inputRef={phoneRef} maxLength={10} prefixText="+63" />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <FormInput label="Date of Birth" type="date" value={form.dateOfBirth} onChange={(e) => handleChange("dateOfBirth", e.target.value)} error={errors.dateOfBirth} disabled={isLoading} required icon={Calendar} inputRef={dobRef} />
@@ -937,7 +944,7 @@ export default function RegisterPage({
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <FormInput label="Contact Name" value={form.emergencyContactName} onChange={(e) => handleChange("emergencyContactName", e.target.value)} error={errors.emergencyContactName} disabled={isLoading} placeholder="Maria Dela Cruz" required icon={User} inputRef={emergencyNameRef} maxLength={100} />
-                        <FormInput label="Phone Number" type="tel" value={form.emergencyContactPhone} onChange={(e) => handleChange("emergencyContactPhone", e.target.value)} error={errors.emergencyContactPhone} disabled={isLoading} placeholder="Enter Phone Number" required icon={Phone} onlyNumbers inputRef={emergencyPhoneRef} maxLength={11} />
+                        <FormInput label="Phone Number" type="tel" value={form.emergencyContactPhone} onChange={(e) => handleChange("emergencyContactPhone", normalizePhMobileInput(e.target.value))} error={errors.emergencyContactPhone} disabled={isLoading} placeholder="9XXXXXXXXX" required icon={Phone} onlyNumbers inputRef={emergencyPhoneRef} maxLength={10} prefixText="+63" />
                       </div>
                       <SelectField label="Relationship" value={form.emergencyContactRelationship} onChange={(value) => handleChange("emergencyContactRelationship", value)} options={RELATIONSHIP_OPTIONS.map((option) => ({ value: option, label: option }))} error={errors.emergencyContactRelationship} disabled={isLoading} required inputRef={emergencyRelationshipRef} />
                     </div>

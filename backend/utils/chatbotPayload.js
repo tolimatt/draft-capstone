@@ -31,6 +31,49 @@ const FALLBACK_REPLIES = {
   filipino:
     "Paumanhin, hindi ko natukoy nang maayos ang tanong mo. Subukan mong magtanong tungkol sa booking, presyo, requirements, deposito, bayad, insurance, o available na sasakyan.",
 };
+const CHATBOT_MAX_INPUT_LENGTH = 500;
+const ALLOWED_CHATBOT_MESSAGE_PATTERN = /^[A-Za-z?,. ]+$/;
+const BLOCKED_WORDS = [
+  "fuck",
+  "fucking",
+  "shit",
+  "bitch",
+  "asshole",
+  "puta",
+  "putangina",
+  "gago",
+  "tanga",
+  "ulol",
+  "tarantado",
+  "pakyu",
+  "bwisit",
+];
+const REJECT_REPLIES = {
+  english: {
+    empty: "Please type a message so I can help you.",
+    too_long: `Please keep your message within ${CHATBOT_MAX_INPUT_LENGTH} characters.`,
+    invalid_characters:
+      "Please use letters, spaces, commas, periods, and question marks only.",
+    profanity:
+      "Please avoid offensive words. Rephrase your question politely, and I'll gladly help.",
+  },
+  filipino: {
+    empty: "Pakilagay ang iyong mensahe para matulungan kita.",
+    too_long: `Pakiikli ang mensahe sa loob ng ${CHATBOT_MAX_INPUT_LENGTH} na characters.`,
+    invalid_characters:
+      "Mga letra, espasyo, kuwit, tuldok, at tandang pananong lamang ang puwedeng gamitin.",
+    profanity:
+      "Iwasan muna natin ang masasamang salita. I-type ulit nang maayos ang tanong at tutulungan kita.",
+  },
+};
+
+const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const BLOCKED_WORD_PATTERN = new RegExp(
+  `\\b(${BLOCKED_WORDS.map((word) => escapeRegex(word)).join("|")})\\b`,
+  "i"
+);
 const GREETING_PATTERNS = [
   /\bhello\b/i,
   /\bhi\b/i,
@@ -682,6 +725,54 @@ function filterVehiclesForChatbot(vehicles, slots) {
   });
 }
 
+export function validateChatbotInput(message = "") {
+  const rawMessage = String(message || "");
+  const trimmedMessage = rawMessage.trim();
+
+  if (!trimmedMessage) {
+    return {
+      isValid: false,
+      reason: "empty",
+      message: "",
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  if (rawMessage.length > CHATBOT_MAX_INPUT_LENGTH) {
+    return {
+      isValid: false,
+      reason: "too_long",
+      message: trimmedMessage,
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  if (!ALLOWED_CHATBOT_MESSAGE_PATTERN.test(rawMessage)) {
+    return {
+      isValid: false,
+      reason: "invalid_characters",
+      message: trimmedMessage,
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  if (BLOCKED_WORD_PATTERN.test(trimmedMessage)) {
+    return {
+      isValid: false,
+      reason: "profanity",
+      message: trimmedMessage,
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  return {
+    isValid: true,
+    reason: "",
+    message: trimmedMessage,
+    maxLength: CHATBOT_MAX_INPUT_LENGTH,
+  };
+}
+
 export function buildChatbotPayload(message, language, vehicles = []) {
   const originalMessage = cleanText(message);
   const selectedLanguage = normalizeLanguage(language);
@@ -817,8 +908,10 @@ export function normalizeChatbotResponse(response) {
 
 export function buildRejectedChatbotResponse(language, reason = "fallback") {
   const selectedLanguage = normalizeLanguage(language);
+  const customReply = REJECT_REPLIES[selectedLanguage]?.[reason];
+
   return {
-    reply: FALLBACK_REPLIES[selectedLanguage],
+    reply: customReply || FALLBACK_REPLIES[selectedLanguage],
     intent: "REJECT",
     intent_id: "REJECT",
     reply_lang: getLanguageCode(selectedLanguage),

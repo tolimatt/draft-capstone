@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 import base64
 import os
+import re
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -38,6 +39,9 @@ logger = logging.getLogger("rentifypro-kyc")
 
 # Config
 MONGO_URI        = os.getenv("MONGO_URI", "mongodb://localhost:27017/rentifypro")
+MONGO_URI_DIRECT = os.getenv("MONGO_URI_DIRECT", "").strip()
+MONGO_DB_NAME    = os.getenv("MONGO_DB_NAME", "rentifypro").strip() or "rentifypro"
+MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "15000"))
 FRONTEND_URL     = os.getenv("FRONTEND_URL", "http://localhost:5173")
 NODE_BACKEND_URL = os.getenv("NODE_BACKEND_URL", "http://localhost:5000")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "rentifypro-internal-secret")
@@ -70,12 +74,79 @@ MAX_CHALLENGE_FRAMES = max(MIN_CHALLENGE_FRAMES, int(os.getenv("KYC_MAX_FRAMES",
 MIN_FRAME_DIFF      = float(os.getenv("KYC_MIN_FRAME_DIFF", "2.0"))
 MIN_FACE_MOVEMENT   = float(os.getenv("KYC_MIN_FACE_MOVEMENT", "0.015"))
 
-# MongoDB
-mongo_client = AsyncIOMotorClient(MONGO_URI)
-mongo_db     = mongo_client["rentifypro"]
-kyc_col        = mongo_db["kycverifications"]
-users_col      = mongo_db["users"]
-challenges_col = mongo_db["kycchallenges"]
+def sanitize_mongo_uri(uri: str) -> str:
+    text = str(uri or "")
+    return re.sub(r"(mongodb(?:\+srv)?://)([^:@/]+):([^@/]+)@", r"\1***:***@", text, flags=re.IGNORECASE)
+
+
+def get_candidate_mongo_uris() -> List[str]:
+    uris: List[str] = []
+    for value in [MONGO_URI_DIRECT, MONGO_URI]:
+        uri = str(value or "").strip()
+        if uri and uri not in uris:
+            uris.append(uri)
+    return uris
+
+
+def is_mongo_auth_error(exc: Exception) -> bool:
+    code = getattr(exc, "code", None)
+    code_name = str(getattr(exc, "codeName", ""))
+    message = str(exc or "")
+    return (
+        code in [18, 8000]
+        or "Auth" in code_name
+        or ("bad auth" in message.lower())
+        or ("authentication failed" in message.lower())
+    )
+
+
+# MongoDB (initialized during startup)
+ACTIVE_MONGO_URI = ""
+mongo_client = None
+mongo_db = None
+kyc_col = None
+users_col = None
+challenges_col = None
+
+
+async def connect_mongo_with_fallback() -> None:
+    global ACTIVE_MONGO_URI, mongo_client, mongo_db, kyc_col, users_col, challenges_col
+
+    uris = get_candidate_mongo_uris()
+    if not uris:
+        raise RuntimeError("MongoDB connection error: MONGO_URI is missing.")
+
+    last_error = None
+
+    for _, uri in enumerate(uris):
+        label = "MONGO_URI_DIRECT" if (MONGO_URI_DIRECT and uri == MONGO_URI_DIRECT) else "MONGO_URI"
+        try:
+            logger.info(f"MongoDB connect attempt with {label}: {sanitize_mongo_uri(uri)}")
+            client = AsyncIOMotorClient(
+                uri,
+                serverSelectionTimeoutMS=MONGO_SERVER_SELECTION_TIMEOUT_MS,
+            )
+            await client.admin.command("ping")
+
+            ACTIVE_MONGO_URI = uri
+            mongo_client = client
+            mongo_db = mongo_client[MONGO_DB_NAME]
+            kyc_col = mongo_db["kycverifications"]
+            users_col = mongo_db["users"]
+            challenges_col = mongo_db["kycchallenges"]
+
+            logger.info("MongoDB connected successfully.")
+            return
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"MongoDB attempt failed ({label}): {exc}")
+            if is_mongo_auth_error(exc):
+                raise RuntimeError(
+                    "MongoDB Atlas authentication failed. Verify Database Access username/password, "
+                    "reset the Atlas user password if needed, and update both MONGO_URI and MONGO_URI_DIRECT."
+                ) from exc
+
+    raise RuntimeError(f"MongoDB connection error: {last_error}")
 
 # FastAPI app
 app = FastAPI(
@@ -96,6 +167,8 @@ app.add_middleware(
 # Load models on startup
 @app.on_event("startup")
 async def startup():
+    await connect_mongo_with_fallback()
+
     # Make sure indexes exist
     try:
         existing = await kyc_col.index_information()
@@ -952,7 +1025,7 @@ if __name__ == "__main__":
     print(f"  Detector:  {DETECTOR_BACKEND} (fast)")
     print(f"  Threshold: {MAX_ACCEPT_DISTANCE}")
     print(f"  Max width: {MAX_IMAGE_WIDTH}px")
-    print(f"  MongoDB:   {MONGO_URI}")
+    print(f"  MongoDB:   {sanitize_mongo_uri(ACTIVE_MONGO_URI or MONGO_URI)}")
     print(f"  Docs:      http://localhost:{FACE_SERVICE_PORT}/docs")
     print("=" * 50 + "\n")
     uvicorn.run("main:app", host="0.0.0.0", port=FACE_SERVICE_PORT, reload=True)

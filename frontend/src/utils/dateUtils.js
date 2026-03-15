@@ -85,7 +85,6 @@ export const sanitizeBookingRange = (bookingData = {}) => {
 
     if (returnDate < minReturnDate) returnDate = minReturnDate;
     if (returnDate === minReturnDate && returnTime < minReturnTime) returnTime = minReturnTime;
-    if (returnDate > minReturnDate && returnTime < minReturnTime) returnTime = minReturnTime;
 
     const returnDateTime = getDateTime(returnDate, returnTime);
     if (!returnDateTime || returnDateTime < minReturnDateTime) {

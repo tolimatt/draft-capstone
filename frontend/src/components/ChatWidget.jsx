@@ -1,14 +1,33 @@
 import React, { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Send, X } from "lucide-react";
 import API from "../utils/api";
+import { getSessionUser, SESSION_USER_UPDATED_EVENT } from "../utils/sessionStore";
 
-const CHAT_WIDGET_STORAGE_KEY = "rentifypro.chatWidget.v1";
+const CHAT_WIDGET_STORAGE_KEY_PREFIX = "rentifypro.chatWidget.v1";
+const LEGACY_CHAT_WIDGET_STORAGE_KEY = "rentifypro.chatWidget.v1";
+const CHAT_INPUT_MAX_LENGTH = 500;
+const DISALLOWED_CHAT_INPUT_REGEX = /[^A-Za-z?,. ]+/g;
 const MAX_STORED_MESSAGES = 40;
 const WELCOME_MESSAGE_ID_PREFIX = "welcome-";
 
 const LANGUAGE_OPTIONS = [
   { value: "english", label: "English" },
   { value: "filipino", label: "Filipino" },
+];
+const BLOCKED_WORDS = [
+  "fuck",
+  "fucking",
+  "shit",
+  "bitch",
+  "asshole",
+  "puta",
+  "putangina",
+  "gago",
+  "tanga",
+  "ulol",
+  "tarantado",
+  "pakyu",
+  "bwisit",
 ];
 
 const TIME_BASED_GREETINGS = {
@@ -61,7 +80,23 @@ const formatDailyRate = (value) => {
 const normalizeRecommendations = (recommendations) =>
   Array.isArray(recommendations) ? recommendations.filter((item) => item && typeof item === "object") : [];
 
-const normalizeMessage = (message, language) => {
+const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const BLOCKED_WORD_GLOBAL_PATTERN = new RegExp(
+  `\\b(${BLOCKED_WORDS.map((word) => escapeRegex(word)).join("|")})\\b`,
+  "gi"
+);
+
+const sanitizeDraftInput = (value = "") =>
+  String(value || "")
+    .replace(DISALLOWED_CHAT_INPUT_REGEX, "")
+    .slice(0, CHAT_INPUT_MAX_LENGTH);
+
+const censorBadWords = (value = "") =>
+  String(value || "").replace(BLOCKED_WORD_GLOBAL_PATTERN, (word) => "*".repeat(word.length));
+
+const normalizeMessage = (message) => {
   if (!message || typeof message !== "object") {
     return null;
   }
@@ -86,7 +121,7 @@ const isWelcomeMessage = (message) =>
 const ensureConversation = (messages, language, date = new Date()) => {
   const normalized = Array.isArray(messages)
     ? messages
-        .map((message) => normalizeMessage(message, language))
+        .map((message) => normalizeMessage(message))
         .filter(Boolean)
         .filter((message) => !isWelcomeMessage(message))
         .slice(-Math.max(0, MAX_STORED_MESSAGES - 1))
@@ -107,13 +142,20 @@ const getDefaultChatState = () => ({
   },
 });
 
-const readStoredChatState = () => {
+const resolveStorageScope = () => {
+  const userId = String(getSessionUser()?._id || "").trim();
+  return userId ? `user:${userId}` : "guest";
+};
+
+const getStorageKey = (scope) => `${CHAT_WIDGET_STORAGE_KEY_PREFIX}:${scope}`;
+
+const readStoredChatState = (scope) => {
   if (typeof window === "undefined") {
     return getDefaultChatState();
   }
 
   try {
-    const raw = window.localStorage.getItem(CHAT_WIDGET_STORAGE_KEY);
+    const raw = window.localStorage.getItem(getStorageKey(scope));
     if (!raw) {
       return getDefaultChatState();
     }
@@ -126,8 +168,8 @@ const readStoredChatState = () => {
         filipino: ensureConversation(parsed?.conversations?.filipino, "filipino"),
       },
       drafts: {
-        english: String(parsed?.drafts?.english || ""),
-        filipino: String(parsed?.drafts?.filipino || ""),
+        english: sanitizeDraftInput(parsed?.drafts?.english || ""),
+        filipino: sanitizeDraftInput(parsed?.drafts?.filipino || ""),
       },
     };
   } catch {
@@ -136,7 +178,9 @@ const readStoredChatState = () => {
 };
 
 export default function ChatWidget({ isOpen, onClose }) {
-  const initialState = readStoredChatState();
+  const initialStorageScope = resolveStorageScope();
+  const initialState = readStoredChatState(initialStorageScope);
+  const [storageScope, setStorageScope] = useState(initialStorageScope);
   const [language, setLanguage] = useState(initialState.language);
   const [messagesByLanguage, setMessagesByLanguage] = useState(initialState.conversations);
   const [draftByLanguage, setDraftByLanguage] = useState(initialState.drafts);
@@ -152,7 +196,7 @@ export default function ChatWidget({ isOpen, onClose }) {
     }
 
     window.localStorage.setItem(
-      CHAT_WIDGET_STORAGE_KEY,
+      getStorageKey(storageScope),
       JSON.stringify({
         language,
         conversations: {
@@ -165,7 +209,36 @@ export default function ChatWidget({ isOpen, onClose }) {
         },
       })
     );
-  }, [draftByLanguage, language, messagesByLanguage]);
+  }, [draftByLanguage, language, messagesByLanguage, storageScope]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    window.localStorage.removeItem(LEGACY_CHAT_WIDGET_STORAGE_KEY);
+
+    const syncChatStateToCurrentSessionUser = () => {
+      const nextScope = resolveStorageScope();
+
+      setStorageScope((currentScope) => {
+        if (currentScope === nextScope) {
+          return currentScope;
+        }
+
+        const nextState = readStoredChatState(nextScope);
+        setLanguage(nextState.language);
+        setMessagesByLanguage(nextState.conversations);
+        setDraftByLanguage(nextState.drafts);
+        return nextScope;
+      });
+    };
+
+    window.addEventListener(SESSION_USER_UPDATED_EVENT, syncChatStateToCurrentSessionUser);
+    return () => {
+      window.removeEventListener(SESSION_USER_UPDATED_EVENT, syncChatStateToCurrentSessionUser);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -194,7 +267,14 @@ export default function ChatWidget({ isOpen, onClose }) {
 
   const sendMessage = async () => {
     const activeLanguage = language;
-    const message = String(draftByLanguage[activeLanguage] || "").trim();
+    const rawDraft = String(draftByLanguage[activeLanguage] || "");
+    const sanitizedDraft = sanitizeDraftInput(rawDraft);
+    const message = sanitizedDraft.trim();
+
+    if (sanitizedDraft !== rawDraft) {
+      updateDraftForLanguage(activeLanguage, sanitizedDraft);
+    }
+
     if (!message || isSending) return;
 
     updateMessagesForLanguage(activeLanguage, (current) => [
@@ -202,7 +282,7 @@ export default function ChatWidget({ isOpen, onClose }) {
       {
         id: `user-${Date.now()}`,
         sender: "user",
-        text: message,
+        text: censorBadWords(message),
         recommendations: [],
       },
     ]);
@@ -332,32 +412,40 @@ export default function ChatWidget({ isOpen, onClose }) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-slate-200 bg-white p-3 flex items-center gap-2">
-        <input
-          value={draft}
-          onChange={(event) => updateDraftForLanguage(language, event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              sendMessage();
+      <div className="border-t border-slate-200 bg-white p-3">
+        <div className="flex items-center gap-2">
+          <input
+            value={draft}
+            onChange={(event) =>
+              updateDraftForLanguage(language, sanitizeDraftInput(event.target.value))
             }
-          }}
-          placeholder={
-            language === "filipino"
-              ? "Magtanong tungkol sa sasakyan o booking..."
-              : "Ask about vehicles or booking..."
-          }
-          className="rp-input text-sm"
-          disabled={isSending}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={isSending}
-          className="h-11 min-w-11 rounded-2xl bg-[#0B75E7] text-white flex items-center justify-center disabled:opacity-60"
-          aria-label="Send message"
-        >
-          <Send size={16} />
-        </button>
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder={
+              language === "filipino"
+                ? "Magtanong tungkol sa sasakyan o booking..."
+                : "Ask about vehicles or booking..."
+            }
+            className="rp-input text-sm flex-1"
+            disabled={isSending}
+            maxLength={CHAT_INPUT_MAX_LENGTH}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={isSending}
+            className="h-11 w-11 rounded-2xl bg-[#0B75E7] text-white flex items-center justify-center disabled:opacity-60 flex-shrink-0"
+            aria-label="Send message"
+          >
+            <Send size={16} />
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-slate-500">
+          {draft.length}/{CHAT_INPUT_MAX_LENGTH} characters
+        </p>
       </div>
     </div>
   );

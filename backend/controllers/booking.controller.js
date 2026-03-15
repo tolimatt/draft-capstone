@@ -21,6 +21,7 @@ import {
   getSepoliaTxUrl,
   recordBookingTransactionOnChain as recordBookingTransactionOnLedger,
 } from "../utils/blockchainBooking.js";
+import { normalizePhilippineMobile } from "../utils/phone.js";
 
 const toDate = (value) => {
   const date = new Date(value);
@@ -65,6 +66,7 @@ const buildReferenceNumber = (bookingId) => {
 const getBlockchainRecordingFee = () => getTransactionFee();
 
 const DOWNPAYMENT_RATE = 0.3;
+const MIN_SAME_DAY_RENTAL_MS = 60 * 60 * 1000;
 const PAYMENT_SCOPES = new Set(["downpayment", "full"]);
 const PAYMENT_CHANNELS = new Set(["ewallet", "card"]);
 const PAYMENT_CHANNEL_METHOD_TYPES = {
@@ -101,15 +103,7 @@ const buildRenterName = (user = {}, renterProfile = {}) => {
 };
 
 const normalizePayMongoPhone = (phoneValue) => {
-  const raw = String(phoneValue || "").trim();
-  if (!raw) return "";
-  const digits = raw.replace(/[^\d]/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("63")) return `+${digits}`;
-  if (digits.startsWith("0") && digits.length === 11) return `+63${digits.slice(1)}`;
-  if (digits.startsWith("9") && digits.length === 10) return `+63${digits}`;
-  if (raw.startsWith("+")) return raw;
-  return `+${digits}`;
+  return normalizePhilippineMobile(phoneValue);
 };
 
 const logPayMongoError = (context, error) => {
@@ -448,6 +442,17 @@ export const createBooking = async (req, res) => {
       });
     }
 
+    const isSameDayRental =
+      pickupAt.getFullYear() === returnAt.getFullYear() &&
+      pickupAt.getMonth() === returnAt.getMonth() &&
+      pickupAt.getDate() === returnAt.getDate();
+    if (isSameDayRental && returnAt.getTime() - pickupAt.getTime() < MIN_SAME_DAY_RENTAL_MS) {
+      return res.status(400).json({
+        success: false,
+        message: "For same-day rentals, return must be at least 1 hour after pickup.",
+      });
+    }
+
     const vehicle = await Vehicle.findById(vehicleId);
     if (!vehicle) {
       return res.status(404).json({ success: false, message: "Vehicle not found." });
@@ -745,6 +750,13 @@ export const createBookingPayment = async (req, res) => {
     const renterPhone = normalizePayMongoPhone(
       req.user?.phone || renterProfile.phone || renterProfile.mobile || renterProfile.phoneNumber
     );
+    if (!renterPhone) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "A valid mobile number is required before checkout. Please update your profile with a 10-digit Philippine mobile number starting with 9.",
+      });
+    }
     const billing = {
       name: renterName,
       email: renterEmail,

@@ -31,6 +31,7 @@ export default function Navbar({
   onNavigateToContacts,
   onNavigateToChat,
   onNavigateToNotifications,
+  onOpenNotificationsModal,
   onNavigateToAccountSettings,
   onShowAI,
   onLogout,
@@ -147,6 +148,14 @@ export default function Navbar({
     navigateFn?.();
   };
 
+  const handleNotificationClick = () => {
+    if (activePage === "home" && typeof onOpenNotificationsModal === "function") {
+      onOpenNotificationsModal();
+      return;
+    }
+    onNavigateToNotifications?.();
+  };
+
   const isMobileItemActive = (key) => {
     const pathname = typeof window !== "undefined" ? window.location.pathname : "";
     if (key === "home") return activePage === "home" || pathname === "/";
@@ -169,7 +178,7 @@ export default function Navbar({
     {
       key: "notifications",
       label: "Notifications",
-      onClick: () => handleMobileNavigate(onNavigateToNotifications),
+      onClick: () => handleMobileNavigate(handleNotificationClick),
     },
   ];
 
@@ -272,7 +281,7 @@ export default function Navbar({
                     )}
                   </button>
                   <button
-                    onClick={onNavigateToNotifications}
+                    onClick={handleNotificationClick}
                     aria-label="Notifications"
                     className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-[#DCEEFF] transition-all hover:-translate-y-0.5"
                   >

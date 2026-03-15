@@ -1,7 +1,7 @@
 // KYC calls used during registration
 // These hit the /api/kyc/pre/* routes
 
-const BASE_URL = "http://localhost:5000";
+import { API_BASE_URL } from "./runtimeConfig";
 
 async function postJson(url, body) {
   const res = await fetch(url, {
@@ -16,7 +16,7 @@ async function postJson(url, body) {
 
 // Step 1: save the ID face
 export async function preRegisterIdFace(email, fullName, role, idImageBase64, idImageMime) {
-  return postJson(`${BASE_URL}/api/kyc/pre/id-register`, {
+  return postJson(`${API_BASE_URL}/kyc/pre/id-register`, {
     email,
     full_name: fullName,
     role,
@@ -27,7 +27,7 @@ export async function preRegisterIdFace(email, fullName, role, idImageBase64, id
 
 // Step 2: run the blink check
 export async function preSelfieChallenge(email, framesBase64) {
-  return postJson(`${BASE_URL}/api/kyc/pre/selfie/challenge`, {
+  return postJson(`${API_BASE_URL}/kyc/pre/selfie/challenge`, {
     email,
     frames_base64: framesBase64,
   });
@@ -35,7 +35,7 @@ export async function preSelfieChallenge(email, framesBase64) {
 
 // Step 3: match the selfie with the ID
 export async function preSelfieVerify(email, challengeId, selfieImageBase64, role) {
-  return postJson(`${BASE_URL}/api/kyc/pre/selfie/verify`, {
+  return postJson(`${API_BASE_URL}/kyc/pre/selfie/verify`, {
     email,
     challenge_id: challengeId,
     selfie_image_base64: selfieImageBase64,
@@ -45,7 +45,7 @@ export async function preSelfieVerify(email, challengeId, selfieImageBase64, rol
 
 // Supporting document verification (owner)
 export async function preVerifySupportingDocument(email, docImageBase64, docImageMime, role = "owner") {
-  return postJson(`${BASE_URL}/api/kyc/pre/supporting-doc/verify`, {
+  return postJson(`${API_BASE_URL}/kyc/pre/supporting-doc/verify`, {
     email,
     role,
     doc_image_base64: docImageBase64,

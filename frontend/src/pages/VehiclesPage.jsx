@@ -1,125 +1,129 @@
-  import React, { useEffect, useMemo, useState } from "react";
-  import { CarFront, Fuel, Search, Settings, Users } from "lucide-react";
-  import API from "../utils/api";
-  import Navbar from "../components/Navbar";
-  import ChatWidget from "../components/ChatWidget";
-  import {
-    sanitizeBookingRange,
-  } from "../utils/dateUtils";
+import React, { useEffect, useMemo, useState } from "react";
+import { CarFront, Fuel, MapPin, Search, Settings, Users } from "lucide-react";
+import API from "../utils/api";
+import Navbar from "../components/Navbar";
+import ChatWidget from "../components/ChatWidget";
+import { sanitizeBookingRange } from "../utils/dateUtils";
 
-  const normalizeVehicle = (vehicle) => ({
-    id: vehicle._id,
-    _id: vehicle._id,
-    name: vehicle.name,
-    location: vehicle.location,
-    image: vehicle.imageUrl || vehicle.images?.[0] || "/bmw-x5.png",
-    images: vehicle.images || [],
-    type: vehicle.specs?.type || "car",
-    subType: vehicle.specs?.subType || "Standard",
-    category: "Owner-listed Vehicle",
-    seats: vehicle.specs?.seats || 4,
-    transmission: vehicle.specs?.transmission || "Automatic",
-    fuel: vehicle.specs?.fuel || "Gasoline",
-    plateNumber: vehicle.specs?.plateNumber || "",
-    price: Number(vehicle.dailyRentalRate || 0),
-    driverOptionEnabled: Boolean(vehicle.driverOptionEnabled),
-    driverDailyRate: Number(vehicle.driverDailyRate || 0),
-    rating: Number.isFinite(Number(vehicle.averageRating ?? vehicle.rating))
-      ? Number(Number(vehicle.averageRating ?? vehicle.rating).toFixed(1))
-      : 0,
-    reviewCount: Number.isFinite(Number(vehicle.reviewCount)) ? Number(vehicle.reviewCount) : 0,
-    available: vehicle.availabilityStatus === "available",
-    description: vehicle.description || "",
-    specs: vehicle.specs || {},
-    owner: {
-      name: vehicle.owner?.name || "Vehicle Owner",
-      email: vehicle.owner?.email || "",
-    },
-  });
+const normalizeVehicleType = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "motor") return "motorcycle";
+  return normalized;
+};
 
-  export default function VehiclesPage({
-    bookingData,
-    setBookingData,
-    isLoggedIn,
-    user,
-    onLogout,
-    onNavigateToHome,
-    onNavigateToSignIn,
-    onNavigateToRegister,
-    onNavigateToVehicles,
-    onViewDetails,
-    onNavigateToBookingHistory,
-    onNavigateToAbout,
-    onNavigateToContacts,
-    onNavigateToChat,
-    onNavigateToNotifications,
-    onNavigateToAccountSettings,
-  }) {
+const normalizeVehicle = (vehicle) => ({
+  id: vehicle._id,
+  _id: vehicle._id,
+  name: vehicle.name,
+  location: vehicle.location,
+  image: vehicle.imageUrl || vehicle.images?.[0] || "/bmw-x5.png",
+  images: vehicle.images || [],
+  type: normalizeVehicleType(vehicle.specs?.type || "car"),
+  subType: vehicle.specs?.subType || "Standard",
+  category: "Owner-listed Vehicle",
+  seats: vehicle.specs?.seats || 4,
+  transmission: vehicle.specs?.transmission || "Automatic",
+  fuel: vehicle.specs?.fuel || "Gasoline",
+  plateNumber: vehicle.specs?.plateNumber || "",
+  price: Number(vehicle.dailyRentalRate || 0),
+  driverOptionEnabled: Boolean(vehicle.driverOptionEnabled),
+  driverDailyRate: Number(vehicle.driverDailyRate || 0),
+  rating: Number.isFinite(Number(vehicle.averageRating ?? vehicle.rating))
+    ? Number(Number(vehicle.averageRating ?? vehicle.rating).toFixed(1))
+    : 0,
+  reviewCount: Number.isFinite(Number(vehicle.reviewCount)) ? Number(vehicle.reviewCount) : 0,
+  available: vehicle.availabilityStatus === "available",
+  description: vehicle.description || "",
+  specs: vehicle.specs || {},
+  owner: {
+    name: vehicle.owner?.name || "Vehicle Owner",
+    email: vehicle.owner?.email || "",
+  },
+});
+
+export default function VehiclesPage({
+  bookingData,
+  setBookingData,
+  isLoggedIn,
+  user,
+  onLogout,
+  onNavigateToHome,
+  onNavigateToSignIn,
+  onNavigateToRegister,
+  onNavigateToVehicles,
+  onViewDetails,
+  onNavigateToBookingHistory,
+  onNavigateToAbout,
+  onNavigateToContacts,
+  onNavigateToChat,
+  onNavigateToNotifications,
+  onNavigateToAccountSettings,
+}) {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showAI, setShowAI] = useState(false);
-    const [searchQuery, setSearchQuery] = useState("");
-    const [vehicleTypeFilter, setVehicleTypeFilter] = useState(bookingData.vehicleType || "");
-    const [pagination, setPagination] = useState({ page: 1, limit: 24, total: 0, totalPages: 1 });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [locationQuery, setLocationQuery] = useState(String(bookingData.location || ""));
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState(
+    normalizeVehicleType(bookingData.vehicleType || "")
+  );
+  const [pagination, setPagination] = useState({ page: 1, limit: 24, total: 0, totalPages: 1 });
 
-    useEffect(() => {
-      setBookingData((prev) => {
-        const normalized = sanitizeBookingRange(prev);
-        if (
-          prev.pickupDate === normalized.pickupDate &&
-          prev.pickupTime === normalized.pickupTime &&
-          prev.returnDate === normalized.returnDate &&
-          prev.returnTime === normalized.returnTime
-        ) {
-          return prev;
-        }
-        return { ...prev, ...normalized };
-      });
-    }, [setBookingData]);
+  useEffect(() => {
+    setBookingData((prev) => {
+      const normalized = sanitizeBookingRange(prev);
+      if (
+        prev.pickupDate === normalized.pickupDate &&
+        prev.pickupTime === normalized.pickupTime &&
+        prev.returnDate === normalized.returnDate &&
+        prev.returnTime === normalized.returnTime
+      ) {
+        return prev;
+      }
+      return { ...prev, ...normalized };
+    });
+  }, [setBookingData]);
 
-    const combinedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
+  const combinedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
+  const combinedLocation = useMemo(() => locationQuery.trim(), [locationQuery]);
 
-    useEffect(() => {
-      let isActive = true;
-      const timeoutId = window.setTimeout(async () => {
-        setLoading(true);
-        setError("");
+  useEffect(() => {
+    let isActive = true;
+    const timeoutId = window.setTimeout(async () => {
+      setLoading(true);
+      setError("");
 
-        try {
-          const response = await API.getPublicVehicles({
-            search: combinedSearch,
-            page: 1,
-            limit: 24,
-          });
+      try {
+        const response = await API.getPublicVehicles({
+          search: combinedSearch,
+          location: combinedLocation,
+          vehicleType: vehicleTypeFilter,
+          page: 1,
+          limit: 24,
+        });
 
-          if (!isActive) return;
-          setVehicles((response.vehicles || []).map(normalizeVehicle));
-          setPagination(response.pagination || { page: 1, limit: 24, total: 0, totalPages: 1 });
-        } catch (err) {
-          if (!isActive) return;
-          setError(err.message || "Failed to load available vehicles.");
-        } finally {
-          if (isActive) setLoading(false);
-        }
-      }, 300);
+        if (!isActive) return;
+        setVehicles((response.vehicles || []).map(normalizeVehicle));
+        setPagination(response.pagination || { page: 1, limit: 24, total: 0, totalPages: 1 });
+      } catch (err) {
+        if (!isActive) return;
+        setError(err.message || "Failed to load available vehicles.");
+      } finally {
+        if (isActive) setLoading(false);
+      }
+    }, 300);
 
-      return () => {
-        isActive = false;
-        window.clearTimeout(timeoutId);
-      };
-    }, [combinedSearch]);
-
-    const filteredVehicles = useMemo(() => {
-      return vehicles.filter((vehicle) => {
-        if (!vehicleTypeFilter) return true;
-        return String(vehicle.type || "").toLowerCase() === vehicleTypeFilter.toLowerCase();
-      });
-    }, [vehicles, vehicleTypeFilter]);
+    return () => {
+      isActive = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [combinedSearch, combinedLocation, vehicleTypeFilter]);
 
   const availableCount = useMemo(
-    () => filteredVehicles.filter((vehicle) => vehicle.available).length,
-    [filteredVehicles]
+    () => vehicles.filter((vehicle) => vehicle.available).length,
+    [vehicles]
   );
 
   return (
@@ -177,11 +181,25 @@
               </div>
 
               <div>
+                <label className="text-sm font-medium mb-1 block text-slate-600">Location</label>
+                <div className="relative">
+                  <MapPin size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    className="rp-input pr-9 text-sm"
+                    placeholder="City, municipality, or area"
+                    maxLength={180}
+                    value={locationQuery}
+                    onChange={(event) => setLocationQuery(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div>
                 <label className="text-sm font-medium mb-1 block text-slate-600">Vehicle Type</label>
                 <select
                   className="rp-input text-sm"
                   value={vehicleTypeFilter}
-                  onChange={(event) => setVehicleTypeFilter(event.target.value)}
+                  onChange={(event) => setVehicleTypeFilter(normalizeVehicleType(event.target.value))}
                 >
                   <option value="">All types</option>
                   <option value="car">Car</option>
@@ -197,18 +215,18 @@
               {error && <p className="text-sm text-red-600">{error}</p>}
               {!loading && !error && pagination.total > 0 && (
                 <p className="mb-3 text-sm text-slate-500">
-                  Showing {filteredVehicles.length} of {pagination.total} vehicles
+                  Showing {vehicles.length} of {pagination.total} vehicles
                 </p>
               )}
 
-              {!loading && !error && filteredVehicles.length === 0 && (
+              {!loading && !error && vehicles.length === 0 && (
                 <div className="rp-surface p-6 text-slate-600 text-sm">
                   No vehicles match your filters.
                 </div>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {filteredVehicles.map((vehicle) => (
+                {vehicles.map((vehicle) => (
                   <article key={vehicle.id} className="rp-surface rp-hover-lift overflow-hidden flex flex-col">
                   <div className="px-4 pt-4">
                     <div className="relative h-48 bg-gradient-to-br from-slate-50 to-slate-200 flex items-center justify-center overflow-hidden rp-image-frame">

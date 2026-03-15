@@ -278,7 +278,7 @@ export default function BookingsPage({
     try {
       const response = await API.getMessagesWithUser(booking.owner._id, booking._id);
       setChatMessages(response.messages || []);
-      await API.markMessagesAsRead(booking.owner._id);
+      await API.markMessagesAsRead(booking.owner._id, { bookingId: booking._id });
       requestLiveCountersRefresh();
     } catch (err) {
       setChatError(err.message || "Failed to load chat.");

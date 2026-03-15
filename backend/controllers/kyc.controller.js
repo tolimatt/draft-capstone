@@ -13,7 +13,12 @@ import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { ensureFaceServiceReady, isFaceServiceConnectionError } from "../utils/faceServiceManager.js";
 import { verifyPhilippinesDocument } from "../services/geminiDocument.service.js";
 
-const getFaceServiceUrl = () => process.env.FACE_SERVICE_URL || "http://localhost:8010";
+const isProduction = process.env.NODE_ENV === "production";
+const getFaceServiceUrl = () => {
+  const configured = String(process.env.FACE_SERVICE_URL || "").trim();
+  if (configured) return configured;
+  return isProduction ? "" : "http://localhost:8010";
+};
 const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "";
 const PRE_KYC_DOC_TTL_HOURS = Number(process.env.PREKYC_DOC_TTL_HOURS || 3);
 const PRE_KYC_FACE_TTL_HOURS = Number(process.env.PREKYC_FACE_TTL_HOURS || PRE_KYC_DOC_TTL_HOURS || 3);
@@ -121,6 +126,14 @@ const saveKycBase64File = async ({ base64, mimeType = "image/jpeg", prefix = "do
   };
 };
 
+const formatIdValidationFailure = (docResult = {}) => ({
+  success: false,
+  message: docResult.reason || "Please upload a valid ID image that clearly shows at least one face photo.",
+  docType: docResult.doc_type || "Unknown",
+  country: docResult.country || "Unknown",
+  confidence: Number(docResult.confidence || 0),
+});
+
 const recordPreKycFace = async ({ email, role, result }) => {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   if (!normalizedEmail) return;
@@ -151,6 +164,9 @@ const recordPreKycFace = async ({ email, role, result }) => {
 // Send a request to the face service
 const proxyToFaceService = async (endpoint, body) => {
   const faceServiceUrl = getFaceServiceUrl();
+  if (!faceServiceUrl) {
+    throw new Error("FACE_SERVICE_URL is not configured in production.");
+  }
   const url = `${faceServiceUrl}${endpoint}`;
   auditLog.info("KYC", `Proxying to Python: ${url}`);
   const doRequest = () =>
@@ -215,28 +231,19 @@ export const registerIdFace = async (req, res) => {
     const { id_image_base64, id_image_mime } = req.body;
     if (!id_image_base64) return res.status(400).json({ message: "id_image_base64 is required" });
 
-    let docResult = {
-      passed: true,
-      confidence: 0,
-      country: "Unknown",
-      doc_type: "Unknown",
-      reason: "ID accepted for face verification.",
-    };
-    try {
-      const checked = await verifyPhilippinesDocument({
-        base64: id_image_base64,
-        mimeType: id_image_mime || "image/jpeg",
+    const docResult = await verifyPhilippinesDocument({
+      base64: id_image_base64,
+      mimeType: id_image_mime || "image/jpeg",
+      docType: "id",
+    });
+    if (!docResult.passed) {
+      await recordPreKycDocument({
+        email: req.user?.email,
+        role: req.user?.role,
         docType: "id",
+        result: docResult,
       });
-      docResult = { ...docResult, ...checked };
-    } catch (docErr) {
-      auditLog.warn("KYC", "ID document AI check failed; continuing with face-only verification", {
-        detail: docErr.message,
-      });
-      docResult = {
-        ...docResult,
-        reason: "ID accepted for face verification (AI document check unavailable).",
-      };
+      return res.status(400).json(formatIdValidationFailure(docResult));
     }
 
     const payload = {
@@ -437,29 +444,11 @@ export const preRegisterIdFace = async (req, res) => {
       return res.status(400).json({ success: false, message: "email and id_image_base64 are required" });
     }
 
-    let docResult = {
-      passed: true,
-      confidence: 0,
-      country: "Unknown",
-      doc_type: "Unknown",
-      reason: "ID accepted for face verification.",
-    };
-    try {
-      const checked = await verifyPhilippinesDocument({
-        base64: id_image_base64,
-        mimeType: id_image_mime || "image/jpeg",
-        docType: "id",
-      });
-      docResult = { ...docResult, ...checked };
-    } catch (docErr) {
-      auditLog.warn("KYC", "Pre-reg ID AI check failed; continuing with face-only verification", {
-        detail: docErr.message,
-      });
-      docResult = {
-        ...docResult,
-        reason: "ID accepted for face verification (AI document check unavailable).",
-      };
-    }
+    const docResult = await verifyPhilippinesDocument({
+      base64: id_image_base64,
+      mimeType: id_image_mime || "image/jpeg",
+      docType: "id",
+    });
 
     let fileMeta = {};
     try {
@@ -470,6 +459,16 @@ export const preRegisterIdFace = async (req, res) => {
       });
     } catch (saveErr) {
       auditLog.warn("KYC", "Failed to store pre-reg ID image", { detail: saveErr.message });
+    }
+
+    if (!docResult.passed) {
+      await recordPreKycDocument({
+        email,
+        role,
+        docType: "id",
+        result: { ...docResult, ...fileMeta },
+      });
+      return res.status(400).json(formatIdValidationFailure(docResult));
     }
 
     const payload = {

@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Fuel,
   MapPin,
+  MessageCircle,
   Settings,
   ShieldCheck,
   Star,
@@ -88,6 +89,7 @@ export default function VehicleDetailsPage({
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState("");
   const [bookingSuccess, setBookingSuccess] = useState("");
+  const [chatOwnerError, setChatOwnerError] = useState("");
   const [driverSelected, setDriverSelected] = useState(false);
   const [vehicleData, setVehicleData] = useState(vehicle || null);
   const vehicleId = vehicleData?._id || vehicleData?.id || vehicle?._id || vehicle?.id;
@@ -203,11 +205,17 @@ export default function VehicleDetailsPage({
     return [...reviews].sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [reviews, sortOption]);
 
+  const sameDayMinReturnTime = useMemo(() => {
+    if (!pickupDate || !pickupTime) return "";
+    const minReturnDate = getMinReturnDate(pickupDate, pickupTime);
+    if (!minReturnDate || minReturnDate !== pickupDate) return "";
+    return getMinReturnTime(pickupDate, pickupTime);
+  }, [pickupDate, pickupTime]);
+
   const validateBookingRange = () => {
     const minPickup = getMinPickupDateTime();
     const pickup = getDateTime(pickupDate, pickupTime);
     const dropoff = getDateTime(returnDate, returnTime);
-    const minReturn = getMinReturnDateTime(pickupDate, pickupTime);
 
     if (!pickup || !dropoff) {
       return "Please provide valid pickup and return date/time.";
@@ -215,8 +223,14 @@ export default function VehicleDetailsPage({
     if (pickup < minPickup) {
       return "Pickup must be at least 10 minutes from now.";
     }
-    if (!minReturn || dropoff < minReturn) {
-      return "Return must be at least 1 hour after pickup.";
+    if (dropoff <= pickup) {
+      return "Return must be after pickup.";
+    }
+    if (pickupDate === returnDate) {
+      const minReturn = getMinReturnDateTime(pickupDate, pickupTime);
+      if (!minReturn || dropoff < minReturn) {
+        return "For same-day rentals, return must be at least 1 hour after pickup.";
+      }
     }
     return "";
   };
@@ -279,7 +293,38 @@ export default function VehicleDetailsPage({
   const ownerName = currentVehicle?.owner?.name || "Vehicle Owner";
   const ownerInitials = getInitialsFromName(ownerName);
   const ownerEmail = currentVehicle?.owner?.email || "";
+  const ownerAvatar = currentVehicle?.owner?.avatar || "";
+  const ownerId = String(currentVehicle?.owner?._id || "");
   const ownerVerified = currentVehicle?.owner?.verified !== false;
+  const isOwnVehicle = Boolean(ownerId) && String(user?._id || "") === ownerId;
+
+  const handleChatOwner = () => {
+    setChatOwnerError("");
+
+    if (!isLoggedIn) {
+      onNavigateToSignIn?.();
+      return;
+    }
+
+    if (!ownerId || !vehicleId) {
+      setChatOwnerError("Owner chat is unavailable for this vehicle right now.");
+      return;
+    }
+
+    if (isOwnVehicle) {
+      setChatOwnerError("You cannot chat yourself for your own listing.");
+      return;
+    }
+
+    onNavigateToChat?.({
+      partnerId: ownerId,
+      partnerName: ownerName,
+      partnerEmail: ownerEmail,
+      partnerAvatar: ownerAvatar,
+      vehicleId: String(vehicleId),
+    });
+  };
+
   const updateBookingRange = (patch) => {
     setBookingData((prev) => {
       const merged = { ...prev, ...patch };
@@ -432,7 +477,18 @@ export default function VehicleDetailsPage({
             </section>
 
             <section className="rp-surface p-5">
-              <h2 className="text-xl font-bold text-slate-900">Owner Information</h2>
+              <div className="flex items-start justify-between gap-4">
+                <h2 className="text-xl font-bold text-slate-900">Owner Information</h2>
+                <button
+                  type="button"
+                  onClick={handleChatOwner}
+                  disabled={isOwnVehicle}
+                  className="rp-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <MessageCircle size={15} />
+                  Chat Owner
+                </button>
+              </div>
               <div className="mt-4 flex items-center gap-4">
                 <div className="w-14 h-14 rounded-full border border-slate-200 bg-[#0B75E7] text-white flex items-center justify-center font-bold">
                   {ownerInitials}
@@ -445,6 +501,9 @@ export default function VehicleDetailsPage({
                   <p className="text-sm text-slate-500">{ownerEmail || "Verified RentifyPro owner"}</p>
                 </div>
               </div>
+              {chatOwnerError && (
+                <p className="mt-3 text-sm text-red-600">{chatOwnerError}</p>
+              )}
             </section>
 
             <section className="rp-surface p-5">
@@ -527,15 +586,15 @@ export default function VehicleDetailsPage({
                     <input
                       type="date"
                       value={returnDate || ""}
-                      min={getMinReturnDate(pickupDate, pickupTime) || getMinPickupDate()}
+                      min={pickupDate || getMinPickupDate()}
                       onChange={(event) => updateBookingRange({ returnDate: event.target.value })}
                       className="rp-input text-sm"
                     />
                     <input
                       type="time"
                       min={
-                        returnDate === getMinReturnDate(pickupDate, pickupTime)
-                          ? getMinReturnTime(pickupDate, pickupTime)
+                        returnDate === pickupDate && sameDayMinReturnTime
+                          ? sameDayMinReturnTime
                           : undefined
                       }
                       value={returnTime || ""}
@@ -698,11 +757,12 @@ export default function VehicleDetailsPage({
   );
 }
 
-function SpecItem({ icon: Icon, label, value }) {
+function SpecItem({ icon, label, value }) {
+  const IconComponent = icon;
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
       <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold flex items-center gap-1">
-        <Icon size={13} className="text-[#0B75E7]" />
+        <IconComponent size={13} className="text-[#0B75E7]" />
         {label}
       </p>
       <p className="text-sm font-semibold text-slate-900 mt-1">{value}</p>

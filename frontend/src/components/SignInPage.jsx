@@ -10,6 +10,14 @@ import { normalizeOwnerProfile, persistOwnerProfile } from "../owner/utils/owner
 
 // Delay between submit attempts
 const SUBMIT_COOLDOWN_MS = 2000;
+const RATE_LIMIT_FALLBACK_SECONDS = 5 * 60;
+
+const formatCountdown = (seconds) => {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
 
 export default function SignInPage({
   onNavigateToHome,
@@ -23,6 +31,7 @@ export default function SignInPage({
   const [successMessage, setSuccessMessage] = useState("");
   const [captcha, setCaptcha] = useState({ id: "", question: "" });
   const [captchaLoading, setCaptchaLoading] = useState(false);
+  const [rateLimitSeconds, setRateLimitSeconds] = useState(0);
   const lastSubmitRef = useRef(0);
 
   const handleChange = (field, value) => {
@@ -61,6 +70,22 @@ export default function SignInPage({
     loadCaptcha();
   }, []);
 
+  useEffect(() => {
+    if (rateLimitSeconds <= 0) return undefined;
+    const timer = setInterval(() => {
+      setRateLimitSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [rateLimitSeconds]);
+
+  useEffect(() => {
+    if (rateLimitSeconds > 0) return;
+    setErrors((prev) => {
+      if (!prev.email || !/too many/i.test(prev.email)) return prev;
+      return { ...prev, email: "" };
+    });
+  }, [rateLimitSeconds]);
+
   const validateForm = () => {
     const newErrors = {};
     const emailErr = SIGN_IN_VALIDATION_RULES.email(form.email);
@@ -74,6 +99,14 @@ export default function SignInPage({
 
   const handleSignIn = async (e) => {
     e.preventDefault();
+
+    if (rateLimitSeconds > 0) {
+      setErrors((prev) => ({
+        ...prev,
+        email: `Too many attempts. Try again in ${formatCountdown(rateLimitSeconds)}.`,
+      }));
+      return;
+    }
 
     // Ignore very fast repeat clicks
     const now = Date.now();
@@ -148,10 +181,19 @@ export default function SignInPage({
           kycStatus: response.user.kycStatus,
         });
       }, 1500);
+      setRateLimitSeconds(0);
     } catch (error) {
       const msg = error.message || "";
+      const retryAfterSeconds = Number(error?.retryAfterSeconds || error?.details?.retryAfterSeconds || 0);
+      const isRateLimited = Number(error?.status) === 429 || msg.includes("Too many");
 
-      if (msg.includes("Invalid email or password")) {
+      if (isRateLimited) {
+        const waitSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : RATE_LIMIT_FALLBACK_SECONDS;
+        setRateLimitSeconds(waitSeconds);
+        setErrors({
+          email: `Too many attempts. Try again in ${formatCountdown(waitSeconds)}.`,
+        });
+      } else if (msg.includes("Invalid email or password")) {
         setErrors({
           email: "Invalid email or password.",
           password: "Invalid email or password.",
@@ -160,12 +202,12 @@ export default function SignInPage({
         setErrors({ captchaAnswer: msg });
       } else if (msg.includes("verify your email")) {
         setErrors({ email: "Please verify your email before logging in." });
-      } else if (msg.includes("Too many")) {
-        setErrors({ email: msg });
       } else {
         setErrors({ email: "Login failed. Please try again." });
       }
-      await loadCaptcha();
+      if (!isRateLimited) {
+        await loadCaptcha();
+      }
     } finally {
       setIsLoading(false);
     }
@@ -286,7 +328,7 @@ export default function SignInPage({
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || rateLimitSeconds > 0}
             className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3.5 text-sm disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isLoading ? (
@@ -294,10 +336,18 @@ export default function SignInPage({
                 <Loader size={18} className="animate-spin" />
                 Signing In...
               </>
+            ) : rateLimitSeconds > 0 ? (
+              `Try again in ${formatCountdown(rateLimitSeconds)}`
             ) : (
               "Sign In"
             )}
           </button>
+
+          {rateLimitSeconds > 0 && (
+            <p className="text-center text-xs font-semibold text-amber-600">
+              Rate limit active. You can sign in again in {formatCountdown(rateLimitSeconds)}.
+            </p>
+          )}
 
           <p className="mt-2 text-center text-sm text-slate-500">
             Don't have an account?{" "}

@@ -1,9 +1,10 @@
 // Auth input validation
 import mongoose from "mongoose";
+import { normalizePhilippineMobile } from "../utils/phone.js";
 
 const EMOJI_REGEX = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-const PHONE_REGEX = /^[0-9]{11}$/;
+const PHONE_REGEX = /^9[0-9]{9}$/;
 const ALLOWED_EMAIL_DOMAINS = new Set([
   "gmail.com",
   "yahoo.com",
@@ -15,7 +16,7 @@ const ALLOWED_RELATIONSHIPS = new Set(["Parent", "Sibling", "Spouse", "Partner",
 const ALLOWED_OWNER_TYPES = new Set(["individual", "business"]);
 const MIN_RENTER_AGE = 18;
 const MAX_EMAIL_LENGTH = 254;
-const MAX_PHONE_LENGTH = 11;
+const MAX_PHONE_LENGTH = 10;
 const MAX_BUSINESS_NAME = 120;
 const MAX_LICENSE_NUMBER = 50;
 const MAX_PERMIT_NUMBER = 50;
@@ -62,7 +63,8 @@ export const validateRegister = (req, res, next) => {
   const { name, email, password } = req.body;
   const errors = {};
   const requestedRole = req.body.role === "owner" ? "owner" : "user";
-  const phone = toText(req.body.phone);
+  const rawPhone = toText(req.body.phone);
+  const phone = normalizePhilippineMobile(rawPhone);
   const dateOfBirth = toText(req.body.dateOfBirth);
   const gender = toText(req.body.gender);
   const address = toText(req.body.address);
@@ -71,7 +73,8 @@ export const validateRegister = (req, res, next) => {
   const city = toText(req.body.city);
   const barangay = toText(req.body.barangay);
   const emergencyContactName = toText(req.body.emergencyContactName);
-  const emergencyContactPhone = toText(req.body.emergencyContactPhone);
+  const rawEmergencyContactPhone = toText(req.body.emergencyContactPhone);
+  const emergencyContactPhone = normalizePhilippineMobile(rawEmergencyContactPhone);
   const emergencyContactRelationship = toText(req.body.emergencyContactRelationship);
   const ownerType = toText(req.body.ownerType);
   const businessName = toText(req.body.businessName);
@@ -110,10 +113,11 @@ export const validateRegister = (req, res, next) => {
   else if (!/[!@#$%^&*()_+\-=[\]{}|;':",.<>?/`~]/.test(password))
     errors.password = "Password needs a special character.";
 
-  if (phone) {
+  if (rawPhone) {
     if (phone.length > MAX_PHONE_LENGTH)
       errors.phone = `Phone number is too long (max ${MAX_PHONE_LENGTH} digits).`;
-    else if (!PHONE_REGEX.test(phone)) errors.phone = "Phone number must be exactly 11 digits.";
+    else if (!PHONE_REGEX.test(phone))
+      errors.phone = "Phone number must be exactly 10 digits and start with 9.";
   }
 
   if (requestedRole === "user" && !dateOfBirth) {
@@ -157,8 +161,9 @@ export const validateRegister = (req, res, next) => {
     }
   }
 
-  if (emergencyContactPhone && !PHONE_REGEX.test(emergencyContactPhone)) {
-    errors.emergencyContactPhone = "Emergency contact phone must be exactly 11 digits.";
+  if (rawEmergencyContactPhone && !PHONE_REGEX.test(emergencyContactPhone)) {
+    errors.emergencyContactPhone =
+      "Emergency contact phone must be exactly 10 digits and start with 9.";
   }
 
   if (

@@ -116,17 +116,40 @@ export async function verifyPhilippinesDocument({ base64, mimeType = "image/jpeg
     };
   }
 
+  const isIdCheck = docType === "id";
   const allowedDocTypes = pickAllowedDocTypes(docType);
-  const docLabel = docType === "supporting" ? "supporting business document" : "government ID";
   const allowedList = allowedDocTypes.map((entry) => `- ${entry}`).join("\n");
 
-  const instruction = `
+  const instruction = isIdCheck
+    ? `
+You are a strict ID document verification system for RentifyPro.
+
+You will receive one uploaded image.
+
+Task:
+1) Decide if the image shows a REAL identification document (government, school, company, or official ID), not a random object/photo.
+2) Confirm that the ID itself contains at least one human face photo.
+3) If it is not an ID, or no face photo exists on the ID, fail.
+4) IDs from any country are allowed.
+
+Return ONLY JSON:
+{
+  "passed": boolean,
+  "confidence": number,
+  "country": string,
+  "doc_type": string,
+  "has_face": boolean,
+  "face_count": number,
+  "reason": string
+}
+`.trim()
+    : `
 You are a strict document verification system for RentifyPro.
 
 You will receive a single document image (photo or scan).
 
 Task:
-1) Decide if the document is a REAL ${docLabel} issued in the Philippines.
+1) Decide if the document is a REAL supporting business document issued in the Philippines.
 2) Identify the document type ONLY from the allowed list below.
 3) If it is NOT from the Philippines or the type is unclear, fail.
 
@@ -182,6 +205,36 @@ Return ONLY JSON:
       country: "",
       doc_type: "Unknown",
       reason: "AI returned an invalid response. Please upload a clearer document image.",
+    };
+  }
+
+  if (isIdCheck) {
+    const confidence = Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : 0;
+    const rawFaceCount = Number(parsed.face_count);
+    const faceCount = Number.isFinite(rawFaceCount) ? Math.max(0, Math.floor(rawFaceCount)) : 0;
+    const hasFace = typeof parsed.has_face === "boolean" ? parsed.has_face : faceCount >= 1;
+    const rawDocType = String(parsed.doc_type || "").trim();
+    const docTypeValue = rawDocType || "Unknown";
+    const country = String(parsed.country || "Unknown").trim() || "Unknown";
+
+    if (!parsed.passed || !hasFace) {
+      return {
+        passed: false,
+        confidence,
+        country,
+        doc_type: docTypeValue,
+        reason:
+          parsed.reason ||
+          "Please upload a valid ID image that clearly shows at least one face photo.",
+      };
+    }
+
+    return {
+      passed: true,
+      confidence,
+      country,
+      doc_type: docTypeValue,
+      reason: parsed.reason || "ID verified with visible face photo.",
     };
   }
 

@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
+import { SOCKET_URL } from "./runtimeConfig";
 
-const SOCKET_URL = "http://localhost:5000";
 let socketInstance = null;
 
 export const getSocket = () => {

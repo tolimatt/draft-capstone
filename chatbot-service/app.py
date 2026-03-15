@@ -57,6 +57,21 @@ q_emb = embedder.encode(questions, normalize_embeddings=True)
 app = FastAPI(title="RentifyPro Chatbot Service (V4)")
 
 
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "service": "RentifyPro Chatbot Service",
+        "model": MODEL_NAME,
+        "dataset": str(DATASET_PATH.name),
+    }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 # Request and response models
 class ChatRequest(BaseModel):
     message: str

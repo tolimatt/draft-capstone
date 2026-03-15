@@ -17,22 +17,29 @@ import {
   buildRetryPayload,
   normalizeChatbotResponse,
   shouldRetryChatbotResponse,
+  validateChatbotInput,
 } from "../utils/chatbotPayload.js";
 
 const router = express.Router();
-const DEFAULT_CHATBOT_URL = "http://localhost:8001";
+const isProduction = process.env.NODE_ENV === "production";
+const DEFAULT_CHATBOT_URL = isProduction ? "" : "http://localhost:8001";
 
 router.post("/", async (req, res, next) => {
   try {
-    const message = String(req.body?.message || "").trim();
+    const rawMessage = String(req.body?.message || "");
     const language = String(req.body?.language || "english").trim().toLowerCase();
-    if (!message) {
-      return res.status(400).json({ message: "Message is required." });
+    const validation = validateChatbotInput(rawMessage);
+    if (!validation.isValid) {
+      return res.json(buildRejectedChatbotResponse(language, validation.reason));
     }
+    const message = validation.message;
 
     const chatbotBaseUrl = String(process.env.CHATBOT_URL || DEFAULT_CHATBOT_URL)
       .trim()
       .replace(/\/+$/, "");
+    if (!chatbotBaseUrl) {
+      return res.status(503).json({ message: "CHATBOT_URL is not configured in production." });
+    }
     await ensureChatbotServiceReady();
 
     const vehicles = await Vehicle.find({ availabilityStatus: "available" })

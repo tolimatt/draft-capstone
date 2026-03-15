@@ -1,5 +1,6 @@
 import { clearSessionOwnerProfile, clearSessionUser } from "./sessionStore";
-export const API_BASE_URL = "http://localhost:5000/api";
+import { API_BASE_URL } from "./runtimeConfig";
+export { API_BASE_URL } from "./runtimeConfig";
 
 function buildQueryString(params = {}) {
   const searchParams = new URLSearchParams();
@@ -11,6 +12,22 @@ function buildQueryString(params = {}) {
 
   const query = searchParams.toString();
   return query ? `?${query}` : "";
+}
+
+function normalizeChatContext(context = "") {
+  if (typeof context === "string") {
+    const bookingId = String(context || "").trim();
+    return bookingId ? { bookingId } : {};
+  }
+
+  if (!context || typeof context !== "object") return {};
+
+  const bookingId = String(context.bookingId || "").trim();
+  const vehicleId = String(context.vehicleId || "").trim();
+  return {
+    ...(bookingId ? { bookingId } : {}),
+    ...(vehicleId ? { vehicleId } : {}),
+  };
 }
 
 async function request(endpoint, options = {}) {
@@ -32,6 +49,19 @@ async function request(endpoint, options = {}) {
 
   if (!response.ok) {
     const msg = data.message || data.errors?.email || `Request failed (${response.status})`;
+    const error = new Error(msg);
+    error.status = response.status;
+
+    if (data && typeof data === "object") {
+      error.details = data;
+      const retryAfterSeconds = Number(data.retryAfterSeconds);
+      if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+        error.retryAfterSeconds = retryAfterSeconds;
+      }
+      if (data.retryAfterAt) {
+        error.retryAfterAt = data.retryAfterAt;
+      }
+    }
 
     if (
       response.status === 401 ||
@@ -43,7 +73,7 @@ async function request(endpoint, options = {}) {
       clearSessionUser();
     }
 
-    throw new Error(msg);
+    throw error;
   }
 
   return data;
@@ -159,16 +189,17 @@ const API = {
 
   getConversations: () => request("/chat/conversations"),
   chatWithBot: (body) => request("/chat", { method: "POST", body: JSON.stringify(body) }),
-  getMessagesWithUser: (userId, bookingId = "") =>
-    request(
-      `/chat/messages/${userId}${bookingId ? `?bookingId=${encodeURIComponent(bookingId)}` : ""}`
-    ),
+  getMessagesWithUser: (userId, context = "") =>
+    request(`/chat/messages/${userId}${buildQueryString(normalizeChatContext(context))}`),
   sendMessageToUser: (userId, body) =>
     request(`/chat/messages/${userId}`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  markMessagesAsRead: (userId) => request(`/chat/messages/${userId}/read`, { method: "PATCH" }),
+  markMessagesAsRead: (userId, context = "") =>
+    request(`/chat/messages/${userId}/read${buildQueryString(normalizeChatContext(context))}`, {
+      method: "PATCH",
+    }),
 
   getNotifications: () => request("/notifications"),
   markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: "PATCH" }),
