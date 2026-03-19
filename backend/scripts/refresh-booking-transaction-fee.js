@@ -3,14 +3,14 @@ import mongoose from "mongoose";
 import connectDB from "../config/db.js";
 import Booking from "../models/Booking.js";
 import { getTransactionFee } from "../utils/fees.js";
+import {
+  getBookingDriverHourlyRate,
+  getBookingDurationHours,
+  getBookingVehicleHourlyRate,
+  roundCurrency,
+} from "../utils/pricing.js";
 
 dotenv.config();
-
-const roundCurrency = (value) => {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * 100) / 100;
-};
 
 const getRentalTotal = (booking) => {
   const directTotal = Number(booking?.totalAmount);
@@ -24,16 +24,16 @@ const getRentalTotal = (booking) => {
     return baseAmount + driverAmount;
   }
 
-  const vehicleDailyRate = Number(booking?.vehicleDailyRate);
-  const bookingDays = Number(booking?.bookingDays || 1);
-  if (Number.isFinite(vehicleDailyRate) && vehicleDailyRate > 0 && Number.isFinite(bookingDays) && bookingDays > 0) {
-    const driverDailyRate = Number(booking?.driverDailyRate || 0);
+  const durationHours = getBookingDurationHours(booking);
+  const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
+  if (Number.isFinite(vehicleHourlyRate) && vehicleHourlyRate > 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = getBookingDriverHourlyRate(booking);
     const driverSelected = Boolean(booking?.driverSelected);
     const driverAmountFromRate =
-      driverSelected && Number.isFinite(driverDailyRate) && driverDailyRate > 0
-        ? driverDailyRate * bookingDays
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
         : 0;
-    return vehicleDailyRate * bookingDays + driverAmountFromRate;
+    return roundCurrency(vehicleHourlyRate * durationHours + driverAmountFromRate);
   }
 
   return 0;

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Mail, Loader, RefreshCcw } from "lucide-react";
 import FormInput from "./FormInput";
 import PasswordInput from "./PasswordInput";
@@ -27,6 +27,7 @@ export default function SignInPage({
 }) {
   const [form, setForm] = useState({ email: "", password: "", captchaAnswer: "" });
   const [errors, setErrors] = useState({});
+  const [dirtyFields, setDirtyFields] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [captcha, setCaptcha] = useState({ id: "", question: "" });
@@ -34,9 +35,26 @@ export default function SignInPage({
   const [rateLimitSeconds, setRateLimitSeconds] = useState(0);
   const lastSubmitRef = useRef(0);
 
+  const validateField = useCallback((field, nextForm) => {
+    if (field === "email") return SIGN_IN_VALIDATION_RULES.email(nextForm.email);
+    if (field === "password") return SIGN_IN_VALIDATION_RULES.password(nextForm.password);
+    if (field === "captchaAnswer") return SIGN_IN_VALIDATION_RULES.captcha(nextForm.captchaAnswer);
+    return "";
+  }, []);
+
   const handleChange = (field, value) => {
-    setForm({ ...form, [field]: value });
-    if (errors[field]) setErrors({ ...errors, [field]: "" });
+    const nextForm = { ...form, [field]: value };
+    setForm(nextForm);
+    setDirtyFields((prev) => ({ ...prev, [field]: true }));
+    if (field === "email" && rateLimitSeconds > 0) return;
+    setErrors((prev) => ({ ...prev, [field]: "" }));
+  };
+
+  const handleFieldBlur = (field) => {
+    if (!dirtyFields[field]) return;
+    const nextForm = { ...form };
+    if (rateLimitSeconds > 0 && field === "email") return;
+    setErrors((prev) => ({ ...prev, [field]: validateField(field, nextForm) }));
   };
 
   const loadCaptcha = async () => {
@@ -53,6 +71,7 @@ export default function SignInPage({
         question,
       });
       setForm((prev) => ({ ...prev, captchaAnswer: "" }));
+      setDirtyFields((prev) => ({ ...prev, captchaAnswer: false }));
       setErrors((prev) => ({ ...prev, captchaAnswer: "" }));
     } catch (error) {
       const message = String(error?.message || "").trim();
@@ -257,6 +276,7 @@ export default function SignInPage({
             iconPosition="left"
             showEmailHint
             maxLength={254}
+            onBlur={() => handleFieldBlur("email")}
           />
 
           <PasswordInput
@@ -268,6 +288,7 @@ export default function SignInPage({
             placeholder="Enter Password"
             required
             maxLength={128}
+            onBlur={() => handleFieldBlur("password")}
           />
 
           <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
@@ -291,6 +312,7 @@ export default function SignInPage({
                       type="text"
                       value={form.captchaAnswer}
                       onChange={(e) => handleChange("captchaAnswer", e.target.value.replace(/[^0-9]/g, ""))}
+                      onBlur={() => handleFieldBlur("captchaAnswer")}
                       disabled={isLoading || captchaLoading}
                       placeholder="?"
                       inputMode="numeric"

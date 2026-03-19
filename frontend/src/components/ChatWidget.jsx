@@ -72,9 +72,9 @@ const createWelcomeMessage = (language, date = new Date()) => ({
   recommendations: [],
 });
 
-const formatDailyRate = (value) => {
+const formatHourlyRate = (value) => {
   const amount = Number(value || 0);
-  return `P${amount.toLocaleString()} / day`;
+  return `P${amount.toLocaleString()} / hour`;
 };
 
 const normalizeRecommendations = (recommendations) =>
@@ -390,7 +390,7 @@ export default function ChatWidget({ isOpen, onClose }) {
                         {vehicle.seats || 0} seats
                       </p>
                       <p className="mt-2 text-sm font-semibold text-[#0B75E7]">
-                        {formatDailyRate(vehicle.dailyRate)}
+                        {formatHourlyRate(vehicle.hourlyRate ?? vehicle.dailyRate)}
                       </p>
                     </article>
                   ))}

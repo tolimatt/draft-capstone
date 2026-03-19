@@ -159,6 +159,16 @@ const API = {
     request(`/bookings/${id}/blockchain-record`, {
       method: "POST",
     }),
+  requestBookingExtension: (id, body = {}) =>
+    request(`/bookings/${id}/extension-request`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
+  proceedLateReturn: (id, body = {}) =>
+    request(`/bookings/${id}/late-return/proceed`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
   cancelBooking: (id) => request(`/bookings/${id}/cancel`, { method: "PATCH" }),
   reviewBooking: (id, body) => request(`/bookings/${id}/review`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -171,6 +181,11 @@ const API = {
     request(`/owner/bookings/${id}/payment-status`, {
       method: "PATCH",
       body: JSON.stringify({ paymentStatus }),
+    }),
+  reviewOwnerBookingExtensionRequest: (id, action, body = {}) =>
+    request(`/owner/bookings/${id}/extension-request`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...body }),
     }),
   reviewOwnerWalkInPaymentRequest: (id, action, body = {}) =>
     request(`/owner/bookings/${id}/walk-in-request`, {
@@ -196,6 +211,19 @@ const API = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  editChatMessage: (messageId, body) =>
+    request(`/chat/messages/${messageId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deleteChatMessage: (messageId) =>
+    request(`/chat/messages/${messageId}`, {
+      method: "DELETE",
+    }),
+  deleteConversation: (userId, context = "") =>
+    request(`/chat/conversations/${userId}${buildQueryString(normalizeChatContext(context))}`, {
+      method: "DELETE",
+    }),
   markMessagesAsRead: (userId, context = "") =>
     request(`/chat/messages/${userId}/read${buildQueryString(normalizeChatContext(context))}`, {
       method: "PATCH",
@@ -204,6 +232,8 @@ const API = {
   getNotifications: () => request("/notifications"),
   markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: "PATCH" }),
   markAllNotificationsRead: () => request("/notifications/read-all", { method: "PATCH" }),
+  deleteAllReadNotifications: () => request("/notifications/read-all", { method: "DELETE" }),
+  archiveReadNotifications: () => request("/notifications/archive-read", { method: "PATCH" }),
 };
 
 export default API;

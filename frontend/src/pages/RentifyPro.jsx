@@ -36,7 +36,7 @@ const categories = [
     image: "/cars.png",
     tags: ["Sedan", "Hatchback", "SUV", "Luxury"],
     description: "Ideal for family trips, business meetings, and city drives.",
-    price: "P500/day",
+    price: "P500/hr",
     vehicleType: "car",
   },
   {
@@ -46,7 +46,7 @@ const categories = [
     image: "/motor.png",
     tags: ["Scooter", "Sport Bike", "Cruiser"],
     description: "Great for fast commutes and flexible urban travel.",
-    price: "P300/day",
+    price: "P300/hr",
     vehicleType: "motorcycle",
   },
   {
@@ -56,7 +56,7 @@ const categories = [
     image: "/van.png",
     tags: ["Passenger", "Mini Van", "Cargo", "Luxury"],
     description: "Spacious and reliable for group trips and transport runs.",
-    price: "P1,500/day",
+    price: "P1,500/hr",
     vehicleType: "van",
   },
   {
@@ -66,7 +66,7 @@ const categories = [
     image: "/trucks.png",
     tags: ["Pick-up", "Cargo", "Refrigerated", "Flat Bed"],
     description: "Built for heavy-duty tasks and dependable hauling.",
-    price: "P2,000/day",
+    price: "P2,000/hr",
     vehicleType: "truck",
   },
 ];
@@ -92,7 +92,7 @@ const normalizeFeaturedVehicle = (vehicle) => ({
   seats: vehicle.specs?.seats || 4,
   transmission: vehicle.specs?.transmission || "Automatic",
   fuel: vehicle.specs?.fuel || "Gasoline",
-  price: Number(vehicle.dailyRentalRate || 0),
+  price: Number((vehicle.hourlyRentalRate ?? vehicle.dailyRentalRate) || 0),
   rating: Number.isFinite(Number(vehicle.averageRating ?? vehicle.rating))
     ? Number(Number(vehicle.averageRating ?? vehicle.rating).toFixed(1))
     : 0,
@@ -191,11 +191,14 @@ const getNotificationAgeMs = (value) => {
   return Date.now() - timestamp;
 };
 
+const isNotificationRead = (notification) =>
+  Boolean(notification?.readAt);
+
 const shouldIncludeInModal = (notification) => {
   const ageMs = getNotificationAgeMs(notification?.createdAt);
   if (!Number.isFinite(ageMs) || ageMs < 0) return false;
   if (ageMs <= ONE_DAY_IN_MS) return true;
-  return !notification?.readAt && ageMs <= TWO_DAYS_IN_MS;
+  return !isNotificationRead(notification) && ageMs <= TWO_DAYS_IN_MS;
 };
 
 const formatNotificationTime = (value) =>
@@ -221,6 +224,8 @@ export default function RentifyPro({
   onViewDetails,
   onNavigateToBookingHistory,
   onNavigateToAccountSettings,
+  onNavigateToPrivacyPolicy,
+  onNavigateToTermsAndConditions,
   isLoggedIn,
   user,
   onLogout,
@@ -312,7 +317,7 @@ export default function RentifyPro({
   };
 
   const unreadDailyCount = useMemo(
-    () => dailyNotifications.filter((notification) => !notification.readAt).length,
+    () => dailyNotifications.filter((notification) => !isNotificationRead(notification)).length,
     [dailyNotifications]
   );
 
@@ -325,7 +330,9 @@ export default function RentifyPro({
       const now = new Date().toISOString();
       setDailyNotifications((prev) =>
         prev
-          .map((notification) => (notification.readAt ? notification : { ...notification, readAt: now }))
+          .map((notification) =>
+            isNotificationRead(notification) ? notification : { ...notification, readAt: now }
+          )
           .filter((notification) => shouldIncludeInModal(notification))
       );
       requestLiveCountersRefresh();
@@ -607,7 +614,7 @@ export default function RentifyPro({
 
                     <p className="text-[#0B75E7] text-2xl font-bold mt-2">
                       P{vehicle.price.toLocaleString()}
-                      <span className="text-sm text-slate-500 font-medium"> / day</span>
+                      <span className="text-sm text-slate-500 font-medium"> / hour</span>
                     </p>
 
                     <div className="pt-3 mt-auto">
@@ -742,8 +749,8 @@ export default function RentifyPro({
           <div className="border-t border-blue-400/50 mt-10 pt-5 flex flex-col sm:flex-row items-center justify-between text-blue-100 text-sm gap-2">
             <p>Copyright 2026 RentifyPro. All rights reserved.</p>
             <div className="flex gap-5">
-              <button>Privacy Policy</button>
-              <button>Terms and Conditions</button>
+              <button onClick={onNavigateToPrivacyPolicy}>Privacy Policy</button>
+              <button onClick={onNavigateToTermsAndConditions}>Terms and Conditions</button>
             </div>
           </div>
         </div>
@@ -794,7 +801,7 @@ export default function RentifyPro({
 
               <div className="space-y-3">
                 {dailyNotifications.map((notification) => {
-                  const isUnread = !notification.readAt;
+                  const isUnread = !isNotificationRead(notification);
                   return (
                     <article
                       key={notification._id}

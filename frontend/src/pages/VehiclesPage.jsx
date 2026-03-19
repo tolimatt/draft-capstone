@@ -26,9 +26,9 @@ const normalizeVehicle = (vehicle) => ({
   transmission: vehicle.specs?.transmission || "Automatic",
   fuel: vehicle.specs?.fuel || "Gasoline",
   plateNumber: vehicle.specs?.plateNumber || "",
-  price: Number(vehicle.dailyRentalRate || 0),
+  price: Number((vehicle.hourlyRentalRate ?? vehicle.dailyRentalRate) || 0),
   driverOptionEnabled: Boolean(vehicle.driverOptionEnabled),
-  driverDailyRate: Number(vehicle.driverDailyRate || 0),
+  driverDailyRate: Number((vehicle.driverHourlyRate ?? vehicle.driverDailyRate) || 0),
   rating: Number.isFinite(Number(vehicle.averageRating ?? vehicle.rating))
     ? Number(Number(vehicle.averageRating ?? vehicle.rating).toFixed(1))
     : 0,
@@ -282,7 +282,7 @@ export default function VehiclesPage({
 
                       <div className="text-xl font-bold text-[#0B75E7]">
                         P{vehicle.price.toLocaleString()}
-                        <span className="text-sm text-slate-500 font-medium"> / day</span>
+                        <span className="text-sm text-slate-500 font-medium"> / hour</span>
                       </div>
 
                       <div className="pt-4 mt-auto">

@@ -58,7 +58,7 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
         </div>
 
         <div className="text-lg font-bold text-[#017FE6] mb-4">
-          ₱{vehicle.price.toLocaleString()} / day
+          ₱{vehicle.price.toLocaleString()} / hour
         </div>
 
         <div>
@@ -70,3 +70,4 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
     </div>
   );
 }
+

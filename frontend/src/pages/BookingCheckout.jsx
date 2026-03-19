@@ -130,14 +130,14 @@ useEffect(() => {
   });
 }, [driveType, isLoggedIn, user]);
 
-// Insurance price per day
+// Insurance price per hour
 const INSURANCE_PRICES = {
   basic: 0,
   standard: 500,
   premium: 1000,
 };
 
-// Selected insurance price per day
+// Selected insurance price per hour
 const insurancePerDay = INSURANCE_PRICES[insuranceType] || 0;
 
 // Totals
@@ -525,7 +525,7 @@ const handleBack = () => {
       </div>
 
       <span className="font-semibold text-[#017FE6]">
-        ₱{INSURANCE_PRICES.standard} / day
+        ₱{INSURANCE_PRICES.standard} / hour
       </span>
     </label>
 
@@ -546,7 +546,7 @@ const handleBack = () => {
       </div>
 
       <span className="font-semibold text-[#017FE6]">
-        ₱{INSURANCE_PRICES.premium} / day
+        ₱{INSURANCE_PRICES.premium} / hour
       </span>
     </label>
 
@@ -798,30 +798,8 @@ const handleBack = () => {
           <img
             src={vehicle.image}
             alt={vehicle.name}
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-            className="w-25 h-25 object-cover object-center rounded-xl bg-gray-50 p-2"
-=======
             className="object-contain object-center rounded-xl bg-gray-50 p-2"
             style={{ width: "6.25rem", height: "6.25rem" }}
->>>>>>> theirs
-=======
-            className="w-25 h-25 object-contain object-center rounded-xl bg-gray-50 p-2"
->>>>>>> theirs
-=======
-            className="object-contain object-center rounded-xl bg-gray-50 p-2"
-            style={{ width: "6.25rem", height: "6.25rem" }}
->>>>>>> theirs
-=======
-            className="w-25 h-25 object-contain object-center rounded-xl bg-gray-50 p-2"
->>>>>>> theirs
-=======
-            className="object-contain object-center rounded-xl bg-gray-50 p-2"
-            style={{ width: "6.25rem", height: "6.25rem" }}
->>>>>>> theirs
           />
         </div>
 
@@ -836,7 +814,7 @@ const handleBack = () => {
 
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
-            <span>Daily Rate</span>
+            <span>Hourly Rate</span>
             <span>₱{dailyRate.toLocaleString()}</span>
           </div>
 
@@ -1001,3 +979,4 @@ const handleBack = () => {
 };
 
 export default BookingCheckout;
+

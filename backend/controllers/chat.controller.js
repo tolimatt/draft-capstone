@@ -8,11 +8,18 @@ import { censorProfanityInText } from "../utils/chatModeration.js";
 
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
 const toIdString = (value) => String(value?._id || value || "");
+const DELETED_MESSAGE_PLACEHOLDER = "This message was deleted.";
 
 const buildOwnerRenterQuery = (userA, userB) => ({
   $or: [
     { owner: userA, renter: userB },
     { owner: userB, renter: userA },
+  ],
+});
+const buildParticipantQuery = (userA, userB) => ({
+  $or: [
+    { sender: userA, receiver: userB },
+    { sender: userB, receiver: userA },
   ],
 });
 
@@ -32,11 +39,21 @@ const validateChatContext = ({ bookingId, vehicleId }) => {
 
 const sanitizeChatMessage = (message = {}) => {
   if (!message || typeof message !== "object") return message;
+  const { hiddenFor, ...safeMessage } = message;
+  const isDeleted = Boolean(safeMessage.isDeleted);
   return {
-    ...message,
-    text: censorProfanityInText(String(message.text || "")),
+    ...safeMessage,
+    text: isDeleted
+      ? DELETED_MESSAGE_PLACEHOLDER
+      : censorProfanityInText(String(safeMessage.text || "")),
+    isEdited: Boolean(safeMessage.editedAt),
+    isDeleted,
   };
 };
+
+const isHiddenForUser = (message, userId) =>
+  Array.isArray(message?.hiddenFor) &&
+  message.hiddenFor.some((entry) => String(entry) === String(userId));
 
 const applyScopeQuery = (query, relation, context = {}) => {
   if (context.bookingId && relation?.bookingId) {
@@ -117,6 +134,14 @@ const resolveOwnerRenterPair = async ({ senderId, partnerId, bookingId, vehicleI
   };
 };
 
+const populateChatMessage = (messageId) =>
+  ChatMessage.findById(messageId)
+    .populate("sender", "name email avatar")
+    .populate("receiver", "name email avatar")
+    .populate("booking", "pickupAt returnAt status")
+    .populate("vehicle", "name")
+    .lean();
+
 export const getConversations = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -124,6 +149,7 @@ export const getConversations = async (req, res) => {
     const [messages, unreadCounts] = await Promise.all([
       ChatMessage.find({
         $or: [{ sender: userId }, { receiver: userId }],
+        hiddenFor: { $ne: userId },
       })
         .sort({ createdAt: -1 })
         .limit(500)
@@ -137,6 +163,7 @@ export const getConversations = async (req, res) => {
           $match: {
             receiver: userId,
             readAt: null,
+            hiddenFor: { $ne: userId },
           },
         },
         {
@@ -162,22 +189,25 @@ export const getConversations = async (req, res) => {
       const partnerId = String(partner?._id || partner);
       if (!partnerId || byPartner.has(partnerId)) continue;
 
-        byPartner.set(partnerId, {
+      byPartner.set(partnerId, {
         partner: {
-            _id: partner?._id || partnerId,
-            name: partner?.name || partner?.email || "User",
-            email: partner?.email || "",
-            avatar: partner?.avatar || "",
-          },
-          lastMessage: {
+          _id: partner?._id || partnerId,
+          name: partner?.name || partner?.email || "User",
+          email: partner?.email || "",
+          avatar: partner?.avatar || "",
+        },
+        lastMessage: sanitizeChatMessage({
           _id: message._id,
-          text: censorProfanityInText(String(message.text || "")),
+          text: message.text,
           sender: message.sender,
           receiver: message.receiver,
           booking: message.booking || null,
           vehicle: message.vehicle || null,
+          editedAt: message.editedAt || null,
+          isDeleted: Boolean(message.isDeleted),
+          deletedAt: message.deletedAt || null,
           createdAt: message.createdAt,
-        },
+        }),
         unreadCount: unreadBySender.get(partnerId) || 0,
       });
     }
@@ -217,12 +247,8 @@ export const getMessagesWithUser = async (req, res) => {
       });
     }
 
-    const query = {
-      $or: [
-        { sender: currentUserId, receiver: partnerId },
-        { sender: partnerId, receiver: currentUserId },
-      ],
-    };
+    const query = buildParticipantQuery(currentUserId, partnerId);
+    query.hiddenFor = { $ne: currentUserId };
     applyScopeQuery(query, relation, context);
 
     const messages = await ChatMessage.find(query)
@@ -289,14 +315,10 @@ export const sendMessageToUser = async (req, res) => {
       receiver: receiverId,
       text: censorProfanityInText(text),
       attachments: [],
+      hiddenFor: [],
     });
 
-    const populated = await ChatMessage.findById(message._id)
-      .populate("sender", "name email avatar")
-      .populate("receiver", "name email avatar")
-      .populate("booking", "pickupAt returnAt status")
-      .populate("vehicle", "name")
-      .lean();
+    const populated = await populateChatMessage(message._id);
     const sanitizedMessage = sanitizeChatMessage(populated);
 
     await createNotification({
@@ -317,6 +339,138 @@ export const sendMessageToUser = async (req, res) => {
     res.status(201).json({ success: true, message: sanitizedMessage });
   } catch {
     res.status(500).json({ success: false, message: "Failed to send message." });
+  }
+};
+
+export const editMessage = async (req, res) => {
+  try {
+    const messageId = req.params.messageId;
+    const currentUserId = req.user._id;
+    const text = String(req.body?.text || "").trim();
+
+    if (!isObjectId(messageId)) {
+      return res.status(400).json({ success: false, message: "Invalid message ID." });
+    }
+    if (!text) {
+      return res.status(400).json({ success: false, message: "Message text is required." });
+    }
+
+    const existingMessage = await ChatMessage.findById(messageId);
+    if (!existingMessage || isHiddenForUser(existingMessage, currentUserId)) {
+      return res.status(404).json({ success: false, message: "Message not found." });
+    }
+    if (String(existingMessage.sender) !== String(currentUserId)) {
+      return res.status(403).json({ success: false, message: "You can only edit your own messages." });
+    }
+    if (existingMessage.isDeleted) {
+      return res.status(400).json({ success: false, message: "Deleted messages cannot be edited." });
+    }
+
+    existingMessage.text = censorProfanityInText(text);
+    existingMessage.editedAt = new Date();
+    await existingMessage.save();
+
+    const populated = await populateChatMessage(existingMessage._id);
+    const sanitizedMessage = sanitizeChatMessage(populated);
+
+    emitToUser(String(existingMessage.sender), "chat:message:update", sanitizedMessage);
+    emitToUser(String(existingMessage.receiver), "chat:message:update", sanitizedMessage);
+
+    res.json({ success: true, message: sanitizedMessage });
+  } catch {
+    res.status(500).json({ success: false, message: "Failed to edit message." });
+  }
+};
+
+export const deleteMessage = async (req, res) => {
+  try {
+    const messageId = req.params.messageId;
+    const currentUserId = req.user._id;
+
+    if (!isObjectId(messageId)) {
+      return res.status(400).json({ success: false, message: "Invalid message ID." });
+    }
+
+    const existingMessage = await ChatMessage.findById(messageId);
+    if (!existingMessage || isHiddenForUser(existingMessage, currentUserId)) {
+      return res.status(404).json({ success: false, message: "Message not found." });
+    }
+    if (String(existingMessage.sender) !== String(currentUserId)) {
+      return res.status(403).json({ success: false, message: "You can only delete your own messages." });
+    }
+
+    if (!existingMessage.isDeleted) {
+      existingMessage.text = DELETED_MESSAGE_PLACEHOLDER;
+      existingMessage.attachments = [];
+      existingMessage.isDeleted = true;
+      existingMessage.deletedAt = new Date();
+      await existingMessage.save();
+    }
+
+    const populated = await populateChatMessage(existingMessage._id);
+    const sanitizedMessage = sanitizeChatMessage(populated);
+
+    emitToUser(String(existingMessage.sender), "chat:message:update", sanitizedMessage);
+    emitToUser(String(existingMessage.receiver), "chat:message:update", sanitizedMessage);
+
+    res.json({ success: true, message: sanitizedMessage });
+  } catch {
+    res.status(500).json({ success: false, message: "Failed to delete message." });
+  }
+};
+
+export const deleteConversation = async (req, res) => {
+  try {
+    const partnerId = req.params.userId;
+    const currentUserId = req.user._id;
+    const context = parseChatContext(req.query);
+
+    if (!isObjectId(partnerId)) {
+      return res.status(400).json({ success: false, message: "Invalid user ID." });
+    }
+
+    const contextError = validateChatContext(context);
+    if (contextError) {
+      return res.status(400).json({ success: false, message: contextError });
+    }
+
+    const relation = await resolveOwnerRenterPair({
+      senderId: currentUserId,
+      partnerId,
+      bookingId: context.bookingId,
+      vehicleId: context.vehicleId,
+    });
+
+    if (!relation) {
+      return res.status(403).json({
+        success: false,
+        message: "Chat is only available between renters and owners with related bookings.",
+      });
+    }
+
+    const query = buildParticipantQuery(currentUserId, partnerId);
+    query.hiddenFor = { $ne: currentUserId };
+    applyScopeQuery(query, relation, context);
+
+    const result = await ChatMessage.updateMany(
+      query,
+      { $addToSet: { hiddenFor: currentUserId } }
+    );
+
+    emitToUser(String(currentUserId), "chat:conversation:deleted", {
+      partnerId: String(partnerId),
+      bookingId: context.bookingId || null,
+      vehicleId: context.vehicleId || null,
+      deletedCount: result.modifiedCount || 0,
+    });
+
+    res.json({
+      success: true,
+      message: "Conversation deleted.",
+      deletedCount: result.modifiedCount || 0,
+    });
+  } catch {
+    res.status(500).json({ success: false, message: "Failed to delete conversation." });
   }
 };
 
@@ -353,6 +507,7 @@ export const markMessagesAsRead = async (req, res) => {
       sender: partnerId,
       receiver: currentUserId,
       readAt: null,
+      hiddenFor: { $ne: currentUserId },
     };
     applyScopeQuery(query, relation, context);
 

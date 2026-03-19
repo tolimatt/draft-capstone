@@ -33,6 +33,14 @@ import { initSocket } from "./socket/index.js";
 import { warmupFaceService } from "./utils/faceServiceManager.js";
 import { warmupChatbotService } from "./utils/chatbotServiceManager.js";
 import { createOriginChecker } from "./utils/corsOrigins.js";
+import {
+  startNotificationCleanupJob,
+  stopNotificationCleanupJob,
+} from "./jobs/notificationCleanup.job.js";
+import {
+  startBookingLifecycleJob,
+  stopBookingLifecycleJob,
+} from "./jobs/bookingLifecycle.job.js";
 
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -166,6 +174,8 @@ const startServer = async () => {
   console.log(`  Logs:         ./logs/audit-YYYY-MM-DD.log`);
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
   });
+  startNotificationCleanupJob();
+  startBookingLifecycleJob();
 };
 
 startServer().catch((error) => {
@@ -176,6 +186,8 @@ startServer().catch((error) => {
 // Clean shutdown
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled Rejection:", err);
+  stopNotificationCleanupJob();
+  stopBookingLifecycleJob();
   if (!server) {
     process.exit(1);
     return;
@@ -185,6 +197,19 @@ process.on("unhandledRejection", (err) => {
 
 process.on("SIGTERM", () => {
   console.log("SIGTERM received: closing server");
+  stopNotificationCleanupJob();
+  stopBookingLifecycleJob();
+  if (!server) {
+    process.exit(0);
+    return;
+  }
+  server.close(() => process.exit(0));
+});
+
+process.on("SIGINT", () => {
+  console.log("SIGINT received: closing server");
+  stopNotificationCleanupJob();
+  stopBookingLifecycleJob();
   if (!server) {
     process.exit(0);
     return;

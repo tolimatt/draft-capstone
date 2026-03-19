@@ -1,7 +1,7 @@
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
 
-const ACTIVE_BOOKING_STATUSES = ["pending", "confirmed"];
+const ACTIVE_BOOKING_STATUSES = ["pending", "confirmed", "extended"];
 
 export const hasActiveBookingForVehicle = async (vehicleId) => {
   if (!vehicleId) return false;

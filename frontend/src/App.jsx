@@ -10,6 +10,8 @@ import BookingsPage from "./pages/BookingsPage";
 import RealtimeChatPage from "./pages/RealtimeChatPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AboutPage from "./pages/AboutPage";
+import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
+import TermsAndConditionsPage from "./pages/TermsAndConditionsPage";
 import AccountSettings from "./pages/AccountSettings";
 import ProceedVehicleOwner from "./pages/ProceedVehicleOwner";
 import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
@@ -45,6 +47,10 @@ const ROUTE_TO_PAGE = {
   "/vehicles": "vehicles",
   "/vehicle-details": "vehicle-details",
   "/about": "about",
+  "/privacy": "privacy-policy",
+  "/privacy-policy": "privacy-policy",
+  "/terms": "terms-and-conditions",
+  "/terms-and-conditions": "terms-and-conditions",
   "/bookings": "booking-history",
   "/signin": "signin",
   "/register": "register",
@@ -715,6 +721,22 @@ const App = () => {
     setCurrentPage("home");
   };
 
+  const goToPrivacyPolicy = () => {
+    if (currentPage === "privacy-policy") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setCurrentPage("privacy-policy");
+  };
+
+  const goToTermsAndConditions = () => {
+    if (currentPage === "terms-and-conditions") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setCurrentPage("terms-and-conditions");
+  };
+
   useEffect(() => {
     if (!pendingScrollTarget) return undefined;
 
@@ -772,6 +794,8 @@ const App = () => {
           onNavigateToRegister={() => setCurrentPage("register")}
           onNavigateToAbout={navigateToAbout}
           onNavigateToContacts={navigateToContacts}
+          onNavigateToPrivacyPolicy={goToPrivacyPolicy}
+          onNavigateToTermsAndConditions={goToTermsAndConditions}
           onSearch={(data) => {
             setBookingData(data);
             setCurrentPage("vehicles");
@@ -1014,6 +1038,46 @@ const App = () => {
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToPrivacyPolicy={goToPrivacyPolicy}
+          onNavigateToTermsAndConditions={goToTermsAndConditions}
+          onLogout={requestLogout}
+        />
+      )}
+
+      {currentPage === "privacy-policy" && (
+        <PrivacyPolicyPage
+          isLoggedIn={isLoggedIn}
+          user={user}
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToSignIn={() => setCurrentPage("signin")}
+          onNavigateToRegister={() => setCurrentPage("register")}
+          onNavigateToVehicles={() => setCurrentPage("vehicles")}
+          onNavigateToBookingHistory={goToBookingHistory}
+          onNavigateToAbout={navigateToAbout}
+          onNavigateToContacts={navigateToContacts}
+          onNavigateToChat={goToRealtimeChat}
+          onNavigateToNotifications={goToNotifications}
+          onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToTermsAndConditions={goToTermsAndConditions}
+          onLogout={requestLogout}
+        />
+      )}
+
+      {currentPage === "terms-and-conditions" && (
+        <TermsAndConditionsPage
+          isLoggedIn={isLoggedIn}
+          user={user}
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToSignIn={() => setCurrentPage("signin")}
+          onNavigateToRegister={() => setCurrentPage("register")}
+          onNavigateToVehicles={() => setCurrentPage("vehicles")}
+          onNavigateToBookingHistory={goToBookingHistory}
+          onNavigateToAbout={navigateToAbout}
+          onNavigateToContacts={navigateToContacts}
+          onNavigateToChat={goToRealtimeChat}
+          onNavigateToNotifications={goToNotifications}
+          onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToPrivacyPolicy={goToPrivacyPolicy}
           onLogout={requestLogout}
         />
       )}

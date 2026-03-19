@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { getVehicleHourlyRate } from "./pricing.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -663,7 +664,14 @@ function normalizeVehicleForChatbot(vehicle) {
     type: normalizeVehicleType(vehicle?.type || specs?.type || specs?.subType || ""),
     transmission: normalizeTransmission(vehicle?.transmission || specs?.transmission || ""),
     seats: Number(vehicle?.seats || specs?.seats || 0) || 0,
-    dailyRate: Number(vehicle?.dailyRate || vehicle?.dailyRentalRate || 0) || 0,
+    dailyRate: getVehicleHourlyRate(vehicle, {
+      rateField: "dailyRentalRate",
+      unitField: "pricingUnit",
+    }),
+    hourlyRate: getVehicleHourlyRate(vehicle, {
+      rateField: "dailyRentalRate",
+      unitField: "pricingUnit",
+    }),
     isAvailable: vehicle?.isAvailable ?? vehicle?.availabilityStatus === "available",
     location: cleanText(vehicle?.location || ""),
     imageUrl,

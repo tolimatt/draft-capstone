@@ -137,7 +137,7 @@ function VehicleModal({
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
-                  <label className={labelClass}>Daily Rate</label>
+                  <label className={labelClass}>Hourly Rate</label>
                   <input
                     type="number"
                     min="0"
@@ -663,7 +663,7 @@ function Vehicles() {
 
               <div className="text-xl font-bold text-[#0B75E7]">
                 {formatCurrency(vehicle.dailyRentalRate)}
-                <span className="text-sm text-slate-500 font-medium"> / day</span>
+                <span className="text-sm text-slate-500 font-medium"> / hour</span>
               </div>
 
               <div className="pt-2 grid grid-cols-3 gap-2">

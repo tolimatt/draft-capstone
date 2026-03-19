@@ -7,10 +7,19 @@ import ChatWidget from "../components/ChatWidget";
 import { requestLiveCountersRefresh } from "../utils/liveCounters";
 import { getTransactionFee } from "../utils/fees";
 import { getSessionUser } from "../utils/sessionStore";
+import {
+  formatDateInput,
+  formatDurationMinutes,
+  formatTimeInput,
+  getDateTime,
+  getDurationHoursFromMinutes,
+  getDurationMinutesBetween,
+} from "../utils/dateUtils";
 
 const statusStyles = {
   pending: "bg-amber-100 text-amber-800 border border-amber-200",
   confirmed: "bg-blue-100 text-blue-800 border border-blue-200",
+  extended: "bg-violet-100 text-violet-800 border border-violet-200",
   completed: "bg-emerald-100 text-emerald-800 border border-emerald-200",
   cancelled: "bg-rose-100 text-rose-800 border border-rose-200",
   rejected: "bg-rose-100 text-rose-800 border border-rose-200",
@@ -27,7 +36,7 @@ const DOWNPAYMENT_RATE = 0.3;
 const money = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   })}`;
 const moneyWithCents = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
@@ -41,34 +50,59 @@ const toTitleCase = (value = "") =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 const appendUniqueMessage = (list, message) =>
   list.some((item) => item._id === message._id) ? list : [...list, message];
+const replaceMessageById = (list, message) =>
+  list.map((item) => (item._id === message._id ? { ...item, ...message } : item));
+const getBookingDurationMinutesForPricing = (booking) => {
+  const directMinutes = Number(booking?.bookingDurationMinutes);
+  if (Number.isFinite(directMinutes) && directMinutes > 0) return Math.round(directMinutes);
+
+  if (booking?.pickupAt && booking?.returnAt) {
+    const rangeMinutes = getDurationMinutesBetween(booking.pickupAt, booking.returnAt);
+    if (rangeMinutes > 0) return rangeMinutes;
+  }
+
+  const directHours = Number(booking?.bookingDurationHours);
+  if (Number.isFinite(directHours) && directHours > 0) return Math.round(directHours * 60);
+
+  const bookingDays = Number(booking?.bookingDays || 0);
+  if (Number.isFinite(bookingDays) && bookingDays > 0) return Math.round(bookingDays * 24 * 60);
+
+  return 0;
+};
+
 const getRentalTotal = (booking) => {
+  const latePenaltyFee = Number(
+    booking?.lateReturnPenaltyFee ?? booking?.lateReturn?.penaltyFee ?? booking?.late_return?.penaltyFee ?? 0
+  );
+  const safeLatePenaltyFee = Number.isFinite(latePenaltyFee) && latePenaltyFee > 0 ? roundCurrency(latePenaltyFee) : 0;
+
   const total = Number(booking?.totalAmount);
-  if (Number.isFinite(total) && total >= 0) return total;
+  if (Number.isFinite(total) && total >= 0) return roundCurrency(total + safeLatePenaltyFee);
 
   const baseAmount = Number(booking?.baseAmount);
   const driverAmount = Number(booking?.driverAmount);
   if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount > 0) {
-    return baseAmount + driverAmount;
+    return roundCurrency(baseAmount + driverAmount + safeLatePenaltyFee);
   }
 
-  const vehicleDailyRate = Number(booking?.vehicleDailyRate);
-  const bookingDays = Number(booking?.bookingDays || 1);
-  if (Number.isFinite(vehicleDailyRate) && vehicleDailyRate > 0 && Number.isFinite(bookingDays) && bookingDays > 0) {
-    const driverDailyRate = Number(booking?.driverDailyRate || 0);
+  const durationHours = getDurationHoursFromMinutes(getBookingDurationMinutesForPricing(booking));
+  const vehicleHourlyRate = Number((booking?.vehicleHourlyRate ?? booking?.vehicleDailyRate) || 0);
+  if (Number.isFinite(vehicleHourlyRate) && vehicleHourlyRate > 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = Number((booking?.driverHourlyRate ?? booking?.driverDailyRate) || 0);
     const driverSelected = Boolean(booking?.driverSelected);
     const driverAmountFromRate =
-      driverSelected && Number.isFinite(driverDailyRate) && driverDailyRate > 0
-        ? driverDailyRate * bookingDays
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
         : 0;
-    return vehicleDailyRate * bookingDays + driverAmountFromRate;
+    return roundCurrency(vehicleHourlyRate * durationHours + driverAmountFromRate + safeLatePenaltyFee);
   }
 
   const payable = Number(booking?.amountPayable);
   if (Number.isFinite(payable) && payable >= 0) {
-    return Math.max(payable - getTransactionFee(), 0);
+    return Math.max(roundCurrency(payable - getTransactionFee()), 0);
   }
 
-  return 0;
+  return safeLatePenaltyFee;
 };
 
 const getVehicleRateForPayment = (booking) => getRentalTotal(booking);
@@ -102,6 +136,29 @@ const getWalkInStatus = (booking) =>
   String(booking?.walkInPayment?.status || booking?.walk_in_payment?.status || "none")
     .trim()
     .toLowerCase();
+
+const getLateReturnInfo = (booking) => {
+  const lateReturn = booking?.lateReturn || booking?.late_return || {};
+  const overdueMinutes = Number(lateReturn?.overdueMinutes || 0);
+  const penaltyFee = Number(lateReturn?.penaltyFee || booking?.lateReturnPenaltyFee || 0);
+  return {
+    isOverdue: Boolean(lateReturn?.isOverdue),
+    overdueMinutes: Number.isFinite(overdueMinutes) && overdueMinutes > 0 ? Math.round(overdueMinutes) : 0,
+    penaltyFee: Number.isFinite(penaltyFee) && penaltyFee > 0 ? roundCurrency(penaltyFee) : 0,
+    action: String(lateReturn?.action || "none").trim().toLowerCase(),
+  };
+};
+
+const getExtensionRequestInfo = (booking) => {
+  const extension = booking?.extensionRequest || booking?.extension_request || {};
+  return {
+    status: String(extension?.status || "none").trim().toLowerCase(),
+    currentReturnAt: extension?.currentReturnAt || null,
+    requestedReturnAt: extension?.requestedReturnAt || null,
+    requestNote: String(extension?.requestNote || "").trim(),
+    reviewNote: String(extension?.reviewNote || "").trim(),
+  };
+};
 
 const getWalkInStatusMessage = (booking) => {
   const status = getWalkInStatus(booking);
@@ -144,6 +201,14 @@ export default function BookingsPage({
   const [chatMessages, setChatMessages] = useState([]);
   const [chatText, setChatText] = useState("");
   const [chatError, setChatError] = useState("");
+  const [editingChatMessageId, setEditingChatMessageId] = useState("");
+  const [editingChatText, setEditingChatText] = useState("");
+  const [savingChatEdit, setSavingChatEdit] = useState(false);
+  const [deletingChatMessageId, setDeletingChatMessageId] = useState("");
+  const [confirmDeleteChatMessageId, setConfirmDeleteChatMessageId] = useState("");
+  const [activeChatMessageActionId, setActiveChatMessageActionId] = useState("");
+  const [showDeleteChatConversationConfirm, setShowDeleteChatConversationConfirm] = useState(false);
+  const [deletingChatConversation, setDeletingChatConversation] = useState(false);
   const [showAuthPrompt, setShowAuthPrompt] = useState(!isLoggedIn);
   const [payingBookingId, setPayingBookingId] = useState("");
   const [verifyingBookingId, setVerifyingBookingId] = useState("");
@@ -151,6 +216,14 @@ export default function BookingsPage({
   const [paymentNotice, setPaymentNotice] = useState("");
   const [approvalModalBooking, setApprovalModalBooking] = useState(null);
   const [paymentConfirmBooking, setPaymentConfirmBooking] = useState(null);
+  const [extensionModalBooking, setExtensionModalBooking] = useState(null);
+  const [extensionForm, setExtensionForm] = useState({
+    newReturnDate: "",
+    newReturnTime: "",
+    note: "",
+  });
+  const [extensionSubmitting, setExtensionSubmitting] = useState(false);
+  const [lateReturnSubmittingId, setLateReturnSubmittingId] = useState("");
   const [paymentPreferences, setPaymentPreferences] = useState({
     scope: "downpayment",
     channel: "ewallet",
@@ -195,6 +268,10 @@ export default function BookingsPage({
       setBookings([]);
       setChatBooking(null);
       setChatMessages([]);
+      setEditingChatMessageId("");
+      setEditingChatText("");
+      setConfirmDeleteChatMessageId("");
+      setActiveChatMessageActionId("");
       setLoading(false);
       setError("");
       setShowAuthPrompt(true);
@@ -218,19 +295,62 @@ export default function BookingsPage({
     const handleIncomingMessage = (message) => {
       if (!chatBooking) return;
       const ownerId = String(chatBooking.owner?._id || "");
+      const bookingId = String(chatBooking._id || "");
+      const messageBookingId = String(message.booking?._id || message.booking || "");
       const senderId = String(message.sender?._id || message.sender);
       const receiverId = String(message.receiver?._id || message.receiver);
 
-      if ([senderId, receiverId].includes(ownerId)) {
+      if ([senderId, receiverId].includes(ownerId) && messageBookingId === bookingId) {
         setChatMessages((prev) => appendUniqueMessage(prev, message));
       }
     };
 
+    const handleMessageUpdate = (message) => {
+      if (!chatBooking) return;
+      const ownerId = String(chatBooking.owner?._id || "");
+      const bookingId = String(chatBooking._id || "");
+      const senderId = String(message.sender?._id || message.sender);
+      const receiverId = String(message.receiver?._id || message.receiver);
+      const messageBookingId = String(message.booking?._id || message.booking || "");
+
+      if (![senderId, receiverId].includes(ownerId) || messageBookingId !== bookingId) {
+        return;
+      }
+
+      setChatMessages((prev) => replaceMessageById(prev, message));
+      if (message.isDeleted) {
+        setActiveChatMessageActionId((prev) => (prev === String(message._id) ? "" : prev));
+        setConfirmDeleteChatMessageId((prev) => (prev === String(message._id) ? "" : prev));
+      }
+    };
+
+    const handleConversationDeleted = (payload = {}) => {
+      if (!chatBooking) return;
+
+      const partnerId = String(payload.partnerId || "");
+      const bookingId = String(payload.bookingId || "");
+      const activeOwnerId = String(chatBooking.owner?._id || "");
+      const activeBookingId = String(chatBooking._id || "");
+
+      if (partnerId !== activeOwnerId) return;
+      if (bookingId && bookingId !== activeBookingId) return;
+
+      setChatMessages([]);
+      setEditingChatMessageId("");
+      setEditingChatText("");
+      setConfirmDeleteChatMessageId("");
+      setActiveChatMessageActionId("");
+    };
+
     socket.on("booking:updated", handleBookingUpdate);
     socket.on("chat:message", handleIncomingMessage);
+    socket.on("chat:message:update", handleMessageUpdate);
+    socket.on("chat:conversation:deleted", handleConversationDeleted);
     return () => {
       socket.off("booking:updated", handleBookingUpdate);
       socket.off("chat:message", handleIncomingMessage);
+      socket.off("chat:message:update", handleMessageUpdate);
+      socket.off("chat:conversation:deleted", handleConversationDeleted);
     };
   }, [isLoggedIn, chatBooking]);
 
@@ -270,11 +390,87 @@ export default function BookingsPage({
     }
   };
 
+  const openExtensionModal = (booking) => {
+    if (!booking?._id) return;
+    const currentReturn = booking?.returnAt ? new Date(booking.returnAt) : null;
+    const fallback = new Date(Date.now() + 60 * 60 * 1000);
+    const suggested = currentReturn && !Number.isNaN(currentReturn.getTime())
+      ? new Date(currentReturn.getTime() + 60 * 60 * 1000)
+      : fallback;
+
+    setExtensionForm({
+      newReturnDate: formatDateInput(suggested),
+      newReturnTime: formatTimeInput(suggested),
+      note: "",
+    });
+    setExtensionModalBooking(booking);
+  };
+
+  const submitExtensionRequest = async () => {
+    const booking = extensionModalBooking;
+    if (!booking?._id) return;
+
+    const newReturnAt = getDateTime(extensionForm.newReturnDate, extensionForm.newReturnTime);
+    const currentReturnAt = booking?.returnAt ? new Date(booking.returnAt) : null;
+    if (!newReturnAt || Number.isNaN(newReturnAt.getTime())) {
+      setError("Please provide a valid new return date and time.");
+      return;
+    }
+    if (!currentReturnAt || Number.isNaN(currentReturnAt.getTime())) {
+      setError("Current return schedule is invalid for this booking.");
+      return;
+    }
+    if (newReturnAt.getTime() <= currentReturnAt.getTime()) {
+      setError("New return date/time must be later than the current return schedule.");
+      return;
+    }
+
+    try {
+      setExtensionSubmitting(true);
+      setError("");
+      const response = await API.requestBookingExtension(booking._id, {
+        newReturnAt: newReturnAt.toISOString(),
+        note: extensionForm.note || "",
+      });
+      if (response.booking) {
+        upsertBooking(response.booking);
+      }
+      setPaymentNotice(response.message || "Extension request submitted. Waiting for owner approval.");
+      setExtensionModalBooking(null);
+    } catch (err) {
+      setError(err.message || "Failed to request booking extension.");
+    } finally {
+      setExtensionSubmitting(false);
+    }
+  };
+
+  const handleProceedLateReturn = async (booking) => {
+    if (!booking?._id) return;
+    try {
+      setLateReturnSubmittingId(booking._id);
+      setError("");
+      const response = await API.proceedLateReturn(booking._id);
+      if (response.booking) {
+        upsertBooking(response.booking);
+      }
+      setPaymentNotice(response.message || "Late return was processed.");
+    } catch (err) {
+      setError(err.message || "Failed to process late return.");
+    } finally {
+      setLateReturnSubmittingId("");
+    }
+  };
+
   const openChat = async (booking) => {
     if (!booking?.owner?._id) return;
     setChatBooking(booking);
     setChatError("");
     setChatText("");
+    setEditingChatMessageId("");
+    setEditingChatText("");
+    setConfirmDeleteChatMessageId("");
+    setActiveChatMessageActionId("");
+    setShowDeleteChatConversationConfirm(false);
     try {
       const response = await API.getMessagesWithUser(booking.owner._id, booking._id);
       setChatMessages(response.messages || []);
@@ -297,6 +493,96 @@ export default function BookingsPage({
     } catch (err) {
       setChatError(err.message || "Failed to send message.");
     }
+  };
+
+  const startEditChatMessage = (message) => {
+    if (!message?._id || message.isDeleted) return;
+    setEditingChatMessageId(message._id);
+    setEditingChatText(String(message.text || ""));
+    setActiveChatMessageActionId("");
+  };
+
+  const cancelEditChatMessage = () => {
+    setEditingChatMessageId("");
+    setEditingChatText("");
+  };
+
+  const saveEditedChatMessage = async () => {
+    if (!editingChatMessageId) return;
+    const nextText = editingChatText.trim();
+    if (!nextText) {
+      setChatError("Message text is required.");
+      return;
+    }
+
+    try {
+      setSavingChatEdit(true);
+      setChatError("");
+      const response = await API.editChatMessage(editingChatMessageId, { text: nextText });
+      setChatMessages((prev) => replaceMessageById(prev, response.message));
+      cancelEditChatMessage();
+    } catch (err) {
+      setChatError(err.message || "Failed to edit message.");
+    } finally {
+      setSavingChatEdit(false);
+    }
+  };
+
+  const openDeleteChatMessageConfirm = (message) => {
+    if (!message?._id || deletingChatMessageId) return;
+    setConfirmDeleteChatMessageId(String(message._id));
+    setActiveChatMessageActionId("");
+  };
+
+  const deleteOwnChatMessage = async () => {
+    const messageId = String(confirmDeleteChatMessageId || "");
+    if (!messageId || deletingChatMessageId) return;
+
+    try {
+      setDeletingChatMessageId(messageId);
+      setChatError("");
+      const response = await API.deleteChatMessage(messageId);
+      setChatMessages((prev) => replaceMessageById(prev, response.message));
+      if (editingChatMessageId === messageId) {
+        cancelEditChatMessage();
+      }
+      setActiveChatMessageActionId((prev) => (prev === messageId ? "" : prev));
+      setConfirmDeleteChatMessageId("");
+    } catch (err) {
+      setChatError(err.message || "Failed to delete message.");
+    } finally {
+      setDeletingChatMessageId("");
+    }
+  };
+
+  const confirmDeleteChatConversation = async () => {
+    if (!chatBooking?.owner?._id || deletingChatConversation) return;
+
+    try {
+      setDeletingChatConversation(true);
+      setChatError("");
+      await API.deleteConversation(chatBooking.owner._id, { bookingId: chatBooking._id });
+      setChatMessages([]);
+      cancelEditChatMessage();
+      setShowDeleteChatConversationConfirm(false);
+      requestLiveCountersRefresh();
+    } catch (err) {
+      setChatError(err.message || "Failed to delete conversation.");
+    } finally {
+      setDeletingChatConversation(false);
+    }
+  };
+
+  const closeChatModal = () => {
+    setChatBooking(null);
+    setChatMessages([]);
+    setChatText("");
+    setChatError("");
+    setEditingChatMessageId("");
+    setEditingChatText("");
+    setConfirmDeleteChatMessageId("");
+    setActiveChatMessageActionId("");
+    setShowDeleteChatConversationConfirm(false);
   };
 
   const startPayment = async (bookingId, options = {}) => {
@@ -348,7 +634,10 @@ export default function BookingsPage({
 
   const handlePayNow = (booking) => {
     if (!booking?._id) return;
-    if (booking.status !== "confirmed") {
+    const canPayForStatus = ["confirmed", "extended", "completed"].includes(
+      String(booking.status || "").toLowerCase()
+    );
+    if (!canPayForStatus) {
       setApprovalModalBooking(booking);
       return;
     }
@@ -616,10 +905,16 @@ export default function BookingsPage({
               <option value="all">All</option>
               <option value="pending">Pending</option>
               <option value="confirmed">Confirmed</option>
+              <option value="extended">Extended</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
           </div>
+        </div>
+
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          Payment reminder: Complete payment within the booked rental duration, or request walk-in settlement upon
+          returning the vehicle.
         </div>
 
         {loading && <p className="text-sm text-gray-600">Loading bookings...</p>}
@@ -633,7 +928,16 @@ export default function BookingsPage({
         )}
 
         <div className="space-y-4">
-          {filteredBookings.map((booking) => (
+          {filteredBookings.map((booking) => {
+            const lateReturnInfo = getLateReturnInfo(booking);
+            const extensionInfo = getExtensionRequestInfo(booking);
+            const isPaymentEligibleStatus = ["confirmed", "extended", "completed"].includes(
+              String(booking.status || "").toLowerCase()
+            );
+            const canResolveOverdue =
+              lateReturnInfo.isOverdue && ["confirmed", "extended"].includes(String(booking.status || "").toLowerCase());
+
+            return (
             <article key={booking._id} className="bg-white border rounded-xl p-5">
               <div className="flex flex-col md:flex-row md:justify-between gap-3">
                 <div>
@@ -655,19 +959,67 @@ export default function BookingsPage({
                   >
                     {toTitleCase(booking.paymentStatus)}
                   </span>
+                  {extensionInfo.status !== "none" && (
+                    <span
+                      className={`inline-flex items-center text-xs font-semibold px-3 py-1 rounded-full ${
+                        extensionInfo.status === "approved"
+                          ? "bg-violet-100 text-violet-800 border border-violet-200"
+                          : extensionInfo.status === "rejected"
+                            ? "bg-rose-100 text-rose-800 border border-rose-200"
+                            : "bg-amber-100 text-amber-800 border border-amber-200"
+                      }`}
+                    >
+                      Extension {toTitleCase(extensionInfo.status)}
+                    </span>
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-4 text-sm">
                 <Info title="Pickup" value={formatDate(booking.pickupAt)} />
                 <Info title="Return" value={formatDate(booking.returnAt)} />
-                <Info title="Duration" value={`${booking.bookingDays} day(s)`} />
-                <Info title="Vehicle Rate" value={money(booking.vehicleDailyRate)} />
-                <Info title="Driver" value={booking.driverSelected ? money(booking.driverDailyRate) : "No"} />
-                <Info title="Rental Total" value={money(booking.totalAmount)} />
+                <Info title="Duration" value={formatDurationMinutes(getBookingDurationMinutesForPricing(booking))} />
+                <Info
+                  title="Vehicle Rate"
+                  value={`${money(booking.vehicleHourlyRate ?? booking.vehicleDailyRate)} / hr`}
+                />
+                <Info
+                  title="Driver"
+                  value={
+                    booking.driverSelected
+                      ? `${money(booking.driverHourlyRate ?? booking.driverDailyRate)} / hr`
+                      : "No"
+                  }
+                />
+                <Info title="Rental Total" value={money(getRentalTotal(booking))} />
+                <Info
+                  title="Late Penalty"
+                  value={lateReturnInfo.penaltyFee > 0 ? moneyWithCents(lateReturnInfo.penaltyFee) : moneyWithCents(0)}
+                />
                 <Info title="Transaction Fee" value={moneyWithCents(getTransactionFee())} />
                 <Info title="Amount Payable" value={moneyWithCents(getAmountPayable(booking))} />
               </div>
+
+              {lateReturnInfo.isOverdue && (
+                <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  Late return detected: overdue by {formatDurationMinutes(lateReturnInfo.overdueMinutes)}.
+                  {lateReturnInfo.penaltyFee > 0
+                    ? ` Current late charge: ${moneyWithCents(lateReturnInfo.penaltyFee)}.`
+                    : " Additional charges may apply."}
+                </div>
+              )}
+
+              {extensionInfo.status === "requested" && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Extension request pending owner approval.
+                  {extensionInfo.requestedReturnAt ? ` Requested return: ${formatDate(extensionInfo.requestedReturnAt)}.` : ""}
+                </div>
+              )}
+              {extensionInfo.status === "rejected" && (
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  Your extension request was rejected. Original return schedule still applies.
+                </div>
+              )}
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
@@ -685,7 +1037,7 @@ export default function BookingsPage({
                       className={`px-3 py-2 rounded-lg text-sm ${
                         payingBookingId === booking._id || verifyingBookingId === booking._id
                           ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-                          : booking.status === "confirmed"
+                          : isPaymentEligibleStatus
                             ? "bg-[#017FE6] text-white"
                             : "bg-amber-100 text-amber-800 border border-amber-300"
                       }`}
@@ -699,20 +1051,39 @@ export default function BookingsPage({
                   )}
 
                 {["unpaid", "partial"].includes(String(booking.paymentStatus || "").toLowerCase()) &&
-                  booking.status !== "confirmed" &&
+                  !isPaymentEligibleStatus &&
                   !["cancelled", "rejected"].includes(booking.status) && (
                     <p className="w-full text-xs text-amber-700">
-                      Payment is locked until the owner approves this booking.
+                      Payment is locked until the booking is approved or extended.
                     </p>
                   )}
 
-                {["pending", "confirmed"].includes(booking.status) && (
+                {["pending", "confirmed", "extended"].includes(booking.status) && (
                   <button
                     onClick={() => cancelBooking(booking._id)}
                     className="px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm"
                   >
                     Cancel Booking
                   </button>
+                )}
+
+                {canResolveOverdue && (
+                  <>
+                    <button
+                      onClick={() => openExtensionModal(booking)}
+                      disabled={extensionInfo.status === "requested" || lateReturnSubmittingId === booking._id}
+                      className="px-3 py-2 rounded-lg bg-violet-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Extend Rental Time
+                    </button>
+                    <button
+                      onClick={() => handleProceedLateReturn(booking)}
+                      disabled={lateReturnSubmittingId === booking._id || extensionInfo.status === "requested"}
+                      className="px-3 py-2 rounded-lg bg-rose-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {lateReturnSubmittingId === booking._id ? "Processing..." : "Proceed with Late Return"}
+                    </button>
+                  </>
                 )}
 
                 {booking.status === "completed" && !booking.reviewRating && (
@@ -785,7 +1156,8 @@ export default function BookingsPage({
                 )}
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -793,7 +1165,7 @@ export default function BookingsPage({
         <>
           <div
             className="fixed inset-0 z-40 bg-slate-900/45 backdrop-blur-[2px]"
-            onClick={() => setChatBooking(null)}
+            onClick={closeChatModal}
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)] flex flex-col max-h-[80vh]">
@@ -802,33 +1174,119 @@ export default function BookingsPage({
                   <p className="font-semibold text-slate-900">Chat with {chatBooking.owner?.name || "Owner"}</p>
                   <p className="text-xs text-slate-500">{chatBooking.vehicle?.name}</p>
                 </div>
-                <button
-                  onClick={() => setChatBooking(null)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                  aria-label="Close chat"
-                >
-                  ×
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteChatConversationConfirm(true)}
+                    className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs text-rose-700 transition hover:bg-rose-50"
+                  >
+                    Delete Conversation
+                  </button>
+                  <button
+                    onClick={closeChatModal}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+                    aria-label="Close chat"
+                  >
+                    x
+                  </button>
+                </div>
               </div>
 
-              <div className="p-4 overflow-y-auto flex-1 space-y-2 bg-slate-50">
+              <div
+                className="p-4 overflow-y-auto flex-1 space-y-2 bg-slate-50"
+                onClick={() => setActiveChatMessageActionId("")}
+              >
                 {chatError && <p className="text-sm text-red-600">{chatError}</p>}
                 {!chatMessages.length && (
                   <p className="text-sm text-slate-500">No messages yet.</p>
                 )}
                 {chatMessages.map((message) => {
                   const isMe = String(message.sender?._id || message.sender) === String(currentUserId);
+                  const isEditing = isMe && editingChatMessageId === message._id;
+                  const showActions =
+                    isMe &&
+                    !isEditing &&
+                    !message.isDeleted &&
+                    activeChatMessageActionId === String(message._id);
                   return (
                     <div key={message._id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                       <div
                         className={`max-w-[75%] rounded-xl px-3 py-2 text-sm ${
                           isMe ? "bg-[#017FE6] text-white" : "bg-white border"
                         }`}
+                        onClick={(event) => {
+                          if (!isMe || isEditing || message.isDeleted) return;
+                          event.stopPropagation();
+                          setActiveChatMessageActionId((prev) =>
+                            prev === String(message._id) ? "" : String(message._id)
+                          );
+                        }}
                       >
-                        <p>{message.text}</p>
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <input
+                              value={editingChatText}
+                              onChange={(event) => setEditingChatText(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  saveEditedChatMessage();
+                                }
+                              }}
+                              onClick={(event) => event.stopPropagation()}
+                              className="w-full rounded border border-white/30 bg-white px-2 py-1 text-sm text-slate-900"
+                            />
+                            <div className="flex justify-end gap-2 text-[11px]">
+                              <button
+                                type="button"
+                                onClick={cancelEditChatMessage}
+                                className="rounded bg-white/20 px-2 py-0.5"
+                                disabled={savingChatEdit}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={saveEditedChatMessage}
+                                className="rounded bg-white px-2 py-0.5 text-[#017FE6]"
+                                disabled={savingChatEdit}
+                              >
+                                {savingChatEdit ? "Saving..." : "Save"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className={message.isDeleted ? "italic opacity-85" : ""}>{message.text}</p>
+                        )}
                         <p className={`text-[10px] mt-1 ${isMe ? "text-white/80" : "text-gray-500"}`}>
                           {formatDate(message.createdAt)}
+                          {message.isEdited && !message.isDeleted ? " - edited" : ""}
                         </p>
+                        {showActions && (
+                          <div className="mt-1 flex justify-end gap-2 text-[10px] text-white/80">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                startEditChatMessage(message);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openDeleteChatMessageConfirm(message);
+                              }}
+                              disabled={
+                                deletingChatMessageId === message._id || Boolean(confirmDeleteChatMessageId)
+                              }
+                            >
+                              {deletingChatMessageId === message._id ? "Deleting..." : "Delete"}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -851,6 +1309,86 @@ export default function BookingsPage({
               </div>
             </div>
           </div>
+
+          {showDeleteChatConversationConfirm && (
+            <>
+              <div
+                className="fixed inset-0 z-[55] bg-slate-900/45 backdrop-blur-[2px]"
+                onClick={() => {
+                  if (!deletingChatConversation) setShowDeleteChatConversationConfirm(false);
+                }}
+              />
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
+                  <div className="border-b border-slate-200 px-6 py-4">
+                    <h3 className="text-base font-semibold text-slate-900">Delete Conversation</h3>
+                  </div>
+                  <div className="px-6 py-5">
+                    <p className="text-sm text-slate-700">
+                      Are you sure you want to delete this conversation? This action cannot be undone.
+                    </p>
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteChatConversationConfirm(false)}
+                        disabled={deletingChatConversation}
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={confirmDeleteChatConversation}
+                        disabled={deletingChatConversation}
+                        className="rounded-lg bg-rose-600 px-3 py-2 text-sm text-white disabled:opacity-60"
+                      >
+                        {deletingChatConversation ? "Deleting..." : "Delete Conversation"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {confirmDeleteChatMessageId && (
+            <>
+              <div
+                className="fixed inset-0 z-[55] bg-slate-900/45 backdrop-blur-[2px]"
+                onClick={() => {
+                  if (!deletingChatMessageId) setConfirmDeleteChatMessageId("");
+                }}
+              />
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
+                  <div className="border-b border-slate-200 px-6 py-4">
+                    <h3 className="text-base font-semibold text-slate-900">Delete Message</h3>
+                  </div>
+                  <div className="px-6 py-5">
+                    <p className="text-sm text-slate-700">Are you sure you want to delete this message?</p>
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteChatMessageId("")}
+                        disabled={Boolean(deletingChatMessageId)}
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-60"
+                      >
+                        No
+                      </button>
+                      <button
+                        type="button"
+                        onClick={deleteOwnChatMessage}
+                        disabled={Boolean(deletingChatMessageId)}
+                        className="rounded-lg bg-rose-600 px-3 py-2 text-sm text-white disabled:opacity-60"
+                      >
+                        {deletingChatMessageId ? "Deleting..." : "Yes"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -904,8 +1442,12 @@ export default function BookingsPage({
               </div>
 
               <div className="px-6 py-5">
+              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                Payment reminder: complete payment within the booked rental duration, or request walk-in settlement
+                upon return.
+              </div>
               <div className="rounded-xl border p-4 space-y-2 text-sm">
-                <Line label="Vehicle Rate" value={money(getVehicleRateForPayment(paymentConfirmBooking))} />
+                <Line label="Rental Amount" value={money(getVehicleRateForPayment(paymentConfirmBooking))} />
                 <Line label="Transaction Fee" value={moneyWithCents(getTransactionFee())} />
                 <Line label="Already Paid" value={moneyWithCents(confirmPaidAmount)} />
                 <Line
@@ -1038,6 +1580,72 @@ export default function BookingsPage({
                       : "Proceed to Pay"}
                 </button>
               </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {extensionModalBooking && (
+        <>
+          <div
+            className="fixed inset-0 bg-slate-900/45 backdrop-blur-[2px] z-[70]"
+            onClick={() => {
+              if (!extensionSubmitting) setExtensionModalBooking(null);
+            }}
+          />
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+            <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white border border-slate-200 shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
+              <div className="px-6 pt-5 pb-4 border-b border-slate-200 bg-gradient-to-r from-violet-500/10 via-white to-white">
+                <h3 className="text-lg font-semibold text-slate-900">Request Rental Extension</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  Current return: {formatDate(extensionModalBooking.returnAt)}
+                </p>
+              </div>
+              <div className="px-6 py-5 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="date"
+                    value={extensionForm.newReturnDate}
+                    min={formatDateInput(extensionModalBooking.returnAt || new Date())}
+                    onChange={(event) =>
+                      setExtensionForm((prev) => ({ ...prev, newReturnDate: event.target.value }))
+                    }
+                    className="border rounded-lg px-3 py-2 text-sm"
+                  />
+                  <input
+                    type="time"
+                    value={extensionForm.newReturnTime}
+                    onChange={(event) =>
+                      setExtensionForm((prev) => ({ ...prev, newReturnTime: event.target.value }))
+                    }
+                    className="border rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <textarea
+                  value={extensionForm.note}
+                  onChange={(event) => setExtensionForm((prev) => ({ ...prev, note: event.target.value }))}
+                  rows={3}
+                  maxLength={500}
+                  placeholder="Optional note to owner"
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setExtensionModalBooking(null)}
+                    disabled={extensionSubmitting}
+                    className="rp-btn-secondary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitExtensionRequest}
+                    disabled={extensionSubmitting}
+                    className="rp-btn-primary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {extensionSubmitting ? "Submitting..." : "Submit Request"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

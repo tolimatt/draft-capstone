@@ -5,12 +5,6 @@ const normalizeNameInput = (value = "") => {
   nextValue = nextValue.replace(/[^A-Za-z ]/g, "");
   nextValue = nextValue.replace(/\s+/g, " ");
   if (nextValue.startsWith(" ")) nextValue = nextValue.slice(1);
-  const firstSpace = nextValue.indexOf(" ");
-  if (firstSpace !== -1) {
-    const before = nextValue.slice(0, firstSpace);
-    const after = nextValue.slice(firstSpace + 1).replace(/ /g, "");
-    nextValue = `${before} ${after}`;
-  }
   return nextValue;
 };
 
@@ -33,6 +27,8 @@ export default function FormInput({
   inputRef,
   iconPosition = "right",
   prefixText = "",
+  onBlur,
+  onFocus,
 }) {
   const [showEmailSuggestions, setShowEmailSuggestions] = useState(false);
   const [savedEmails, setSavedEmails] = useState([]);
@@ -51,12 +47,14 @@ export default function FormInput({
   }, []);
 
   const handleEmailFocus = () => {
+    if (typeof onFocus === "function") onFocus();
     if (showEmailHint && type === "email") {
       setShowEmailSuggestions(true);
     }
   };
 
   const handleEmailBlur = () => {
+    if (typeof onBlur === "function") onBlur();
     setTimeout(() => setShowEmailSuggestions(false), 200);
   };
 
@@ -76,7 +74,31 @@ export default function FormInput({
       newValue = newValue.replace(/[^0-9]/g, "");
     }
 
+    if (type === "email") {
+      newValue = newValue.replace(/\s/g, "");
+    }
+
     onChange({ target: { value: newValue } });
+  };
+
+  const handleKeyDown = (e) => {
+    if (type === "email" && e.key === " ") {
+      e.preventDefault();
+    }
+  };
+
+  const handlePaste = (e) => {
+    if (type !== "email") return;
+    const pastedText = String(e.clipboardData?.getData("text") || "");
+    if (!/\s/.test(pastedText)) return;
+    e.preventDefault();
+    const sanitizedText = pastedText.replace(/\s/g, "");
+    const input = e.currentTarget;
+    const currentValue = String(input?.value || "");
+    const start = Number.isInteger(input?.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input?.selectionEnd) ? input.selectionEnd : currentValue.length;
+    const nextValue = currentValue.slice(0, start) + sanitizedText + currentValue.slice(end);
+    onChange({ target: { value: nextValue } });
   };
 
   const setInputRefs = (node) => {
@@ -148,6 +170,8 @@ export default function FormInput({
           type={type}
           value={value}
           onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onFocus={handleEmailFocus}
           onBlur={handleEmailBlur}
           disabled={disabled}

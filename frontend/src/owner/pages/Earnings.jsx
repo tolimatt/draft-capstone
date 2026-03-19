@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import API from "../../utils/api";
+import { getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
 const money = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
 const getBookingAmountPayable = (booking) => {
   const payable = Number(booking?.amountPayable);
@@ -17,10 +18,25 @@ const getBookingAmountPayable = (booking) => {
     return baseAmount + driverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
   }
 
-  const dailyRate = Number(booking?.vehicleDailyRate);
-  const bookingDays = Number(booking?.bookingDays || 1);
-  if (Number.isFinite(dailyRate) && dailyRate >= 0 && Number.isFinite(bookingDays) && bookingDays > 0) {
-    return dailyRate * bookingDays + (Number.isFinite(gasFee) ? gasFee : 0);
+  const directMinutes = Number(booking?.bookingDurationMinutes);
+  const durationMinutes =
+    Number.isFinite(directMinutes) && directMinutes > 0
+      ? Math.round(directMinutes)
+      : booking?.pickupAt && booking?.returnAt
+        ? getDurationMinutesBetween(booking.pickupAt, booking.returnAt)
+        : Number.isFinite(Number(booking?.bookingDays))
+          ? Math.round(Number(booking.bookingDays) * 24 * 60)
+          : 0;
+  const durationHours = getDurationHoursFromMinutes(durationMinutes);
+  const hourlyRate = Number((booking?.vehicleHourlyRate ?? booking?.vehicleDailyRate) || 0);
+  if (Number.isFinite(hourlyRate) && hourlyRate >= 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = Number((booking?.driverHourlyRate ?? booking?.driverDailyRate) || 0);
+    const driverSelected = Boolean(booking?.driverSelected);
+    const computedDriverAmount =
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
+        : 0;
+    return hourlyRate * durationHours + computedDriverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
   }
 
   return 0;

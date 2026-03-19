@@ -63,6 +63,17 @@ const safeKeyMatch = (provided, expected) => {
   return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 };
 
+const splitFirstLastName = (fullName = "") => {
+  const tokens = String(fullName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return {
+    first_name: tokens[0] || "",
+    last_name: tokens.length > 1 ? tokens[tokens.length - 1] : "",
+  };
+};
+
 const recordPreKycDocument = async ({ email, role, docType, result }) => {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   if (!normalizedEmail || !docType) return;
@@ -79,6 +90,16 @@ const recordPreKycDocument = async ({ email, role, docType, result }) => {
         status: result?.passed ? "verified" : "rejected",
         country: result?.country || "",
         docCategory: result?.doc_type || "",
+        selectedDocCategory: result?.selected_doc_type || "",
+        detailsMatched:
+          typeof result?.details_match === "boolean" ? result.details_match : true,
+        mismatchFields: Array.isArray(result?.mismatch_fields)
+          ? result.mismatch_fields
+              .map((entry) => String(entry || "").trim())
+              .filter(Boolean)
+              .slice(0, 12)
+          : [],
+        suspectedTampering: Boolean(result?.suspected_tampering),
         confidence: result?.confidence || 0,
         reason: result?.reason || "",
         fileName: result?.fileName || "",
@@ -130,6 +151,7 @@ const formatIdValidationFailure = (docResult = {}) => ({
   success: false,
   message: docResult.reason || "Please upload a valid ID image that clearly shows at least one face photo.",
   docType: docResult.doc_type || "Unknown",
+  selectedDocType: docResult.selected_doc_type || "",
   country: docResult.country || "Unknown",
   confidence: Number(docResult.confidence || 0),
 });
@@ -228,13 +250,29 @@ export const faceDetect = async (req, res) => {
 // POST /api/kyc/id-register
 export const registerIdFace = async (req, res) => {
   try {
-    const { id_image_base64, id_image_mime } = req.body;
+    const { id_image_base64, id_image_mime, id_type, user_profile } = req.body;
     if (!id_image_base64) return res.status(400).json({ message: "id_image_base64 is required" });
+
+    const fallbackName = splitFirstLastName(req.user?.name || user_profile?.full_name);
+    const profileContext = {
+      full_name: req.user?.name || user_profile?.full_name,
+      first_name: req.user?.firstName || user_profile?.first_name || fallbackName.first_name,
+      last_name: req.user?.lastName || user_profile?.last_name || fallbackName.last_name,
+      email: req.user?.email || user_profile?.email,
+      date_of_birth: req.user?.dateOfBirth || user_profile?.date_of_birth,
+      gender: req.user?.gender || user_profile?.gender,
+      owner_type: req.user?.ownerType || user_profile?.owner_type,
+      business_name: req.user?.businessName || user_profile?.business_name,
+      permit_number: req.user?.permitNumber || user_profile?.permit_number,
+      address: req.user?.address || user_profile?.address,
+    };
 
     const docResult = await verifyPhilippinesDocument({
       base64: id_image_base64,
       mimeType: id_image_mime || "image/jpeg",
       docType: "id",
+      selectedDocType: id_type || "",
+      userProfile: profileContext,
     });
     if (!docResult.passed) {
       await recordPreKycDocument({
@@ -438,16 +476,35 @@ export const getMyKyc = async (req, res) => {
 // Pre-registration ID upload
 export const preRegisterIdFace = async (req, res) => {
   try {
-    const { email, full_name, role, id_image_base64, id_image_mime } = req.body;
+    const { email, full_name, role, id_image_base64, id_image_mime, id_type, user_profile } = req.body;
 
     if (!email || !id_image_base64) {
       return res.status(400).json({ success: false, message: "email and id_image_base64 are required" });
     }
+    if (!id_type) {
+      return res.status(400).json({ success: false, message: "Please select the ID type before verifying." });
+    }
+
+    const fallbackName = splitFirstLastName(full_name || user_profile?.full_name);
+    const profileContext = {
+      full_name: full_name || user_profile?.full_name,
+      first_name: user_profile?.first_name || fallbackName.first_name,
+      last_name: user_profile?.last_name || fallbackName.last_name,
+      email,
+      date_of_birth: user_profile?.date_of_birth,
+      gender: user_profile?.gender,
+      owner_type: user_profile?.owner_type || role,
+      business_name: user_profile?.business_name,
+      permit_number: user_profile?.permit_number,
+      address: user_profile?.address,
+    };
 
     const docResult = await verifyPhilippinesDocument({
       base64: id_image_base64,
       mimeType: id_image_mime || "image/jpeg",
       docType: "id",
+      selectedDocType: id_type,
+      userProfile: profileContext,
     });
 
     let fileMeta = {};
@@ -563,7 +620,7 @@ export const preSelfieVerify = async (req, res) => {
 // Pre-registration supporting document verification (owner)
 export const preVerifySupportingDocument = async (req, res) => {
   try {
-    const { email, role, doc_image_base64, doc_image_mime } = req.body;
+    const { email, role, doc_image_base64, doc_image_mime, supporting_doc_type, user_profile } = req.body;
 
     if (!email || !doc_image_base64) {
       return res.status(400).json({
@@ -571,11 +628,31 @@ export const preVerifySupportingDocument = async (req, res) => {
         message: "email and doc_image_base64 are required",
       });
     }
+    if (!supporting_doc_type) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select the supporting document type before verifying.",
+      });
+    }
+
+    const fallbackName = splitFirstLastName(user_profile?.full_name);
+    const profileContext = {
+      full_name: user_profile?.full_name,
+      first_name: user_profile?.first_name || fallbackName.first_name,
+      last_name: user_profile?.last_name || fallbackName.last_name,
+      email,
+      owner_type: user_profile?.owner_type || role,
+      business_name: user_profile?.business_name,
+      permit_number: user_profile?.permit_number,
+      address: user_profile?.address,
+    };
 
     const docResult = await verifyPhilippinesDocument({
       base64: doc_image_base64,
       mimeType: doc_image_mime || "image/jpeg",
       docType: "supporting",
+      selectedDocType: supporting_doc_type,
+      userProfile: profileContext,
     });
     let fileMeta = {};
     if (docResult.passed) {
@@ -604,6 +681,7 @@ export const preVerifySupportingDocument = async (req, res) => {
           docResult.reason ||
           "Only valid Philippine business documents are accepted. Please upload a supported Philippine document.",
         docType: docResult.doc_type,
+        selectedDocType: docResult.selected_doc_type,
         country: docResult.country,
         confidence: docResult.confidence,
       });
@@ -613,6 +691,7 @@ export const preVerifySupportingDocument = async (req, res) => {
       success: true,
       message: docResult.reason || "Supporting document verified.",
       docType: docResult.doc_type,
+      selectedDocType: docResult.selected_doc_type,
       country: docResult.country,
       confidence: docResult.confidence,
     });

@@ -5,6 +5,9 @@ import {
   getMessagesWithUser,
   sendMessageToUser,
   markMessagesAsRead,
+  editMessage,
+  deleteMessage,
+  deleteConversation,
 } from "../controllers/chat.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { authorize } from "../middleware/rbac.middleware.js";
@@ -44,7 +47,7 @@ router.post("/", async (req, res, next) => {
 
     const vehicles = await Vehicle.find({ availabilityStatus: "available" })
       .select(
-        "name description location availabilityStatus imageUrl images dailyRentalRate specs driverOptionEnabled driverDailyRate"
+        "name description location availabilityStatus imageUrl images dailyRentalRate pricingUnit specs driverOptionEnabled driverDailyRate"
       )
       .lean();
 
@@ -104,8 +107,11 @@ router.post("/", async (req, res, next) => {
 });
 
 router.get("/conversations", protect, authorize("user", "owner", "admin"), getConversations);
+router.delete("/conversations/:userId", protect, authorize("user", "owner", "admin"), deleteConversation);
 router.get("/messages/:userId", protect, authorize("user", "owner", "admin"), getMessagesWithUser);
 router.post("/messages/:userId", protect, authorize("user", "owner", "admin"), sendMessageToUser);
 router.patch("/messages/:userId/read", protect, authorize("user", "owner", "admin"), markMessagesAsRead);
+router.patch("/messages/:messageId", protect, authorize("user", "owner", "admin"), editMessage);
+router.delete("/messages/:messageId", protect, authorize("user", "owner", "admin"), deleteMessage);
 
 export default router;

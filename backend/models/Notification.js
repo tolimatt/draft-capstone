@@ -34,11 +34,17 @@ const notificationSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    archived_at: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true }
 );
 
-notificationSchema.index({ user: 1, createdAt: -1 });
+notificationSchema.index({ user: 1, archived_at: 1, createdAt: -1 });
+notificationSchema.index({ archived_at: 1 });
 
 export default mongoose.model("Notification", notificationSchema);
 

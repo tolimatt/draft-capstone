@@ -9,6 +9,9 @@ import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../../utils/liveCounters";
 
+const isNotificationRead = (notification) =>
+  Boolean(notification?.readAt);
+
 export default function Topbar({ title, onNavigateToNotifications, onToggleSidebar }) {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
 
@@ -16,7 +19,7 @@ export default function Topbar({ title, onNavigateToNotifications, onToggleSideb
     try {
       const response = await API.getNotifications();
       const unread = (response.notifications || []).reduce(
-        (count, notification) => count + (notification.readAt ? 0 : 1),
+        (count, notification) => count + (isNotificationRead(notification) ? 0 : 1),
         0
       );
       setUnreadNotifications(unread);
@@ -51,7 +54,7 @@ export default function Topbar({ title, onNavigateToNotifications, onToggleSideb
     if (!socket) return undefined;
 
     const handleNotification = (notification) => {
-      if (notification?.readAt) return;
+      if (isNotificationRead(notification)) return;
       setUnreadNotifications((prev) => prev + 1);
     };
 

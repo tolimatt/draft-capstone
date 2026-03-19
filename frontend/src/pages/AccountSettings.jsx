@@ -23,6 +23,7 @@ import {
 import { fileToBase64, stripDataUrlPrefix, getMimeFromDataUrl } from "../utils/cameraKyc";
 import { preVerifySupportingDocument } from "../utils/kycApi";
 import { RELATIONSHIP_OPTIONS } from "../data/registerValidation";
+import { SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 const GENDER_OPTIONS = ["Male", "Female", "Prefer not to say"];
@@ -104,6 +105,36 @@ const InputField = React.memo(function InputField({
   max,
   prefixText = "",
 }) {
+  const isPasswordField = type === "password";
+  const sanitizePasswordValue = (rawValue = "") => String(rawValue).replace(/\s/g, "");
+
+  const handleInputChange = (event) => {
+    if (!isPasswordField || typeof onChange !== "function") {
+      if (typeof onChange === "function") onChange(event);
+      return;
+    }
+    const sanitizedValue = sanitizePasswordValue(event?.target?.value || "");
+    onChange({ target: { value: sanitizedValue } });
+  };
+
+  const handleInputKeyDown = (event) => {
+    if (isPasswordField && event.key === " ") event.preventDefault();
+  };
+
+  const handleInputPaste = (event) => {
+    if (!isPasswordField || typeof onChange !== "function") return;
+    const pastedText = String(event.clipboardData?.getData("text") || "");
+    if (!/\s/.test(pastedText)) return;
+    event.preventDefault();
+    const sanitizedText = sanitizePasswordValue(pastedText);
+    const input = event.currentTarget;
+    const currentValue = String(input?.value || "");
+    const start = Number.isInteger(input?.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input?.selectionEnd) ? input.selectionEnd : currentValue.length;
+    const nextValue = currentValue.slice(0, start) + sanitizedText + currentValue.slice(end);
+    onChange({ target: { value: nextValue } });
+  };
+
   return (
     <div>
       <label className="text-xs text-gray-500">{label}</label>
@@ -116,7 +147,9 @@ const InputField = React.memo(function InputField({
         <input
           type={type}
           value={value}
-          onChange={onChange}
+          onChange={handleInputChange}
+          onKeyDown={handleInputKeyDown}
+          onPaste={handleInputPaste}
           disabled={disabled}
           max={max}
           className={`relative z-0 w-full mt-1 border rounded-lg px-3 py-2 text-sm ${
@@ -299,6 +332,7 @@ const AccountSettings = ({
   const [ownerUpgradeMessage, setOwnerUpgradeMessage] = useState("");
   const [ownerUpgradeError, setOwnerUpgradeError] = useState("");
   const [supportingDocFile, setSupportingDocFile] = useState(null);
+  const [supportingDocType, setSupportingDocType] = useState("");
   const [supportingDocStatus, setSupportingDocStatus] = useState("");
   const [supportingDocLoading, setSupportingDocLoading] = useState(false);
   const [ownerForm, setOwnerForm] = useState({
@@ -519,10 +553,10 @@ const AccountSettings = ({
   ]);
 
   useEffect(() => {
-    if (supportingDocFile) {
+    if (supportingDocFile || supportingDocType) {
       setSupportingDocStatus("");
     }
-  }, [supportingDocFile]);
+  }, [supportingDocFile, supportingDocType]);
 
   useEffect(() => {
     if (editingSection !== "location" || isAddressEdited || !draftProfile) return;
@@ -670,6 +704,10 @@ const AccountSettings = ({
   };
 
   const verifySupportingDoc = async () => {
+    if (!supportingDocType) {
+      setSupportingDocStatus("Please select your supporting document type first.");
+      return;
+    }
     if (!supportingDocFile) {
       setSupportingDocStatus("Please upload your supporting document first.");
       return;
@@ -684,7 +722,19 @@ const AccountSettings = ({
       const dataUrl = await fileToBase64(supportingDocFile);
       const clean = stripDataUrlPrefix(dataUrl);
       const mime = getMimeFromDataUrl(dataUrl);
-      const response = await preVerifySupportingDocument(profile.email, clean, mime, "owner");
+      const response = await preVerifySupportingDocument(profile.email, clean, mime, "owner", {
+        documentType: supportingDocType,
+        userProfile: {
+          full_name: profile.name,
+          first_name: String(profile.firstName || "").trim(),
+          last_name: String(profile.lastName || "").trim(),
+          email: profile.email,
+          owner_type: ownerForm.ownerType || profile.ownerType,
+          business_name: ownerForm.businessName || profile.businessName,
+          permit_number: ownerForm.permitNumber || profile.permitNumber,
+          address: profile.address,
+        },
+      });
       setSupportingDocStatus(response.message || "Supporting document verified.");
     } catch (error) {
       setSupportingDocStatus(error.message || "Supporting document verification failed.");
@@ -1625,6 +1675,15 @@ const AccountSettings = ({
                     </p>
                   </div>
 
+                  <SelectField
+                    label="Document Type"
+                    value={supportingDocType}
+                    onChange={(event) => setSupportingDocType(event.target.value)}
+                    options={SUPPORTING_DOCUMENT_TYPES.map((entry) => ({ label: entry, value: entry }))}
+                    placeholder="Select document type"
+                    disabled={supportingDocLoading}
+                  />
+
                   <input
                     type="file"
                     accept="image/*,application/pdf"
@@ -1635,7 +1694,7 @@ const AccountSettings = ({
                   <div className="flex flex-wrap gap-3">
                     <button
                       onClick={verifySupportingDoc}
-                      disabled={supportingDocLoading || !supportingDocFile}
+                      disabled={supportingDocLoading || !supportingDocType || !supportingDocFile}
                       className="px-4 py-2 rounded-lg border text-sm font-semibold hover:bg-gray-100 disabled:opacity-60"
                     >
                       {supportingDocLoading ? "Verifying..." : "Verify Document"}

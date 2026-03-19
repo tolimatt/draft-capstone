@@ -19,6 +19,9 @@ import {
   formatDisplayName,
   getCurrentTime,
   getDateTime,
+  getBookingDurationMinutes,
+  getDurationHoursFromMinutes,
+  formatDurationMinutes,
   getMinPickupDate,
   getMinPickupDateTime,
   getMinPickupTime,
@@ -164,23 +167,21 @@ export default function VehicleDetailsPage({
   const availabilityStatus = normalizeAvailability(currentVehicle);
   const isAvailable = availabilityStatus === "available";
   const reviews = normalizeReviews(currentVehicle);
-  const dailyRate = Number(currentVehicle?.dailyRentalRate ?? currentVehicle?.price ?? 0);
+  const hourlyRate = Number(currentVehicle?.dailyRentalRate ?? currentVehicle?.hourlyRentalRate ?? currentVehicle?.price ?? 0);
   const driverOptionEnabled = Boolean(currentVehicle?.driverOptionEnabled);
-  const driverDailyRate = Number(currentVehicle?.driverDailyRate || 0);
+  const driverHourlyRate = Number(currentVehicle?.driverDailyRate || currentVehicle?.driverHourlyRate || 0);
 
   useEffect(() => {
     if (!driverOptionEnabled && driverSelected) setDriverSelected(false);
   }, [driverOptionEnabled, driverSelected]);
 
-  const durationDays = useMemo(() => {
-    const start = getDateTime(pickupDate, pickupTime);
-    const end = getDateTime(returnDate, returnTime);
-    if (!start || !end || end <= start) return 1;
-    return Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+  const durationMinutes = useMemo(() => {
+    return getBookingDurationMinutes(pickupDate, pickupTime, returnDate, returnTime);
   }, [pickupDate, pickupTime, returnDate, returnTime]);
 
-  const vehicleCost = durationDays * dailyRate;
-  const driverCost = driverSelected ? durationDays * driverDailyRate : 0;
+  const durationHours = useMemo(() => getDurationHoursFromMinutes(durationMinutes), [durationMinutes]);
+  const vehicleCost = roundCurrency(durationHours * hourlyRate);
+  const driverCost = roundCurrency(driverSelected ? durationHours * driverHourlyRate : 0);
   const transactionFee = getTransactionFee();
   const estimatedTotal = roundCurrency(vehicleCost + driverCost + transactionFee);
   const downpaymentFee = roundCurrency(estimatedTotal * DOWNPAYMENT_RATE);
@@ -384,8 +385,8 @@ export default function VehicleDetailsPage({
             <div className="text-left lg:text-right">
               <p className="text-sm text-slate-500">Starting price</p>
               <p className="text-3xl font-extrabold text-[#0B75E7]">
-                {money(dailyRate)}
-                <span className="text-sm font-semibold text-slate-500"> / day</span>
+                {money(hourlyRate)}
+                <span className="text-sm font-semibold text-slate-500"> / hour</span>
               </p>
             </div>
           </div>
@@ -632,17 +633,14 @@ export default function VehicleDetailsPage({
                       </button>
                     </div>
                     <p className="text-xs text-slate-500 mt-2">
-                      Driver rate: {money(driverDailyRate)} / day
+                      Driver rate: {money(driverHourlyRate)} / hour
                     </p>
                   </div>
                 )}
 
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm">
-                  <SummaryRow label="Daily vehicle rate" value={money(dailyRate)} />
-                  <SummaryRow
-                    label="Duration"
-                    value={`${durationDays} ${durationDays > 1 ? "days" : "day"}`}
-                  />
+                  <SummaryRow label="Hourly vehicle rate" value={money(hourlyRate)} />
+                  <SummaryRow label="Duration" value={formatDurationMinutes(durationMinutes)} />
                   <SummaryRow label="Vehicle subtotal" value={money(vehicleCost)} />
                   <SummaryRow label="Transaction fee" value={moneyWithCents(transactionFee)} />
                   <SummaryRow label="Downpayment (30%)" value={moneyWithCents(downpaymentFee)} muted />
@@ -655,6 +653,10 @@ export default function VehicleDetailsPage({
                   <span>
                     Booking requests are validated with date/time checks and linked to your authenticated account.
                   </span>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Payment reminder: complete payment within the booked rental duration, or settle via walk-in upon
+                  vehicle return.
                 </div>
 
                 {bookingError && (

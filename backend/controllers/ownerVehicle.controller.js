@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import Vehicle from "../models/Vehicle.js";
 import { hasActiveBookingForVehicle } from "../utils/vehicleAvailability.js";
+import { HOURLY_RATE_UNIT, getVehicleHourlyRate } from "../utils/pricing.js";
 
 const allowedAvailabilityStatuses = new Set(["available", "unavailable"]);
 const UPLOADS_SEGMENT = "/uploads/";
@@ -116,14 +117,29 @@ const serializeVehicle = (req, vehicle) => {
     owner: vehicle.owner,
     name: vehicle.name,
     description: vehicle.description,
-    dailyRentalRate: vehicle.dailyRentalRate,
+    dailyRentalRate: getVehicleHourlyRate(vehicle, {
+      rateField: "dailyRentalRate",
+      unitField: "pricingUnit",
+    }),
+    hourlyRentalRate: getVehicleHourlyRate(vehicle, {
+      rateField: "dailyRentalRate",
+      unitField: "pricingUnit",
+    }),
+    pricingUnit: HOURLY_RATE_UNIT,
     location: vehicle.location,
     availabilityStatus: vehicle.availabilityStatus,
     images,
     imagePaths,
     imageUrl: primaryImage,
     driverOptionEnabled: Boolean(vehicle.driverOptionEnabled),
-    driverDailyRate: vehicle.driverDailyRate || 0,
+    driverDailyRate: getVehicleHourlyRate(vehicle, {
+      rateField: "driverDailyRate",
+      unitField: "pricingUnit",
+    }),
+    driverHourlyRate: getVehicleHourlyRate(vehicle, {
+      rateField: "driverDailyRate",
+      unitField: "pricingUnit",
+    }),
     specs: vehicle.specs || {},
     rating: averageRating,
     averageRating,
@@ -157,6 +173,7 @@ export const createOwnerVehicle = async (req, res) => {
       name: req.body.name.trim(),
       description: req.body.description.trim(),
       dailyRentalRate: toNumeric(req.body.dailyRentalRate, 0),
+      pricingUnit: HOURLY_RATE_UNIT,
       location: req.body.location.trim(),
       availabilityStatus: req.body.availabilityStatus,
       images,
@@ -181,7 +198,10 @@ export const updateOwnerVehicle = async (req, res) => {
 
     if (req.body.name !== undefined) vehicle.name = req.body.name.trim();
     if (req.body.description !== undefined) vehicle.description = req.body.description.trim();
-    if (req.body.dailyRentalRate !== undefined) vehicle.dailyRentalRate = toNumeric(req.body.dailyRentalRate, 0);
+    if (req.body.dailyRentalRate !== undefined) {
+      vehicle.dailyRentalRate = toNumeric(req.body.dailyRentalRate, 0);
+      vehicle.pricingUnit = HOURLY_RATE_UNIT;
+    }
     if (req.body.location !== undefined) vehicle.location = req.body.location.trim();
     if (req.body.availabilityStatus && allowedAvailabilityStatuses.has(req.body.availabilityStatus)) {
       if (

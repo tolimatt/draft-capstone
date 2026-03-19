@@ -8,7 +8,7 @@ export const VEHICLE_CATEGORIES = [
     image: "/cars.png",
     tags: ["Sedan", "Hatchback", "SUV", "Luxury"],
     description: "Perfect for family trips, business meetings, or special occasions.",
-    price: "₱500/day",
+    price: "₱500/hr",
   },
   {
     id: "motorcycles",
@@ -17,7 +17,7 @@ export const VEHICLE_CATEGORIES = [
     image: "/motor.png",
     tags: ["Scooter", "Sports Bike", "Cruiser"],
     description: "Ideal for quick commutes, exploring the city, or weekend adventures.",
-    price: "₱300/day",
+    price: "₱300/hr",
   },
   {
     id: "vans",
@@ -26,7 +26,7 @@ export const VEHICLE_CATEGORIES = [
     image: "/van.png",
     tags: ["Passenger", "Mini Van", "Cargo", "Luxury"],
     description: "Spacious rides designed for all your plans and occasions.",
-    price: "₱1,500/day",
+    price: "₱1,500/hr",
   },
   {
     id: "trucks",
@@ -35,6 +35,6 @@ export const VEHICLE_CATEGORIES = [
     image: "/trucks.png",
     tags: ["Pick-up", "Cargo", "Refrigerated", "Flat bed"],
     description: "Built for work, designed to carry cargo safely and comfortably.",
-    price: "₱2,000/day",
+    price: "₱2,000/hr",
   },
 ];

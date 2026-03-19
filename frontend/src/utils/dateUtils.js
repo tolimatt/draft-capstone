@@ -56,6 +56,40 @@ export const getDateTime = (date, time) => {
   return Number.isNaN(value.getTime()) ? null : value;
 };
 
+export const getDurationMinutesBetween = (start, end) => {
+  if (start === null || start === undefined || end === null || end === undefined) return 0;
+  const startDate = start instanceof Date ? start : new Date(start);
+  const endDate = end instanceof Date ? end : new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return 0;
+  const diffMs = endDate.getTime() - startDate.getTime();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return 0;
+  return Math.round(diffMs / (1000 * 60));
+};
+
+export const getBookingDurationMinutes = (pickupDate, pickupTime, returnDate, returnTime) => {
+  const pickup = getDateTime(pickupDate, pickupTime);
+  const dropoff = getDateTime(returnDate, returnTime);
+  if (!pickup || !dropoff) return 0;
+  return getDurationMinutesBetween(pickup, dropoff);
+};
+
+export const getDurationHoursFromMinutes = (minutes) => {
+  const numeric = Number(minutes || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Math.round((numeric / 60) * 10000) / 10000;
+};
+
+export const formatDurationMinutes = (minutes) => {
+  const totalMinutes = Number(minutes || 0);
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return "0m";
+  const safeMinutes = Math.round(totalMinutes);
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+  if (hours <= 0) return `${remainingMinutes}m`;
+  if (remainingMinutes <= 0) return `${hours}h`;
+  return `${hours}h ${remainingMinutes}m`;
+};
+
 export const sanitizeBookingRange = (bookingData = {}) => {
   const minPickupDateTime = getMinPickupDateTime();
   const minPickupDate = formatDateInput(minPickupDateTime);

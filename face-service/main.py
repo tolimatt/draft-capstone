@@ -65,6 +65,8 @@ MAX_FACE_AREA_RATIO = float(os.getenv("KYC_MAX_FACE_AREA_RATIO", "0.85"))
 MIN_FACE_CONFIDENCE = float(os.getenv("KYC_MIN_FACE_CONFIDENCE", "0.40"))
 ID_FACE_COUNT_MIN_AREA_RATIO = float(os.getenv("KYC_ID_COUNT_MIN_AREA_RATIO", "0.006"))
 ID_FACE_COUNT_MIN_RELATIVE_RATIO = float(os.getenv("KYC_ID_COUNT_MIN_RELATIVE_RATIO", "0.25"))
+SELFIE_FACE_COUNT_MIN_AREA_RATIO = float(os.getenv("KYC_SELFIE_COUNT_MIN_AREA_RATIO", "0.010"))
+SELFIE_FACE_COUNT_MIN_RELATIVE_RATIO = float(os.getenv("KYC_SELFIE_COUNT_MIN_RELATIVE_RATIO", "0.35"))
 BLUR_THRESHOLD      = 15
 BRIGHTNESS_MIN      = 15
 BRIGHTNESS_MAX      = 245
@@ -520,9 +522,18 @@ def validate_face_constraints(
     if use_secondary_count:
         alt_count = count_faces_opencv(image)
         if alt_count is not None:
-            face_count = max(face_count, alt_count)
-            if alt_count > primary_count:
-                logger.info(f"Alt face detector saw {alt_count} faces (primary={primary_count}).")
+            # Use secondary detector as a recovery signal for missed faces,
+            # not to aggressively override a valid primary single-face result.
+            if face_count < 1 and alt_count > 0:
+                face_count = alt_count
+                logger.info(
+                    f"Using secondary face count {alt_count} because primary detector found no valid face."
+                )
+            elif alt_count > primary_count:
+                logger.info(
+                    f"Ignoring secondary multi-face count {alt_count} (primary={primary_count}) "
+                    "to reduce false positives."
+                )
     if face_count < 1 or (
         max_faces_allowed is not None and face_count > max_faces_allowed
     ):
@@ -784,6 +795,9 @@ async def post_selfie_challenge(req: SelfieChallengeRequest):
                 small_face_message="Your face is too small. Please move closer to the camera.",
                 large_face_message="Your face is too close. Please move slightly farther away.",
                 low_conf_message="We're having trouble detecting your face. Please improve the lighting.",
+                use_secondary_count=False,
+                count_min_area_ratio=SELFIE_FACE_COUNT_MIN_AREA_RATIO,
+                count_min_relative_to_largest=SELFIE_FACE_COUNT_MIN_RELATIVE_RATIO,
             )
             if constraint_err:
                 return SelfieChallengeResponse(
@@ -911,6 +925,9 @@ async def post_kyc_selfie_verify(req: KycSelfieVerifyRequest):
             small_face_message="Your face is too small. Please move closer to the camera.",
             large_face_message="Your face is too close. Please move slightly farther away.",
             low_conf_message="We're having trouble detecting your face. Please improve the lighting.",
+            use_secondary_count=False,
+            count_min_area_ratio=SELFIE_FACE_COUNT_MIN_AREA_RATIO,
+            count_min_relative_to_largest=SELFIE_FACE_COUNT_MIN_RELATIVE_RATIO,
         )
         if constraint_err:
             return KycSelfieVerifyResponse(verified=False, message=constraint_err, **base_resp)

@@ -58,8 +58,13 @@ const vehicleSchema = new mongoose.Schema(
     },
     dailyRentalRate: {
       type: Number,
-      required: [true, "Daily rental rate is required."],
-      min: [0, "Daily rental rate must be zero or greater."],
+      required: [true, "Hourly rental rate is required."],
+      min: [0, "Hourly rental rate must be zero or greater."],
+    },
+    pricingUnit: {
+      type: String,
+      enum: ["hourly", "daily"],
+      default: "hourly",
     },
     location: {
       type: String,
@@ -88,7 +93,7 @@ const vehicleSchema = new mongoose.Schema(
     },
     driverDailyRate: {
       type: Number,
-      min: [0, "Driver daily rate must be zero or greater."],
+      min: [0, "Driver hourly rate must be zero or greater."],
       default: 0,
     },
     specs: {

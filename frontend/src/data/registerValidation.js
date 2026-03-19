@@ -1,4 +1,4 @@
-export const NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)?$/;
+export const NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 export const EMAIL_REGEX = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 export const PHONE_REGEX = /^9[0-9]{9}$/;
 export const EMOJI_REGEX = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
@@ -59,7 +59,7 @@ export const VALIDATION_RULES = {
     if (!trimmed) return "First name is required.";
     if (EMOJI_REGEX.test(value)) return "First name must not contain emoji.";
     if (!NAME_REGEX.test(trimmed)) {
-      return "First name can only contain letters with one optional space for a second name.";
+      return "First name can only contain letters and spaces between names.";
     }
     if (trimmed.length > 50) return "First name is too long (max 50 characters).";
     return "";
@@ -69,7 +69,7 @@ export const VALIDATION_RULES = {
     if (!trimmed) return "Last name is required.";
     if (EMOJI_REGEX.test(value)) return "Last name must not contain emoji.";
     if (!NAME_REGEX.test(trimmed)) {
-      return "Last name can only contain letters with one optional space for a second name.";
+      return "Last name can only contain letters and spaces between names.";
     }
     if (trimmed.length > 50) return "Last name is too long (max 50 characters).";
     return "";

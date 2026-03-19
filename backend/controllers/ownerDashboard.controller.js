@@ -11,11 +11,49 @@ import {
   getSepoliaTxUrl,
   recordBookingTransactionOnChain as recordBookingTransactionOnLedger,
 } from "../utils/blockchainBooking.js";
+import {
+  HOURLY_RATE_UNIT,
+  getBookingDriverHourlyRate,
+  getBookingDurationHours,
+  getBookingDurationMinutes,
+  getBookingVehicleHourlyRate,
+  roundCurrency,
+} from "../utils/pricing.js";
 
-const STATUSES = new Set(["pending", "confirmed", "completed", "cancelled", "rejected"]);
+const STATUSES = new Set(["pending", "confirmed", "extended", "completed", "cancelled", "rejected"]);
 const PAYMENT_STATUSES = new Set(["unpaid", "partial", "paid", "refunded"]);
 const WALK_IN_PAYMENT_STATUSES = new Set(["none", "requested", "approved", "rejected", "completed"]);
 const WALK_IN_REVIEW_ACTIONS = new Set(["approve", "reject"]);
+const EXTENSION_STATUSES = new Set(["none", "requested", "approved", "rejected"]);
+const EXTENSION_REVIEW_ACTIONS = new Set(["approve", "reject"]);
+const ACTIVE_BOOKING_STATUSES = new Set(["confirmed", "extended"]);
+const ACTIVE_OVERLAP_STATUSES = ["pending", "confirmed", "extended"];
+const LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT = 0.25;
+const BOOKING_AUTO_COMPLETE_GRACE_MINUTES_DEFAULT = 0;
+const BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT = 0;
+
+const getLateReturnPenaltyMultiplier = () => {
+  const raw = Number(process.env.LATE_RETURN_PENALTY_MULTIPLIER);
+  if (!Number.isFinite(raw) || raw < 0) return LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT;
+  return raw;
+};
+
+const parseGraceMinutes = (value, fallback = 0) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  return Math.floor(numeric);
+};
+
+const getOwnerBookingLifecycleGracePolicy = () => ({
+  autoCompleteMinutes: parseGraceMinutes(
+    process.env.BOOKING_AUTO_COMPLETE_GRACE_MINUTES,
+    BOOKING_AUTO_COMPLETE_GRACE_MINUTES_DEFAULT
+  ),
+  overdueMinutes: parseGraceMinutes(
+    process.env.BOOKING_OVERDUE_GRACE_MINUTES,
+    BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT
+  ),
+});
 
 const getImageUrl = (req, pathValue) => {
   if (!pathValue) return "";
@@ -46,16 +84,27 @@ const getOwnerBookingGasFee = (booking) => {
   return 0;
 };
 
+const getOwnerBookingLatePenaltyRatePerHour = (booking) => {
+  const persisted = Number(booking?.lateReturnPenaltyRatePerHour || 0);
+  if (Number.isFinite(persisted) && persisted > 0) {
+    return roundCurrency(persisted);
+  }
+  const vehicleRate = getBookingVehicleHourlyRate(booking);
+  const driverRate = Boolean(booking?.driverSelected) ? getBookingDriverHourlyRate(booking) : 0;
+  const baseRate = Math.max(0, Number(vehicleRate || 0)) + Math.max(0, Number(driverRate || 0));
+  return roundCurrency(baseRate * getLateReturnPenaltyMultiplier());
+};
+
+const getOwnerBookingLatePenaltyFee = (booking) => {
+  const penalty = Number(booking?.lateReturnPenaltyFee || 0);
+  if (!Number.isFinite(penalty) || penalty <= 0) return 0;
+  return roundCurrency(penalty);
+};
+
 const getOwnerBookingPayableAmount = (booking) => {
   const bookingTotal = Number(booking?.totalAmount || 0);
   const total = Number.isFinite(bookingTotal) && bookingTotal > 0 ? bookingTotal : 0;
-  return Math.round((total + getOwnerBookingGasFee(booking)) * 100) / 100;
-};
-
-const roundCurrency = (value) => {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * 100) / 100;
+  return Math.round((total + getOwnerBookingLatePenaltyFee(booking) + getOwnerBookingGasFee(booking)) * 100) / 100;
 };
 
 const toDate = (value) => {
@@ -66,6 +115,12 @@ const toDate = (value) => {
 const normalizeWalkInStatus = (value, fallback = "none") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (WALK_IN_PAYMENT_STATUSES.has(normalized)) return normalized;
+  return fallback;
+};
+
+const normalizeExtensionStatus = (value, fallback = "none") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (EXTENSION_STATUSES.has(normalized)) return normalized;
   return fallback;
 };
 
@@ -101,6 +156,96 @@ const getOwnerBookingRemainingAmount = (booking) => {
   return roundCurrency(Math.max(totalPayable - paidAmount, 0));
 };
 
+const getOwnerBookingReturnBoundaryWithGrace = (booking, graceMinutes = 0) => {
+  const returnAt = toDate(booking?.returnAt);
+  if (!returnAt) return null;
+  const grace = Math.max(0, Math.floor(Number(graceMinutes || 0)));
+  if (grace <= 0) return returnAt;
+  return new Date(returnAt.getTime() + grace * 60 * 1000);
+};
+
+const getOwnerBookingOverdueMinutes = (booking, now = new Date(), graceMinutes = 0) => {
+  const overdueBoundary = getOwnerBookingReturnBoundaryWithGrace(booking, graceMinutes);
+  const current = toDate(now);
+  if (!overdueBoundary || !current) return 0;
+  if (current.getTime() <= overdueBoundary.getTime()) return 0;
+  const diffMs = current.getTime() - overdueBoundary.getTime();
+  return Math.max(0, Math.round(diffMs / (1000 * 60)));
+};
+
+const hasSettledOwnerBookingPayment = (booking) => {
+  const paymentStatus = String(booking?.paymentStatus || "").trim().toLowerCase();
+  const walkInStatus = normalizeWalkInStatus(booking?.walkInPaymentStatus, "none");
+  return paymentStatus === "paid" || walkInStatus === "completed";
+};
+
+const recalculateOwnerBookingAmountsForRange = (booking, nextReturnAt) => {
+  const pickupAt = toDate(booking?.pickupAt);
+  const returnAt = toDate(nextReturnAt);
+  if (!pickupAt || !returnAt || returnAt.getTime() <= pickupAt.getTime()) {
+    return null;
+  }
+
+  const diffMs = returnAt.getTime() - pickupAt.getTime();
+  const bookingDurationMinutes = Math.max(0, Math.round(diffMs / (1000 * 60)));
+  const bookingDurationHours = getBookingDurationHours({
+    pickupAt,
+    returnAt,
+    bookingDurationMinutes,
+    bookingDurationHours: Number(bookingDurationMinutes || 0) / 60,
+  });
+  const bookingDays = Math.max(1, Math.ceil(bookingDurationMinutes / (24 * 60)));
+  if (!(bookingDurationMinutes > 0) || !(bookingDurationHours > 0)) return null;
+
+  const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
+  const driverHourlyRate = Boolean(booking?.driverSelected) ? getBookingDriverHourlyRate(booking) : 0;
+  const baseAmount = roundCurrency(vehicleHourlyRate * bookingDurationHours);
+  const driverAmount = roundCurrency(driverHourlyRate * bookingDurationHours);
+  const totalAmount = roundCurrency(baseAmount + driverAmount);
+
+  booking.returnAt = returnAt;
+  booking.bookingDays = bookingDays;
+  booking.bookingDurationMinutes = bookingDurationMinutes;
+  booking.bookingDurationHours = bookingDurationHours;
+  booking.baseAmount = baseAmount;
+  booking.driverAmount = driverAmount;
+  booking.totalAmount = totalAmount;
+  booking.rentalRateUnit = HOURLY_RATE_UNIT;
+
+  return {
+    bookingDurationMinutes,
+    bookingDurationHours,
+    bookingDays,
+    baseAmount,
+    driverAmount,
+    totalAmount,
+  };
+};
+
+const syncOwnerBookingPaymentSnapshot = (booking) => {
+  const totalPayable = getOwnerBookingPayableAmount(booking);
+  const existingPaidAmount = Number(booking?.paymentAmountPaid || 0);
+  const normalizedPaidAmount = Number.isFinite(existingPaidAmount) && existingPaidAmount > 0
+    ? Math.min(roundCurrency(existingPaidAmount), totalPayable)
+    : 0;
+  const remainingAmount = roundCurrency(Math.max(totalPayable - normalizedPaidAmount, 0));
+
+  booking.paymentAmountPaid = normalizedPaidAmount;
+  booking.paymentAmountDue = remainingAmount;
+  if (remainingAmount <= 0) {
+    booking.paymentStatus = "paid";
+    booking.paidAt = booking.paidAt || new Date();
+    booking.paymentCheckoutAmount = 0;
+    booking.paymentScope = "full";
+  } else if (normalizedPaidAmount > 0) {
+    booking.paymentStatus = "partial";
+    booking.paidAt = null;
+  } else {
+    booking.paymentStatus = "unpaid";
+    booking.paidAt = null;
+  }
+};
+
 const resetWalkInPaymentState = (booking, { clearBalancePaymentMethod = true } = {}) => {
   if (!booking) return;
   if (clearBalancePaymentMethod) {
@@ -129,6 +274,34 @@ const serializeWalkInPayment = (booking) => ({
   confirmedAt: booking?.walkInConfirmedAt || null,
   confirmedBy: toIdString(booking?.walkInConfirmedBy),
   confirmationNote: toOptionalText(booking?.walkInConfirmationNote),
+});
+
+const serializeLateReturn = (booking) => {
+  const overdueMinutes = Math.max(0, Math.round(Number(booking?.lateReturnOverdueMinutes || 0)));
+  return {
+    isOverdue: Boolean(booking?.lateReturnIsOverdue),
+    overdueMinutes,
+    detectedAt: booking?.lateReturnDetectedAt || null,
+    notifiedAt: booking?.lateReturnNotifiedAt || null,
+    penaltyRatePerHour: getOwnerBookingLatePenaltyRatePerHour(booking),
+    penaltyFee: getOwnerBookingLatePenaltyFee(booking),
+    action: String(booking?.lateReturnAction || "").trim().toLowerCase() || "none",
+    resolvedAt: booking?.lateReturnResolvedAt || null,
+    resolvedBy: toIdString(booking?.lateReturnResolvedBy),
+  };
+};
+
+const serializeExtensionRequest = (booking) => ({
+  status: normalizeExtensionStatus(booking?.extensionStatus, "none"),
+  requestedAt: booking?.extensionRequestedAt || null,
+  requestedBy: toIdString(booking?.extensionRequestedBy),
+  currentReturnAt: booking?.extensionCurrentReturnAt || null,
+  requestedReturnAt: booking?.extensionRequestedReturnAt || null,
+  requestNote: toOptionalText(booking?.extensionRequestNote),
+  reviewedAt: booking?.extensionReviewedAt || null,
+  reviewedBy: toIdString(booking?.extensionReviewedBy),
+  reviewAction: String(booking?.extensionReviewAction || "").trim().toLowerCase() || null,
+  reviewNote: toOptionalText(booking?.extensionReviewNote),
 });
 
 const getOwnerBookingEarnedAt = (booking) => {
@@ -202,12 +375,19 @@ const serializeOwnerBooking = (req, booking) => {
   const vehicle = booking.vehicle || {};
   const rawImages = Array.isArray(vehicle.images) ? vehicle.images : [];
   const images = rawImages.map((pathValue) => getImageUrl(req, pathValue));
+  const bookingDurationMinutes = getBookingDurationMinutes(booking);
+  const bookingDurationHours = getBookingDurationHours(booking);
+  const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
+  const driverHourlyRate = getBookingDriverHourlyRate(booking);
 
   return {
     _id: booking._id,
     pickupAt: booking.pickupAt,
     returnAt: booking.returnAt,
     bookingDays: booking.bookingDays,
+    bookingDurationMinutes,
+    bookingDurationHours,
+    rentalRateUnit: HOURLY_RATE_UNIT,
     status: booking.status,
     paymentStatus: booking.paymentStatus,
     payment_status: booking.paymentStatus,
@@ -215,6 +395,12 @@ const serializeOwnerBooking = (req, booking) => {
     payment_method: booking.paymentMethod || null,
     balancePaymentMethod: booking.balancePaymentMethod || null,
     balance_payment_method: booking.balancePaymentMethod || null,
+    autoCompletedAt: booking.autoCompletedAt || null,
+    actualReturnAt: booking.actualReturnAt || null,
+    lateReturn: serializeLateReturn(booking),
+    late_return: serializeLateReturn(booking),
+    extensionRequest: serializeExtensionRequest(booking),
+    extension_request: serializeExtensionRequest(booking),
     walkInPayment: serializeWalkInPayment(booking),
     walk_in_payment: serializeWalkInPayment(booking),
     paymongoReference: booking.paymongoReference || null,
@@ -250,12 +436,16 @@ const serializeOwnerBooking = (req, booking) => {
         }
       : null,
     blockchainStatus: getOwnerBookingBlockchainStatus(booking),
-    vehicleDailyRate: booking.vehicleDailyRate,
+    vehicleDailyRate: vehicleHourlyRate,
+    vehicleHourlyRate,
     driverSelected: booking.driverSelected,
-    driverDailyRate: booking.driverDailyRate,
+    driverDailyRate: driverHourlyRate,
+    driverHourlyRate,
     baseAmount: booking.baseAmount,
     driverAmount: booking.driverAmount,
     totalAmount: booking.totalAmount,
+    lateReturnPenaltyRatePerHour: getOwnerBookingLatePenaltyRatePerHour(booking),
+    lateReturnPenaltyFee: getOwnerBookingLatePenaltyFee(booking),
     blockchainGasFee: getOwnerBookingGasFee(booking),
     amountPayable: getOwnerBookingPayableAmount(booking),
     paymentAmountPaid: getOwnerBookingPaidAmount(booking),
@@ -283,7 +473,7 @@ const populateFields = [
   {
     path: "vehicle",
     select:
-      "name location specs images imageUrl dailyRentalRate driverOptionEnabled driverDailyRate",
+      "name location specs images imageUrl dailyRentalRate pricingUnit driverOptionEnabled driverDailyRate",
   },
 ];
 
@@ -319,6 +509,150 @@ const autoRecordOwnerBookingOnChain = async (booking) => {
   }
 };
 
+const syncOwnerBookingLifecycleState = async (booking) => {
+  if (!booking?._id) return { updated: false };
+
+  const now = new Date();
+  const gracePolicy = getOwnerBookingLifecycleGracePolicy();
+  const normalizedStatus = String(booking?.status || "").trim().toLowerCase();
+  if (!ACTIVE_BOOKING_STATUSES.has(normalizedStatus)) {
+    return { updated: false };
+  }
+
+  const returnAt = toDate(booking?.returnAt);
+  if (!returnAt || now.getTime() < returnAt.getTime()) {
+    return { updated: false };
+  }
+
+  if (hasSettledOwnerBookingPayment(booking)) {
+    const autoCompleteBoundary = getOwnerBookingReturnBoundaryWithGrace(booking, gracePolicy.autoCompleteMinutes);
+    if (!autoCompleteBoundary || now.getTime() < autoCompleteBoundary.getTime()) {
+      return { updated: false };
+    }
+
+    let changed = false;
+    if (booking.status !== "completed") {
+      booking.status = "completed";
+      changed = true;
+    }
+    if (!booking.autoCompletedAt) {
+      booking.autoCompletedAt = now;
+      changed = true;
+    }
+    if (!booking.actualReturnAt) {
+      booking.actualReturnAt = returnAt;
+      changed = true;
+    }
+    if (booking.lateReturnIsOverdue) {
+      booking.lateReturnIsOverdue = false;
+      changed = true;
+    }
+    if (Number(booking.lateReturnOverdueMinutes || 0) > 0) {
+      booking.lateReturnOverdueMinutes = 0;
+      changed = true;
+    }
+
+    if (changed) {
+      await booking.save();
+      await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
+
+      await createNotification({
+        user: booking.renter?._id || booking.renter,
+        type: "booking_status",
+        title: "Booking completed automatically",
+        message: "Your rental duration ended and the booking status was updated to completed.",
+        data: { bookingId: booking._id, status: "completed", autoCompleted: true },
+      });
+      await createNotification({
+        user: booking.owner?._id || booking.owner,
+        type: "booking_status",
+        title: "Booking completed automatically",
+        message: "A rental duration ended and the booking was auto-completed.",
+        data: { bookingId: booking._id, status: "completed", autoCompleted: true },
+      });
+    }
+
+    return { updated: changed, status: String(booking.status || "").toLowerCase() };
+  }
+
+  const overdueMinutes = getOwnerBookingOverdueMinutes(booking, now, gracePolicy.overdueMinutes);
+  if (overdueMinutes <= 0) {
+    return { updated: false };
+  }
+  let changed = false;
+
+  if (!booking.lateReturnIsOverdue) {
+    booking.lateReturnIsOverdue = true;
+    changed = true;
+  }
+  if (Number(booking.lateReturnOverdueMinutes || 0) !== overdueMinutes) {
+    booking.lateReturnOverdueMinutes = overdueMinutes;
+    changed = true;
+  }
+  if (!booking.lateReturnDetectedAt) {
+    booking.lateReturnDetectedAt = now;
+    changed = true;
+  }
+  const penaltyRatePerHour = getOwnerBookingLatePenaltyRatePerHour(booking);
+  if (roundCurrency(Number(booking.lateReturnPenaltyRatePerHour || 0)) !== penaltyRatePerHour) {
+    booking.lateReturnPenaltyRatePerHour = penaltyRatePerHour;
+    changed = true;
+  }
+
+  let shouldNotifyOverdue = false;
+  if (!booking.lateReturnNotifiedAt) {
+    booking.lateReturnNotifiedAt = now;
+    shouldNotifyOverdue = true;
+    changed = true;
+  }
+
+  if (changed) {
+    await booking.save();
+  }
+
+  if (shouldNotifyOverdue) {
+    await createNotification({
+      user: booking.renter?._id || booking.renter,
+      type: "booking_status",
+      title: "Late return detected",
+      message:
+        "Your booking is overdue. You can extend the rental or proceed with late return from your booking card.",
+      data: {
+        bookingId: booking._id,
+        status: booking.status,
+        isOverdue: true,
+        overdueMinutes,
+        actions: ["extend_rental", "proceed_late_return"],
+      },
+    });
+    await createNotification({
+      user: booking.owner?._id || booking.owner,
+      type: "booking_status",
+      title: "Vehicle return is overdue",
+      message: "The renter has exceeded the scheduled return time.",
+      data: {
+        bookingId: booking._id,
+        status: booking.status,
+        isOverdue: true,
+        overdueMinutes,
+      },
+    });
+  }
+
+  return { updated: changed || shouldNotifyOverdue, status: String(booking.status || "").toLowerCase() };
+};
+
+const autoSyncOwnerBookingLifecycles = async (bookings = []) => {
+  const updated = [];
+  for (const booking of bookings) {
+    const result = await syncOwnerBookingLifecycleState(booking);
+    if (result.updated) {
+      updated.push(booking);
+    }
+  }
+  return updated;
+};
+
 export const getOwnerBookings = async (req, res) => {
   try {
     const status = req.query.status || "all";
@@ -330,6 +664,12 @@ export const getOwnerBookings = async (req, res) => {
     }
 
     const bookings = await Booking.find(query).populate(populateFields).sort({ createdAt: -1 });
+    const autoSynced = await autoSyncOwnerBookingLifecycles(bookings);
+    for (const booking of autoSynced) {
+      const payload = serializeOwnerBooking(req, booking);
+      emitToUser(String(booking.renter?._id || booking.renter), "booking:updated", payload);
+      emitToUser(String(booking.owner?._id || booking.owner), "booking:updated", payload);
+    }
     res.json({ success: true, bookings: bookings.map((booking) => serializeOwnerBooking(req, booking)) });
   } catch {
     res.status(500).json({ success: false, message: "Failed to fetch owner bookings." });
@@ -345,12 +685,21 @@ export const updateOwnerBookingStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
 
+    await syncOwnerBookingLifecycleState(booking);
+
+    if (String(status || "").trim().toLowerCase() === "extended") {
+      return res.status(400).json({
+        success: false,
+        message: "Use extension approval flow to set status to extended.",
+      });
+    }
+
     if (status === "confirmed") {
       const vehicleId = booking.vehicle?._id || booking.vehicle;
       const conflictingBooking = await Booking.findOne({
         _id: { $ne: booking._id },
         vehicle: vehicleId,
-        status: { $in: ["pending", "confirmed"] },
+        status: { $in: ACTIVE_OVERLAP_STATUSES },
         pickupAt: { $lt: booking.returnAt },
         returnAt: { $gt: booking.pickupAt },
       }).select("_id");
@@ -364,6 +713,11 @@ export const updateOwnerBookingStatus = async (req, res) => {
     }
 
     booking.status = status;
+    if (status === "completed") {
+      booking.actualReturnAt = booking.actualReturnAt || new Date();
+      booking.lateReturnResolvedAt = booking.lateReturnResolvedAt || new Date();
+      booking.lateReturnResolvedBy = booking.lateReturnResolvedBy || req.user._id;
+    }
     await booking.save();
     await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
 
@@ -403,6 +757,7 @@ export const updateOwnerBookingPaymentStatus = async (req, res) => {
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
+    await syncOwnerBookingLifecycleState(booking);
 
     booking.paymentStatus = requestedPaymentStatus;
     booking.paymentUpdatedAt = new Date();
@@ -448,6 +803,155 @@ export const updateOwnerBookingPaymentStatus = async (req, res) => {
   }
 };
 
+export const reviewOwnerBookingExtensionRequest = async (req, res) => {
+  try {
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    if (!EXTENSION_REVIEW_ACTIONS.has(action)) {
+      return res.status(400).json({ success: false, message: "Invalid extension review action." });
+    }
+
+    const booking = await Booking.findOne({ _id: req.params.id, owner: req.user._id }).populate(populateFields);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+
+    await syncOwnerBookingLifecycleState(booking);
+
+    const normalizedStatus = String(booking.status || "").trim().toLowerCase();
+    if (["cancelled", "rejected", "completed"].includes(normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "This booking can no longer process extension requests.",
+      });
+    }
+
+    const extensionStatus = normalizeExtensionStatus(booking.extensionStatus, "none");
+    if (extensionStatus !== "requested") {
+      return res.status(409).json({
+        success: false,
+        message: "No pending extension request found for this booking.",
+      });
+    }
+
+    const now = new Date();
+    const note = toOptionalText(req.body?.note, 500);
+
+    if (action === "approve") {
+      const requestedReturnAt = toDate(booking.extensionRequestedReturnAt);
+      const currentReturnAt = toDate(booking.returnAt);
+      if (!requestedReturnAt || !currentReturnAt || requestedReturnAt.getTime() <= currentReturnAt.getTime()) {
+        return res.status(400).json({
+          success: false,
+          message: "Requested extension schedule is invalid.",
+        });
+      }
+
+      const vehicleId = booking.vehicle?._id || booking.vehicle;
+      const conflictingBooking = await Booking.findOne({
+        _id: { $ne: booking._id },
+        vehicle: vehicleId,
+        status: { $in: ACTIVE_OVERLAP_STATUSES },
+        pickupAt: { $lt: requestedReturnAt },
+        returnAt: { $gt: booking.pickupAt },
+      }).select("_id");
+      if (conflictingBooking) {
+        return res.status(409).json({
+          success: false,
+          message: "Cannot approve extension because it conflicts with another booking schedule.",
+        });
+      }
+
+      const recalculated = recalculateOwnerBookingAmountsForRange(booking, requestedReturnAt);
+      if (!recalculated) {
+        return res.status(400).json({
+          success: false,
+          message: "Failed to apply extension because the updated duration is invalid.",
+        });
+      }
+
+      booking.status = "extended";
+      booking.extensionStatus = "approved";
+      booking.extensionReviewedAt = now;
+      booking.extensionReviewedBy = req.user._id;
+      booking.extensionReviewAction = "approve";
+      booking.extensionReviewNote = note;
+      booking.lateReturnIsOverdue = false;
+      booking.lateReturnDetectedAt = null;
+      booking.lateReturnNotifiedAt = null;
+      booking.lateReturnOverdueMinutes = 0;
+      booking.lateReturnPenaltyFee = 0;
+      booking.lateReturnAction = "none";
+      booking.lateReturnResolvedAt = null;
+      booking.lateReturnResolvedBy = null;
+      booking.actualReturnAt = null;
+      booking.paymentUpdatedAt = now;
+      syncOwnerBookingPaymentSnapshot(booking);
+      await booking.save();
+      await syncVehicleAvailabilityByBookingState(vehicleId);
+
+      const refreshed = await Booking.findById(booking._id).populate(populateFields);
+      const payload = serializeOwnerBooking(req, refreshed);
+
+      await createNotification({
+        user: refreshed.renter?._id || refreshed.renter,
+        type: "booking_status",
+        title: "Extension approved",
+        message: "Your extension request was approved. Booking schedule and price were updated.",
+        data: {
+          bookingId: refreshed._id,
+          status: refreshed.status,
+          extensionStatus: "approved",
+          returnAt: refreshed.returnAt,
+        },
+      });
+
+      emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);
+      emitToUser(String(refreshed.owner?._id || refreshed.owner), "booking:updated", payload);
+
+      return res.json({
+        success: true,
+        message: "Extension request approved. Booking schedule and pricing were updated.",
+        booking: payload,
+      });
+    }
+
+    booking.extensionStatus = "rejected";
+    booking.extensionReviewedAt = now;
+    booking.extensionReviewedBy = req.user._id;
+    booking.extensionReviewAction = "reject";
+    booking.extensionReviewNote = note;
+    booking.lateReturnAction = "none";
+    booking.paymentUpdatedAt = now;
+    await booking.save();
+
+    const refreshed = await Booking.findById(booking._id).populate(populateFields);
+    const payload = serializeOwnerBooking(req, refreshed);
+
+    await createNotification({
+      user: refreshed.renter?._id || refreshed.renter,
+      type: "booking_status",
+      title: "Extension rejected",
+      message: "Your extension request was rejected. The original booking schedule remains in effect.",
+      data: {
+        bookingId: refreshed._id,
+        status: refreshed.status,
+        extensionStatus: "rejected",
+      },
+    });
+
+    emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);
+    emitToUser(String(refreshed.owner?._id || refreshed.owner), "booking:updated", payload);
+
+    return res.json({
+      success: true,
+      message: "Extension request rejected.",
+      booking: payload,
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "Failed to review extension request." });
+  }
+};
+
 export const reviewOwnerWalkInPaymentRequest = async (req, res) => {
   try {
     const action = String(req.body?.action || "").trim().toLowerCase();
@@ -459,6 +963,7 @@ export const reviewOwnerWalkInPaymentRequest = async (req, res) => {
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
+    await syncOwnerBookingLifecycleState(booking);
 
     if (["cancelled", "rejected"].includes(booking.status)) {
       return res.status(400).json({
@@ -466,10 +971,10 @@ export const reviewOwnerWalkInPaymentRequest = async (req, res) => {
         message: "Cancelled bookings cannot be updated for walk-in payment.",
       });
     }
-    if (booking.status !== "confirmed") {
+    if (!["confirmed", "extended"].includes(String(booking.status || "").trim().toLowerCase())) {
       return res.status(400).json({
         success: false,
-        message: "Booking must be confirmed before reviewing walk-in payment.",
+        message: "Booking must be approved or extended before reviewing walk-in payment.",
       });
     }
 
@@ -546,6 +1051,7 @@ export const confirmOwnerWalkInPayment = async (req, res) => {
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
+    await syncOwnerBookingLifecycleState(booking);
 
     if (["cancelled", "rejected"].includes(booking.status)) {
       return res.status(400).json({
@@ -553,10 +1059,10 @@ export const confirmOwnerWalkInPayment = async (req, res) => {
         message: "Cancelled bookings cannot be settled via walk-in payment.",
       });
     }
-    if (!["confirmed", "completed"].includes(booking.status)) {
+    if (!["confirmed", "extended", "completed"].includes(String(booking.status || "").trim().toLowerCase())) {
       return res.status(400).json({
         success: false,
-        message: "Only confirmed or completed bookings can be settled via walk-in payment.",
+        message: "Only approved, extended, or completed bookings can be settled via walk-in payment.",
       });
     }
 
@@ -674,15 +1180,24 @@ export const getOwnerEarnings = async (req, res) => {
     const bookings = paidBookings.map((booking) => {
       const earnings = getOwnerBookingEarningsBreakdown(booking);
       const earnedAt = getOwnerBookingEarnedAt(booking);
+      const bookingDurationMinutes = getBookingDurationMinutes(booking);
+      const bookingDurationHours = getBookingDurationHours(booking);
+      const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
+      const driverHourlyRate = getBookingDriverHourlyRate(booking);
 
       return {
         _id: booking._id,
         vehicle: booking.vehicle || null,
         renter: booking.renter || null,
         bookingDays: booking.bookingDays,
-        vehicleDailyRate: booking.vehicleDailyRate,
+        bookingDurationMinutes,
+        bookingDurationHours,
+        rentalRateUnit: HOURLY_RATE_UNIT,
+        vehicleDailyRate: vehicleHourlyRate,
+        vehicleHourlyRate,
         driverSelected: booking.driverSelected,
-        driverDailyRate: booking.driverDailyRate,
+        driverDailyRate: driverHourlyRate,
+        driverHourlyRate,
         baseAmount: booking.baseAmount,
         driverAmount: booking.driverAmount,
         totalAmount: booking.totalAmount,

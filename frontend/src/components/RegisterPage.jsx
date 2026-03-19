@@ -27,7 +27,9 @@ import {
 import FormInput from "./FormInput";
 import PasswordInput from "./PasswordInput";
 import AuthShell from "./AuthShell";
+import LegalPolicyModal from "./LegalPolicyModal";
 import { RELATIONSHIP_OPTIONS, VALIDATION_RULES } from "../data/registerValidation";
+import { ID_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 import API from "../utils/api";
 
 const TOTAL_STEPS = 3;
@@ -85,6 +87,7 @@ export default function RegisterPage({
 
   // KYC data
   const [kyc, setKyc] = useState({
+    idType: "",
     idCardFile: null,
     idRegistered: false,
     challengeId: "",
@@ -106,9 +109,11 @@ export default function RegisterPage({
   // Page state
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
   const [stepErrors, setStepErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [legalModalType, setLegalModalType] = useState("");
 
   // Input refs
   const firstNameRef = useRef(null);
@@ -126,6 +131,7 @@ export default function RegisterPage({
   const emergencyRelationshipRef = useRef(null);
   const passwordRef = useRef(null);
   const confirmPasswordRef = useRef(null);
+  const idTypeRef = useRef(null);
   const idInputRef = useRef(null);
 
   // Small cooldown to avoid double clicks
@@ -290,18 +296,98 @@ export default function RegisterPage({
 
   // Input handlers
 
+  const validateStep1Field = useCallback(
+    (field, sourceForm = form) => {
+      switch (field) {
+        case "firstName":
+          return VALIDATION_RULES.firstName(sourceForm.firstName);
+        case "lastName":
+          return VALIDATION_RULES.lastName(sourceForm.lastName);
+        case "email":
+          return VALIDATION_RULES.email(sourceForm.email);
+        case "phone":
+          return VALIDATION_RULES.phone(sourceForm.phone);
+        case "dateOfBirth":
+          return VALIDATION_RULES.dateOfBirth(sourceForm.dateOfBirth);
+        case "gender":
+          return VALIDATION_RULES.gender(sourceForm.gender);
+        case "region":
+          return VALIDATION_RULES.region(sourceForm.region);
+        case "province":
+          return provinces.length > 0 ? VALIDATION_RULES.province(sourceForm.province) : "";
+        case "city":
+          return VALIDATION_RULES.city(sourceForm.city);
+        case "barangay":
+          return VALIDATION_RULES.barangay(sourceForm.barangay);
+        case "emergencyContactName":
+          return VALIDATION_RULES.emergencyContactName(sourceForm.emergencyContactName);
+        case "emergencyContactPhone":
+          return VALIDATION_RULES.emergencyContactPhone(sourceForm.emergencyContactPhone);
+        case "emergencyContactRelationship":
+          return VALIDATION_RULES.emergencyContactRelationship(sourceForm.emergencyContactRelationship);
+        case "password":
+          return VALIDATION_RULES.password(sourceForm.password);
+        case "confirmPassword":
+          return VALIDATION_RULES.confirmPassword(sourceForm.password, sourceForm.confirmPassword);
+        case "agree":
+          return VALIDATION_RULES.agree(sourceForm.agree);
+        default:
+          return "";
+      }
+    },
+    [form, provinces.length]
+  );
+
   const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: "" }));
+    const nextForm = { ...form, [field]: value };
+    setForm(nextForm);
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    setErrors((prev) => ({
+      ...prev,
+      [field]: "",
+      ...(field === "password" ? { confirmPassword: "" } : {}),
+    }));
+    if (["firstName", "lastName", "email", "dateOfBirth", "gender"].includes(field)) {
+      setKyc((prev) => ({
+        ...prev,
+        idRegistered: false,
+        challengeId: "",
+        selfieVerified: false,
+        selfieDataUrl: "",
+        selfieBase64Clean: "",
+      }));
+      setStepErrors((prev) => ({ ...prev, idRegistered: "", selfieVerified: "" }));
+      setKycUi((prev) => ({ ...prev, statusText: "" }));
+    }
+  };
+
+  const handleFieldBlur = (field) => {
+    if (!touched[field]) return;
+    const nextForm = { ...form };
+    setErrors((prev) => {
+      const nextErrors = { ...prev, [field]: validateStep1Field(field, nextForm) };
+      if (field === "password" && (touched.confirmPassword || nextForm.confirmPassword)) {
+        nextErrors.confirmPassword = validateStep1Field("confirmPassword", nextForm);
+      }
+      return nextErrors;
+    });
   };
 
   const handleRegionChange = (value) => {
-    setForm((prev) => ({
-      ...prev,
+    const nextForm = {
+      ...form,
       region: value,
       province: "",
       city: "",
       barangay: "",
+    };
+    setForm(nextForm);
+    setTouched((prev) => ({
+      ...prev,
+      region: true,
+      province: false,
+      city: false,
+      barangay: false,
     }));
     setErrors((prev) => ({
       ...prev,
@@ -313,11 +399,18 @@ export default function RegisterPage({
   };
 
   const handleProvinceChange = (value) => {
-    setForm((prev) => ({
-      ...prev,
+    const nextForm = {
+      ...form,
       province: value,
       city: "",
       barangay: "",
+    };
+    setForm(nextForm);
+    setTouched((prev) => ({
+      ...prev,
+      province: true,
+      city: false,
+      barangay: false,
     }));
     setErrors((prev) => ({
       ...prev,
@@ -328,10 +421,16 @@ export default function RegisterPage({
   };
 
   const handleCityChange = (value) => {
-    setForm((prev) => ({
-      ...prev,
+    const nextForm = {
+      ...form,
       city: value,
       barangay: "",
+    };
+    setForm(nextForm);
+    setTouched((prev) => ({
+      ...prev,
+      city: true,
+      barangay: false,
     }));
     setErrors((prev) => ({
       ...prev,
@@ -341,10 +440,9 @@ export default function RegisterPage({
   };
 
   const handleBarangayChange = (value) => {
-    setForm((prev) => ({
-      ...prev,
-      barangay: value,
-    }));
+    const nextForm = { ...form, barangay: value };
+    setForm(nextForm);
+    setTouched((prev) => ({ ...prev, barangay: true }));
     setErrors((prev) => ({
       ...prev,
       barangay: "",
@@ -363,6 +461,7 @@ export default function RegisterPage({
 
   const resetKyc = useCallback(() => {
     setKyc({
+      idType: "",
       idCardFile: null, idRegistered: false, challengeId: "",
       selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "",
     });
@@ -449,24 +548,22 @@ export default function RegisterPage({
 
   const validateStep1 = () => {
     const newErrors = {};
-    newErrors.firstName = VALIDATION_RULES.firstName(form.firstName);
-    newErrors.lastName = VALIDATION_RULES.lastName(form.lastName);
-    newErrors.email = VALIDATION_RULES.email(form.email);
-    newErrors.phone = VALIDATION_RULES.phone(form.phone);
-    newErrors.dateOfBirth = VALIDATION_RULES.dateOfBirth(form.dateOfBirth);
-    newErrors.gender = VALIDATION_RULES.gender(form.gender);
-    newErrors.region = VALIDATION_RULES.region(form.region);
-    newErrors.province = provinces.length > 0 ? VALIDATION_RULES.province(form.province) : "";
-    newErrors.city = VALIDATION_RULES.city(form.city);
-    newErrors.barangay = VALIDATION_RULES.barangay(form.barangay);
-    newErrors.emergencyContactName = VALIDATION_RULES.emergencyContactName(form.emergencyContactName);
-    newErrors.emergencyContactPhone = VALIDATION_RULES.emergencyContactPhone(form.emergencyContactPhone);
-    newErrors.emergencyContactRelationship = VALIDATION_RULES.emergencyContactRelationship(
-      form.emergencyContactRelationship
-    );
-    newErrors.password = VALIDATION_RULES.password(form.password);
-    newErrors.confirmPassword = VALIDATION_RULES.confirmPassword(form.password, form.confirmPassword);
-    newErrors.agree = VALIDATION_RULES.agree(form.agree);
+    newErrors.firstName = validateStep1Field("firstName", form);
+    newErrors.lastName = validateStep1Field("lastName", form);
+    newErrors.email = validateStep1Field("email", form);
+    newErrors.phone = validateStep1Field("phone", form);
+    newErrors.dateOfBirth = validateStep1Field("dateOfBirth", form);
+    newErrors.gender = validateStep1Field("gender", form);
+    newErrors.region = validateStep1Field("region", form);
+    newErrors.province = validateStep1Field("province", form);
+    newErrors.city = validateStep1Field("city", form);
+    newErrors.barangay = validateStep1Field("barangay", form);
+    newErrors.emergencyContactName = validateStep1Field("emergencyContactName", form);
+    newErrors.emergencyContactPhone = validateStep1Field("emergencyContactPhone", form);
+    newErrors.emergencyContactRelationship = validateStep1Field("emergencyContactRelationship", form);
+    newErrors.password = validateStep1Field("password", form);
+    newErrors.confirmPassword = validateStep1Field("confirmPassword", form);
+    newErrors.agree = validateStep1Field("agree", form);
 
     const fieldOrder = [
       ["firstName", firstNameRef],
@@ -487,6 +584,24 @@ export default function RegisterPage({
     ];
 
     const firstInvalidField = fieldOrder.find(([field]) => newErrors[field]);
+    setTouched({
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      dateOfBirth: true,
+      gender: true,
+      region: true,
+      province: true,
+      city: true,
+      barangay: true,
+      emergencyContactName: true,
+      emergencyContactPhone: true,
+      emergencyContactRelationship: true,
+      password: true,
+      confirmPassword: true,
+      agree: true,
+    });
     setErrors(newErrors);
 
     if (firstInvalidField) {
@@ -502,6 +617,7 @@ export default function RegisterPage({
 
   const validateStep2 = () => {
     const nextErrors = {};
+    if (!kyc.idType) nextErrors.idType = "Please select your ID type.";
     if (!kyc.idCardFile) nextErrors.idCardFile = "Please upload your full ID card.";
     if (!kyc.idRegistered) nextErrors.idRegistered = "Please register your ID first.";
     if (!kyc.selfieVerified) nextErrors.selfieVerified = "Please verify your selfie matches the ID.";
@@ -531,6 +647,11 @@ export default function RegisterPage({
 
   const registerId = async () => {
     if (!canAct()) return;
+    if (!kyc.idType) {
+      setStepErrors((p) => ({ ...p, idType: "Select your ID type first." }));
+      idTypeRef.current?.focus?.();
+      return;
+    }
     if (!kyc.idCardFile) {
       setStepErrors((p) => ({ ...p, idCardFile: "Upload your ID image first." }));
       return;
@@ -541,7 +662,17 @@ export default function RegisterPage({
       const dataUrl = await fileToBase64(kyc.idCardFile);
       const clean = stripDataUrlPrefix(dataUrl);
       const mime = getMimeFromDataUrl(dataUrl);
-      const result = await preRegisterIdFace(form.email, fullName, "user", clean, mime);
+      const result = await preRegisterIdFace(form.email, fullName, "user", clean, mime, {
+        idType: kyc.idType,
+        userProfile: {
+          full_name: fullName,
+          first_name: form.firstName.trim(),
+          last_name: form.lastName.trim(),
+          email: form.email,
+          date_of_birth: form.dateOfBirth,
+          gender: form.gender,
+        },
+      });
       if (!result.success) throw new Error(result.message || "We couldn't register your ID. Please try a clearer photo.");
       setKyc((prev) => ({
         ...prev,
@@ -551,7 +682,7 @@ export default function RegisterPage({
         selfieDataUrl: "",
         selfieBase64Clean: "",
       }));
-      setStepErrors((p) => ({ ...p, idRegistered: "" }));
+      setStepErrors((p) => ({ ...p, idType: "", idRegistered: "" }));
       setKycUi((p) => ({ ...p, statusText: "✅ ID registered. Open camera to capture your selfie." }));
     } catch (e) {
       const msg = friendlyError(e.message);
@@ -739,6 +870,7 @@ export default function RegisterPage({
     required = false,
     inputRef,
     placeholder = "Select an option",
+    onBlur,
   }) => (
     <div className="space-y-2">
       <label className="block text-sm font-semibold text-slate-700">
@@ -749,6 +881,7 @@ export default function RegisterPage({
           ref={inputRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
           disabled={disabled}
           className={`w-full appearance-none rounded-xl border bg-white px-4 py-3 pr-12 text-[15px] text-slate-900 shadow-sm transition-all duration-200 focus:outline-none ${
             error
@@ -859,20 +992,20 @@ export default function RegisterPage({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <FormInput label="First Name" value={form.firstName} onChange={(e) => handleChange("firstName", e.target.value)} error={errors.firstName} disabled={isLoading} placeholder="John" required icon={User} onlyLetters inputRef={firstNameRef} maxLength={50} />
-                      <FormInput label="Last Name" value={form.lastName} onChange={(e) => handleChange("lastName", e.target.value)} error={errors.lastName} disabled={isLoading} placeholder="Doe" required icon={User} onlyLetters inputRef={lastNameRef} maxLength={50} />
+                      <FormInput label="First Name" value={form.firstName} onChange={(e) => handleChange("firstName", e.target.value)} onBlur={() => handleFieldBlur("firstName")} error={errors.firstName} disabled={isLoading} placeholder="John" required icon={User} onlyLetters inputRef={firstNameRef} maxLength={50} />
+                      <FormInput label="Last Name" value={form.lastName} onChange={(e) => handleChange("lastName", e.target.value)} onBlur={() => handleFieldBlur("lastName")} error={errors.lastName} disabled={isLoading} placeholder="Doe" required icon={User} onlyLetters inputRef={lastNameRef} maxLength={50} />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <FormInput label="Enter Email" type="email" value={form.email} onChange={(e) => handleChange("email", e.target.value.toLowerCase().trim())} error={errors.email} disabled={isLoading} placeholder="Enter Email" required icon={Mail} inputRef={emailRef} showEmailHint maxLength={254} />
-                      <FormInput label="Phone Number" type="tel" value={form.phone} onChange={(e) => handleChange("phone", normalizePhMobileInput(e.target.value))} error={errors.phone} disabled={isLoading} placeholder="9XXXXXXXXX" required icon={Phone} onlyNumbers inputRef={phoneRef} maxLength={10} prefixText="+63" />
+                      <FormInput label="Enter Email" type="email" value={form.email} onChange={(e) => handleChange("email", e.target.value.toLowerCase().trim())} onBlur={() => handleFieldBlur("email")} error={errors.email} disabled={isLoading} placeholder="Enter Email" required icon={Mail} inputRef={emailRef} showEmailHint maxLength={254} />
+                      <FormInput label="Phone Number" type="tel" value={form.phone} onChange={(e) => handleChange("phone", normalizePhMobileInput(e.target.value))} onBlur={() => handleFieldBlur("phone")} error={errors.phone} disabled={isLoading} placeholder="9XXXXXXXXX" required icon={Phone} onlyNumbers inputRef={phoneRef} maxLength={10} prefixText="+63" />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <FormInput label="Date of Birth" type="date" value={form.dateOfBirth} onChange={(e) => handleChange("dateOfBirth", e.target.value)} error={errors.dateOfBirth} disabled={isLoading} required icon={Calendar} inputRef={dobRef} />
+                      <FormInput label="Date of Birth" type="date" value={form.dateOfBirth} onChange={(e) => handleChange("dateOfBirth", e.target.value)} onBlur={() => handleFieldBlur("dateOfBirth")} error={errors.dateOfBirth} disabled={isLoading} required icon={Calendar} inputRef={dobRef} />
                       <SelectField label="Gender" value={form.gender} onChange={(value) => handleChange("gender", value)} options={[
                         { value: "Male", label: "Male" },
                         { value: "Female", label: "Female" },
                         { value: "Prefer not to say", label: "Prefer not to say" },
-                      ]} error={errors.gender} disabled={isLoading} required inputRef={genderRef} />
+                      ]} onBlur={() => handleFieldBlur("gender")} error={errors.gender} disabled={isLoading} required inputRef={genderRef} />
                     </div>
                     <div className="rounded-2xl border border-gray-200 p-4 bg-white space-y-4">
                       <div className="flex items-start gap-3">
@@ -892,6 +1025,7 @@ export default function RegisterPage({
                           onChange={handleRegionChange}
                           options={regions.map((region) => ({ value: region.code, label: region.name }))}
                           error={errors.region}
+                          onBlur={() => handleFieldBlur("region")}
                           disabled={isLoading}
                           required
                           inputRef={regionRef}
@@ -902,6 +1036,7 @@ export default function RegisterPage({
                           onChange={handleProvinceChange}
                           options={provinces.map((province) => ({ value: province.code, label: province.name }))}
                           error={errors.province}
+                          onBlur={() => handleFieldBlur("province")}
                           disabled={isLoading || !form.region || provinces.length === 0}
                           required={provinces.length > 0}
                           inputRef={provinceRef}
@@ -916,6 +1051,7 @@ export default function RegisterPage({
                           onChange={handleCityChange}
                           options={cities.map((city) => ({ value: city.code, label: city.name }))}
                           error={errors.city}
+                          onBlur={() => handleFieldBlur("city")}
                           disabled={isLoading || !form.region || (provinces.length > 0 && !form.province)}
                           required
                           inputRef={cityRef}
@@ -926,6 +1062,7 @@ export default function RegisterPage({
                           onChange={handleBarangayChange}
                           options={barangays.map((barangay) => ({ value: barangay.code, label: barangay.name }))}
                           error={errors.barangay}
+                          onBlur={() => handleFieldBlur("barangay")}
                           disabled={isLoading || !form.city}
                           required
                           inputRef={barangayRef}
@@ -943,20 +1080,43 @@ export default function RegisterPage({
                         <p className="text-sm text-gray-500 mt-1">Add someone we can reach if you need urgent support during a booking.</p>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <FormInput label="Contact Name" value={form.emergencyContactName} onChange={(e) => handleChange("emergencyContactName", e.target.value)} error={errors.emergencyContactName} disabled={isLoading} placeholder="Maria Dela Cruz" required icon={User} inputRef={emergencyNameRef} maxLength={100} />
-                        <FormInput label="Phone Number" type="tel" value={form.emergencyContactPhone} onChange={(e) => handleChange("emergencyContactPhone", normalizePhMobileInput(e.target.value))} error={errors.emergencyContactPhone} disabled={isLoading} placeholder="9XXXXXXXXX" required icon={Phone} onlyNumbers inputRef={emergencyPhoneRef} maxLength={10} prefixText="+63" />
+                        <FormInput label="Contact Name" value={form.emergencyContactName} onChange={(e) => handleChange("emergencyContactName", e.target.value)} onBlur={() => handleFieldBlur("emergencyContactName")} error={errors.emergencyContactName} disabled={isLoading} placeholder="Maria Dela Cruz" required icon={User} inputRef={emergencyNameRef} maxLength={100} />
+                        <FormInput label="Phone Number" type="tel" value={form.emergencyContactPhone} onChange={(e) => handleChange("emergencyContactPhone", normalizePhMobileInput(e.target.value))} onBlur={() => handleFieldBlur("emergencyContactPhone")} error={errors.emergencyContactPhone} disabled={isLoading} placeholder="9XXXXXXXXX" required icon={Phone} onlyNumbers inputRef={emergencyPhoneRef} maxLength={10} prefixText="+63" />
                       </div>
-                      <SelectField label="Relationship" value={form.emergencyContactRelationship} onChange={(value) => handleChange("emergencyContactRelationship", value)} options={RELATIONSHIP_OPTIONS.map((option) => ({ value: option, label: option }))} error={errors.emergencyContactRelationship} disabled={isLoading} required inputRef={emergencyRelationshipRef} />
+                      <SelectField label="Relationship" value={form.emergencyContactRelationship} onChange={(value) => handleChange("emergencyContactRelationship", value)} onBlur={() => handleFieldBlur("emergencyContactRelationship")} options={RELATIONSHIP_OPTIONS.map((option) => ({ value: option, label: option }))} error={errors.emergencyContactRelationship} disabled={isLoading} required inputRef={emergencyRelationshipRef} />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <PasswordInput label="Create Password" value={form.password} onChange={(e) => handleChange("password", e.target.value)} error={errors.password} disabled={isLoading} placeholder="Create Password" required showStrength inputRef={passwordRef} maxLength={128} />
-                      <PasswordInput label="Confirm Password" value={form.confirmPassword} onChange={(e) => handleChange("confirmPassword", e.target.value)} error={errors.confirmPassword} disabled={isLoading} placeholder="Confirm Password" required showStrength={false} inputRef={confirmPasswordRef} maxLength={128} />
+                      <PasswordInput label="Create Password" value={form.password} onChange={(e) => handleChange("password", e.target.value)} onBlur={() => handleFieldBlur("password")} error={errors.password} disabled={isLoading} placeholder="Create Password" required showStrength inputRef={passwordRef} maxLength={128} />
+                      <PasswordInput label="Confirm Password" value={form.confirmPassword} onChange={(e) => handleChange("confirmPassword", e.target.value)} onBlur={() => handleFieldBlur("confirmPassword")} error={errors.confirmPassword} disabled={isLoading} placeholder="Confirm Password" required showStrength={false} inputRef={confirmPasswordRef} maxLength={128} />
                     </div>
                     <div className="space-y-2">
                       <label className="flex items-center gap-3 cursor-pointer group">
-                        <input type="checkbox" checked={form.agree} onChange={(e) => handleChange("agree", e.target.checked)} disabled={isLoading} className="w-5 h-5 accent-[#017FE6] cursor-pointer flex-shrink-0" />
+                        <input type="checkbox" checked={form.agree} onChange={(e) => handleChange("agree", e.target.checked)} onBlur={() => handleFieldBlur("agree")} disabled={isLoading} className="w-5 h-5 accent-[#017FE6] cursor-pointer flex-shrink-0" />
                         <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
-                          I agree to the <span className="text-[#017FE6] font-semibold hover:underline cursor-pointer">Terms & Conditions</span> and <span className="text-[#017FE6] font-semibold hover:underline cursor-pointer">Privacy Policy</span>
+                          I agree to the{" "}
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setLegalModalType("terms");
+                            }}
+                            className="text-[#017FE6] font-semibold hover:underline"
+                          >
+                            Terms and Conditions
+                          </button>{" "}
+                          and{" "}
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setLegalModalType("privacy");
+                            }}
+                            className="text-[#017FE6] font-semibold hover:underline"
+                          >
+                            Privacy Policy
+                          </button>
                         </span>
                       </label>
                       {errors.agree && <p className="text-red-500 text-sm font-medium">{errors.agree}</p>}
@@ -981,6 +1141,38 @@ export default function RegisterPage({
                       </div>
                     </div>
 
+                    <SelectField
+                      label="ID Type"
+                      value={kyc.idType}
+                      onChange={(value) => {
+                        setKyc((prev) => ({
+                          ...prev,
+                          idType: value,
+                          idRegistered: false,
+                          challengeId: "",
+                          selfieVerified: false,
+                          selfieDataUrl: "",
+                          selfieBase64Clean: "",
+                        }));
+                        setStepErrors((prev) => ({
+                          ...prev,
+                          idType: "",
+                          idRegistered: "",
+                          selfieVerified: "",
+                        }));
+                        setKycUi((prev) => ({ ...prev, statusText: "" }));
+                        setCamError("");
+                        setCamInfo("");
+                        closeCamera();
+                      }}
+                      options={ID_DOCUMENT_TYPES.map((entry) => ({ value: entry, label: entry }))}
+                      error={stepErrors.idType}
+                      disabled={isLoading}
+                      required
+                      inputRef={idTypeRef}
+                      placeholder="Select the ID type you uploaded"
+                    />
+
                       <FileCard
                         title="Government ID (Front — full card)"
                         description="Upload a clear photo of a Philippine government ID showing the entire card with readable text and no cropped edges."
@@ -999,7 +1191,7 @@ export default function RegisterPage({
                     <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                       <p className="font-semibold text-gray-900 mb-3">Verification Steps</p>
                       <div className="grid grid-cols-2 gap-3">
-                        <button type="button" disabled={isLoading || !kyc.idCardFile} onClick={registerId}
+                        <button type="button" disabled={isLoading || !kyc.idType || !kyc.idCardFile} onClick={registerId}
                           className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${
                             kyc.idRegistered ? "bg-green-500 text-white cursor-default" : "bg-gray-900 text-white hover:opacity-95"
                           } disabled:opacity-50`}>
@@ -1086,6 +1278,7 @@ export default function RegisterPage({
                         { label: "Full Name", value: fullName || "—" },
                         { label: "Email", value: form.email || "—" },
                         { label: "Phone", value: form.phone || "—" },
+                        { label: "ID Type", value: kyc.idType || "—" },
                         { label: "Account Type", value: "User (Renter)" },
                         { label: "KYC Verified", value: kyc.selfieVerified ? "✅ Verified" : "⚠️ Not Verified", highlight: kyc.selfieVerified },
                       ].map(({ label, value, highlight }, i, arr) => (
@@ -1131,7 +1324,16 @@ export default function RegisterPage({
                 )}
         </form>
       </div>
+      <LegalPolicyModal
+        isOpen={Boolean(legalModalType)}
+        documentType={legalModalType === "privacy" ? "privacy" : "terms"}
+        onClose={() => setLegalModalType("")}
+        onSwitchToTerms={() => setLegalModalType("terms")}
+        onSwitchToPrivacy={() => setLegalModalType("privacy")}
+      />
     </AuthShell>
   );
 }
+
+
 

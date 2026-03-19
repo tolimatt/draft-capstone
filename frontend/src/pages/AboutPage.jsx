@@ -13,6 +13,8 @@ import Navbar from "../components/Navbar";
     onNavigateToNotifications,
     onNavigateToBookingHistory,
     onNavigateToAccountSettings,
+    onNavigateToPrivacyPolicy,
+    onNavigateToTermsAndConditions,
     isLoggedIn,
     user,
     onLogout,
@@ -29,7 +31,7 @@ import Navbar from "../components/Navbar";
     setMessages([
       {
         sender: "ai",
-        text: "Hi! 👋 This is RentifyPro AI. How can I assist you today?"
+        text: "Hi! This is RentifyPro AI. How can I assist you today?"
       }
     ]);
   }, [showAI]);
@@ -81,14 +83,14 @@ import Navbar from "../components/Navbar";
                 </p>
 
                 <p className="text-gray-600 mb-4">
-                  Today, we’ve grown to serve thousands of customers with a diverse fleet of
+                  Today, we've grown to serve thousands of customers with a diverse fleet of
                   cars and motorcycles. Our commitment to quality service and customer
                   satisfaction remains at the heart of everything we do.
                 </p>
 
                 <p className="text-gray-600">
                   We believe that everyone deserves access to reliable transportation,
-                  whether it’s for a business trip, a family vacation, or an adventure on
+                  whether it's for a business trip, a family vacation, or an adventure on
                   two wheels.
                 </p>
               </div>
@@ -236,10 +238,10 @@ import Navbar from "../components/Navbar";
           </div>
 
           <div className="border-t border-blue-500 mt-8 pt-8 flex flex-col md:flex-row justify-between items-center">
-            <p className="text-blue-100">© 2026 RentifyPro. All rights reserved</p>
+            <p className="text-blue-100">Copyright 2026 RentifyPro. All rights reserved.</p>
             <div className="flex space-x-6 mt-4 md:mt-0">
-              <a href="#" className="text-blue-100 hover:text-white">Privacy Policy</a>
-              <a href="#" className="text-blue-100 hover:text-white">Terms and Condition</a>
+              <button onClick={onNavigateToPrivacyPolicy} className="text-blue-100 hover:text-white">Privacy Policy</button>
+              <button onClick={onNavigateToTermsAndConditions} className="text-blue-100 hover:text-white">Terms and Conditions</button>
             </div>
           </div>
         </div>
@@ -259,9 +261,9 @@ import Navbar from "../components/Navbar";
     <div className="bg-[#017FE6] text-white px-4 py-3 flex justify-between items-center">
       <div>
         <h3 className="font-semibold text-sm">RentifyPro AI</h3>
-        <p className="text-xs opacity-80">Online • Ready to help</p>
+        <p className="text-xs opacity-80">Online - Ready to help</p>
       </div>
-      <button onClick={() => setShowAI(false)}>✕</button>
+      <button onClick={() => setShowAI(false)}>X</button>
     </div>
 
     {/* chat body */}
@@ -329,14 +331,14 @@ import Navbar from "../components/Navbar";
           setTimeout(() => {
             setMessages((prev) => [
               ...prev,
-              { sender: "ai", text: "Got it! 😊 Let me help you with that." }
+              { sender: "ai", text: "Got it! Let me help you with that." }
             ]);
             setIsTyping(false);
           }, 1200);
         }}
         className="bg-[#017FE6] text-white w-9 h-9 rounded-full"
       >
-        ➤
+        &gt;
       </button>
     </div>
   </div>

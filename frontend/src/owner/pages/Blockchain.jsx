@@ -3,6 +3,7 @@ import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { getSepoliaEtherscanTxUrl } from "../../blockchain/config";
 import { getTransactionFee } from "../../utils/fees";
+import { getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
 
 const money = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
@@ -21,12 +22,30 @@ const getRentalTotal = (record) => {
   if (Number.isFinite(total) && total >= 0) return total;
 
   const baseAmount = Number(record?.baseAmount);
-  if (Number.isFinite(baseAmount) && baseAmount >= 0) return baseAmount;
+  const driverAmount = Number(record?.driverAmount);
+  if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount >= 0) {
+    return baseAmount + driverAmount;
+  }
 
-  const dailyRate = Number(record?.vehicleDailyRate);
-  const bookingDays = Number(record?.bookingDays || 1);
-  if (Number.isFinite(dailyRate) && dailyRate >= 0 && Number.isFinite(bookingDays) && bookingDays > 0) {
-    return dailyRate * bookingDays;
+  const directMinutes = Number(record?.bookingDurationMinutes);
+  const durationMinutes =
+    Number.isFinite(directMinutes) && directMinutes > 0
+      ? Math.round(directMinutes)
+      : record?.pickupAt && record?.returnAt
+        ? getDurationMinutesBetween(record.pickupAt, record.returnAt)
+        : Number.isFinite(Number(record?.bookingDays))
+          ? Math.round(Number(record.bookingDays) * 24 * 60)
+          : 0;
+  const durationHours = getDurationHoursFromMinutes(durationMinutes);
+  const hourlyRate = Number((record?.vehicleHourlyRate ?? record?.vehicleDailyRate) || 0);
+  if (Number.isFinite(hourlyRate) && hourlyRate >= 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = Number((record?.driverHourlyRate ?? record?.driverDailyRate) || 0);
+    const driverSelected = Boolean(record?.driverSelected);
+    const computedDriverAmount =
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
+        : 0;
+    return hourlyRate * durationHours + computedDriverAmount;
   }
 
   const payable = Number(record?.amountPayable);

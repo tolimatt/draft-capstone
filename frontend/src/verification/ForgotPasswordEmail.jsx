@@ -13,6 +13,29 @@ export default function ForgotPasswordEmail({ onNavigateToOTP, onNavigateToSignI
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  const sanitizeEmailValue = (rawValue = "") =>
+    String(rawValue).toLowerCase().replace(/\s/g, "").trim();
+
+  const handleEmailKeyDown = (event) => {
+    if (event.key === " ") event.preventDefault();
+  };
+
+  const handleEmailPaste = (event) => {
+    const pastedText = String(event.clipboardData?.getData("text") || "");
+    if (!/\s/.test(pastedText)) return;
+    event.preventDefault();
+    const sanitizedText = sanitizeEmailValue(pastedText);
+    const input = event.currentTarget;
+    const currentValue = String(input?.value || "");
+    const start = Number.isInteger(input?.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input?.selectionEnd) ? input.selectionEnd : currentValue.length;
+    const nextValue = sanitizeEmailValue(
+      currentValue.slice(0, start) + sanitizedText + currentValue.slice(end)
+    );
+    setEmail(nextValue);
+    setError("");
+  };
+
   const handleSubmit = async () => {
     setError("");
 
@@ -85,7 +108,9 @@ export default function ForgotPasswordEmail({ onNavigateToOTP, onNavigateToSignI
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => { setEmail(e.target.value.toLowerCase().trim()); setError(""); }}
+                    onChange={(e) => { setEmail(sanitizeEmailValue(e.target.value)); setError(""); }}
+                    onKeyDown={handleEmailKeyDown}
+                    onPaste={handleEmailPaste}
                     disabled={isLoading}
                     placeholder="john@gmail.com"
                     className={`w-full px-4 py-3 pl-12 border-2 rounded-xl transition focus:outline-none focus:ring-2 focus:ring-[#017FE6] ${

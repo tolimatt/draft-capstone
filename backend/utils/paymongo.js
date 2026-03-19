@@ -3,6 +3,14 @@ import axios from "axios";
 const PAYMONGO_API_BASE = "https://api.paymongo.com/v1";
 const DEFAULT_PAYMENT_METHOD_TYPES = ["gcash", "paymaya", "card"];
 const ALLOWED_PAYMENT_METHOD_TYPES = new Set(DEFAULT_PAYMENT_METHOD_TYPES);
+const SUCCESSFUL_PAYMENT_STATUSES = new Set([
+  "paid",
+  "completed",
+  "succeeded",
+  "authorized",
+  "awaiting_capture",
+  "captured",
+]);
 const NETWORK_ERROR_CODES = new Set([
   "ENOTFOUND",
   "EAI_AGAIN",
@@ -104,9 +112,37 @@ const getPaymentStatuses = (checkoutSession) => {
     if (normalized) statuses.push(normalized);
   };
 
-  pushStatus(attributes.status);
-  pushStatus(attributes.payment_intent?.status);
-  pushStatus(attributes.payment_intent?.attributes?.status);
+  const collectStatuses = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(collectStatuses);
+      return;
+    }
+    if (typeof value === "string") {
+      pushStatus(value);
+      return;
+    }
+    if (typeof value !== "object") return;
+
+    pushStatus(value.status);
+    pushStatus(value?.attributes?.status);
+
+    const data = value.data;
+    if (Array.isArray(data)) {
+      data.forEach(collectStatuses);
+      return;
+    }
+    if (data && typeof data === "object") {
+      collectStatuses(data);
+    }
+  };
+
+  collectStatuses(checkoutSession?.status);
+  collectStatuses(attributes.status);
+  collectStatuses(attributes.payment_intent);
+  collectStatuses(attributes.payments);
+  collectStatuses(attributes.payment_intent?.payments);
+  collectStatuses(checkoutSession?.included);
 
   const payments = Array.isArray(attributes.payments) ? attributes.payments : [];
   for (const payment of payments) {
@@ -114,7 +150,7 @@ const getPaymentStatuses = (checkoutSession) => {
     pushStatus(payment?.attributes?.status);
   }
 
-  return statuses;
+  return [...new Set(statuses)];
 };
 
 export const getPayMongoCheckoutId = (checkoutSession) =>
@@ -140,13 +176,17 @@ export const getPayMongoCheckoutMetadata = (checkoutSession) => {
 };
 
 export const getPayMongoCheckoutAmountInCentavos = (checkoutSession) => {
-  const lineItems = Array.isArray(checkoutSession?.attributes?.line_items)
-    ? checkoutSession.attributes.line_items
-    : [];
+  const rawLineItems = checkoutSession?.attributes?.line_items;
+  const lineItems = Array.isArray(rawLineItems)
+    ? rawLineItems
+    : Array.isArray(rawLineItems?.data)
+      ? rawLineItems.data
+      : [];
 
   return lineItems.reduce((sum, item) => {
-    const amount = Number(item?.amount || 0);
-    const quantity = Number(item?.quantity || 1);
+    const attributes = item?.attributes || {};
+    const amount = Number(item?.amount ?? attributes.amount ?? 0);
+    const quantity = Number(item?.quantity ?? attributes.quantity ?? 1);
     if (!Number.isFinite(amount) || !Number.isFinite(quantity) || amount < 0 || quantity < 0) {
       return sum;
     }
@@ -155,9 +195,7 @@ export const getPayMongoCheckoutAmountInCentavos = (checkoutSession) => {
 };
 
 export const isPayMongoCheckoutPaid = (checkoutSession) =>
-  getPaymentStatuses(checkoutSession).some((status) =>
-    ["paid", "completed", "succeeded"].includes(status)
-  );
+  getPaymentStatuses(checkoutSession).some((status) => SUCCESSFUL_PAYMENT_STATUSES.has(status));
 
 export const createPayMongoCheckoutSession = async ({
   amountInCentavos,
@@ -259,6 +297,10 @@ export const getPayMongoCheckoutSession = async (checkoutId) => {
         { message: "PayMongo checkout session lookup returned an invalid payload." },
         "Failed to retrieve PayMongo checkout session."
       );
+    }
+    const included = Array.isArray(response?.data?.included) ? response.data.included : [];
+    if (included.length) {
+      checkoutSession.included = included;
     }
     return checkoutSession;
   } catch (error) {

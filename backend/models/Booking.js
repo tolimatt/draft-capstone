@@ -33,6 +33,11 @@ const bookingSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    rentalRateUnit: {
+      type: String,
+      enum: ["hourly", "daily"],
+      default: "hourly",
+    },
     driverSelected: {
       type: Boolean,
       default: false,
@@ -46,6 +51,16 @@ const bookingSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 1,
+    },
+    bookingDurationMinutes: {
+      type: Number,
+      min: 1,
+      default: null,
+    },
+    bookingDurationHours: {
+      type: Number,
+      min: 0,
+      default: null,
     },
     baseAmount: {
       type: Number,
@@ -62,6 +77,16 @@ const bookingSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    lateReturnPenaltyRatePerHour: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lateReturnPenaltyFee: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     blockchainGasFee: {
       type: Number,
       default: 0,
@@ -69,9 +94,98 @@ const bookingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "completed", "cancelled", "rejected"],
+      enum: ["pending", "confirmed", "extended", "completed", "cancelled", "rejected"],
       default: "pending",
       index: true,
+    },
+    autoCompletedAt: {
+      type: Date,
+      default: null,
+    },
+    actualReturnAt: {
+      type: Date,
+      default: null,
+    },
+    lateReturnIsOverdue: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    lateReturnDetectedAt: {
+      type: Date,
+      default: null,
+    },
+    lateReturnNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    lateReturnOverdueMinutes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lateReturnAction: {
+      type: String,
+      enum: ["none", "extend_requested", "proceed_late_return"],
+      default: "none",
+    },
+    lateReturnResolvedAt: {
+      type: Date,
+      default: null,
+    },
+    lateReturnResolvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    extensionStatus: {
+      type: String,
+      enum: ["none", "requested", "approved", "rejected"],
+      default: "none",
+      index: true,
+    },
+    extensionRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    extensionRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    extensionCurrentReturnAt: {
+      type: Date,
+      default: null,
+    },
+    extensionRequestedReturnAt: {
+      type: Date,
+      default: null,
+    },
+    extensionRequestNote: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
+    extensionReviewedAt: {
+      type: Date,
+      default: null,
+    },
+    extensionReviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    extensionReviewAction: {
+      type: String,
+      enum: ["", "approve", "reject"],
+      default: "",
+    },
+    extensionReviewNote: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
     },
     paymentStatus: {
       type: String,
@@ -178,6 +292,10 @@ const bookingSchema = new mongoose.Schema(
       default: null,
       index: true,
       sparse: true,
+    },
+    paymongoVerifiedCheckoutIds: {
+      type: [String],
+      default: [],
     },
     paymentIntentId: {
       type: String,

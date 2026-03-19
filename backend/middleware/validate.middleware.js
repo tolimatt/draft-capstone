@@ -258,7 +258,7 @@ export const validateObjectIdParam = (paramName = "id") => (req, _res, next) => 
 };
 
 const AVAILABILITY_STATUSES = new Set(["available", "unavailable"]);
-const BOOKING_STATUSES = new Set(["pending", "confirmed", "completed", "cancelled", "rejected"]);
+const BOOKING_STATUSES = new Set(["pending", "confirmed", "extended", "completed", "cancelled", "rejected"]);
 const PAYMENT_STATUSES = new Set(["unpaid", "partial", "paid", "refunded"]);
 
 const parseBoolean = (value, fallback = false) => {
@@ -332,9 +332,9 @@ export const validateVehicleCreate = (req, res, next) => {
 
   const rate = Number(body.dailyRentalRate);
   if (body.dailyRentalRate === undefined || body.dailyRentalRate === null || body.dailyRentalRate === "") {
-    errors.dailyRentalRate = "Daily rental rate is required.";
+    errors.dailyRentalRate = "Hourly rental rate is required.";
   } else if (!Number.isFinite(rate) || rate < 0) {
-    errors.dailyRentalRate = "Daily rental rate must be a valid non-negative number.";
+    errors.dailyRentalRate = "Hourly rental rate must be a valid non-negative number.";
   } else {
     body.dailyRentalRate = rate;
   }
@@ -353,7 +353,7 @@ export const validateVehicleCreate = (req, res, next) => {
   const driverDailyRate = Number(body.driverDailyRate || 0);
   if (body.driverOptionEnabled) {
     if (!Number.isFinite(driverDailyRate) || driverDailyRate < 0) {
-      errors.driverDailyRate = "Driver daily rate must be zero or greater.";
+      errors.driverDailyRate = "Driver hourly rate must be zero or greater.";
     } else {
       body.driverDailyRate = driverDailyRate;
     }
@@ -385,7 +385,7 @@ export const validateVehicleUpdate = (req, res, next) => {
   if (body.dailyRentalRate !== undefined) {
     const rate = Number(body.dailyRentalRate);
     if (!Number.isFinite(rate) || rate < 0) {
-      errors.dailyRentalRate = "Daily rental rate must be a valid non-negative number.";
+      errors.dailyRentalRate = "Hourly rental rate must be a valid non-negative number.";
     } else {
       body.dailyRentalRate = rate;
     }
@@ -414,7 +414,7 @@ export const validateVehicleUpdate = (req, res, next) => {
   if (body.driverDailyRate !== undefined) {
     const driverDailyRate = Number(body.driverDailyRate);
     if (!Number.isFinite(driverDailyRate) || driverDailyRate < 0) {
-      errors.driverDailyRate = "Driver daily rate must be zero or greater.";
+      errors.driverDailyRate = "Driver hourly rate must be zero or greater.";
     } else {
       body.driverDailyRate = driverDailyRate;
     }

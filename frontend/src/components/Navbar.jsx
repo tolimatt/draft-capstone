@@ -13,6 +13,8 @@ const linkClassName = (activePage, itemKey) =>
 
 const formatBadgeCount = (value) => (value > 99 ? "99+" : String(value));
 const BRAND_LOGO_SRC = "/rentifypro%20logo.png";
+const isNotificationRead = (notification) =>
+  Boolean(notification?.readAt);
 const getStoredUserId = () => {
   return String(getSessionUser()?._id || "");
 };
@@ -59,7 +61,7 @@ export default function Navbar({
       if (notificationResult.status === "fulfilled") {
         const notifications = notificationResult.value.notifications || [];
         const notificationsUnread = notifications.reduce(
-          (sum, notification) => sum + (notification.readAt ? 0 : 1),
+          (sum, notification) => sum + (isNotificationRead(notification) ? 0 : 1),
           0
         );
         setUnreadNotifications(notificationsUnread);
@@ -115,7 +117,7 @@ export default function Navbar({
       syncUnreadCounts();
     };
     const handleNotification = (notification) => {
-      if (notification?.readAt) return;
+      if (isNotificationRead(notification)) return;
       setUnreadNotifications((prev) => prev + 1);
     };
     const handleMessage = (message) => {
