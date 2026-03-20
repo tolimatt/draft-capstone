@@ -11,6 +11,7 @@ import {
 } from "../controllers/chat.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { authorize } from "../middleware/rbac.middleware.js";
+import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
 import { ensureChatbotServiceReady } from "../utils/chatbotServiceManager.js";
 import {
@@ -26,14 +27,15 @@ import {
 const router = express.Router();
 const isProduction = process.env.NODE_ENV === "production";
 const DEFAULT_CHATBOT_URL = isProduction ? "" : "http://localhost:8001";
+const ACTIVE_BOOKING_STATUSES = ["pending", "confirmed", "extended"];
 
 router.post("/", async (req, res, next) => {
   try {
     const rawMessage = String(req.body?.message || "");
-    const language = String(req.body?.language || "english").trim().toLowerCase();
+    const language = String(req.body?.language || "auto").trim().toLowerCase();
     const validation = validateChatbotInput(rawMessage);
     if (!validation.isValid) {
-      return res.json(buildRejectedChatbotResponse(language, validation.reason));
+      return res.json(buildRejectedChatbotResponse(language === "auto" ? rawMessage : language, validation.reason));
     }
     const message = validation.message;
 
@@ -51,7 +53,21 @@ router.post("/", async (req, res, next) => {
       )
       .lean();
 
-    const payload = buildChatbotPayload(message, language, vehicles);
+    let realtimeAvailableVehicles = vehicles;
+    if (vehicles.length > 0) {
+      const vehicleIds = vehicles.map((vehicle) => vehicle._id);
+      const lockedVehicleIds = await Booking.distinct("vehicle", {
+        vehicle: { $in: vehicleIds },
+        status: { $in: ACTIVE_BOOKING_STATUSES },
+        returnAt: { $gt: new Date() },
+      });
+      const lockedVehicleIdSet = new Set(lockedVehicleIds.map((id) => String(id)));
+      realtimeAvailableVehicles = vehicles.filter(
+        (vehicle) => !lockedVehicleIdSet.has(String(vehicle?._id || ""))
+      );
+    }
+
+    const payload = buildChatbotPayload(message, language, realtimeAvailableVehicles);
     if (payload.preflightRejectReason) {
       return res.json(buildRejectedChatbotResponse(payload.selectedLanguage, payload.preflightRejectReason));
     }

@@ -3,6 +3,7 @@ import { CarFront, Fuel, MapPin, Search, Settings, Users } from "lucide-react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
+import BookingAccessModal from "../components/BookingAccessModal";
 import { sanitizeBookingRange } from "../utils/dateUtils";
 
 const normalizeVehicleType = (value = "") => {
@@ -58,12 +59,14 @@ export default function VehiclesPage({
   onNavigateToContacts,
   onNavigateToChat,
   onNavigateToNotifications,
+  onOpenNotificationsModal,
   onNavigateToAccountSettings,
 }) {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showAI, setShowAI] = useState(false);
+  const [showBookingAccessModal, setShowBookingAccessModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [locationQuery, setLocationQuery] = useState(String(bookingData.location || ""));
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState(
@@ -105,8 +108,17 @@ export default function VehiclesPage({
         });
 
         if (!isActive) return;
-        setVehicles((response.vehicles || []).map(normalizeVehicle));
-        setPagination(response.pagination || { page: 1, limit: 24, total: 0, totalPages: 1 });
+        const availableVehicles = (response.vehicles || [])
+          .map(normalizeVehicle)
+          .filter((vehicle) => vehicle.available);
+        setVehicles(availableVehicles);
+        setPagination({
+          ...(response.pagination || { page: 1, limit: 24, total: 0, totalPages: 1 }),
+          total: availableVehicles.length,
+          totalPages: Math.max(1, Math.ceil(availableVehicles.length / 24)),
+          hasNextPage: false,
+          hasPrevPage: false,
+        });
       } catch (err) {
         if (!isActive) return;
         setError(err.message || "Failed to load available vehicles.");
@@ -126,6 +138,20 @@ export default function VehiclesPage({
     [vehicles]
   );
 
+  const closeBookingAccessModal = () => setShowBookingAccessModal(false);
+  const handleBookingModalSignIn = () => {
+    setShowBookingAccessModal(false);
+    onNavigateToSignIn();
+  };
+  const handleBookingModalRegister = () => {
+    setShowBookingAccessModal(false);
+    onNavigateToRegister();
+  };
+  const handleBookingModalBrowseVehicles = () => {
+    setShowBookingAccessModal(false);
+    onNavigateToVehicles();
+  };
+
   return (
       <div className="min-h-screen">
         <Navbar
@@ -139,6 +165,7 @@ export default function VehiclesPage({
           onNavigateToContacts={onNavigateToContacts}
           onNavigateToChat={onNavigateToChat}
           onNavigateToNotifications={onNavigateToNotifications}
+          onOpenNotificationsModal={onOpenNotificationsModal}
           onNavigateToSignIn={onNavigateToSignIn}
           onNavigateToRegister={onNavigateToRegister}
           onNavigateToAccountSettings={onNavigateToAccountSettings}
@@ -290,7 +317,7 @@ export default function VehiclesPage({
                           onClick={() => {
                             if (!vehicle.available) return;
                             if (!isLoggedIn) {
-                              onNavigateToSignIn();
+                              setShowBookingAccessModal(true);
                               return;
                             }
                             onViewDetails(vehicle);
@@ -312,7 +339,18 @@ export default function VehiclesPage({
             </section>
           </div>
         </div>
-        <ChatWidget isOpen={showAI} onClose={() => setShowAI(false)} />
+        <BookingAccessModal
+          isOpen={showBookingAccessModal}
+          onClose={closeBookingAccessModal}
+          onSignIn={handleBookingModalSignIn}
+          onRegister={handleBookingModalRegister}
+          onBrowseVehicles={handleBookingModalBrowseVehicles}
+        />
+        <ChatWidget
+          isOpen={showAI}
+          onClose={() => setShowAI(false)}
+          onViewAvailableVehicles={onNavigateToVehicles}
+        />
       </div>
     );
   }

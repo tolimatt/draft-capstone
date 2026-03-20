@@ -3,7 +3,6 @@ import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import hpp from "hpp";
 import helmet from "helmet";
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 const rateLimitingEnabled =
@@ -17,7 +16,6 @@ const keyByEmailOrIp = (req) => {
   return `ip:${ipKeyGenerator(req.ip)}`;
 };
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
-const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
 const hasValidSessionToken = (req) => {
   const token = String(req.cookies?.token || "").trim();
@@ -30,32 +28,12 @@ const hasValidSessionToken = (req) => {
   }
 };
 
-const getEmailFromRequest = (req) => {
-  const bodyEmail = normalizeEmail(req.body?.email);
-  if (bodyEmail) return bodyEmail;
-  const queryEmail = normalizeEmail(req.query?.email);
-  if (queryEmail) return queryEmail;
-  return "";
-};
-
 const skipForSignedIn = (req) => hasValidSessionToken(req);
-
-const skipForSignedInOrRegistered = async (req) => {
-  if (hasValidSessionToken(req)) return true;
-  const email = getEmailFromRequest(req);
-  if (!email) return false;
-  try {
-    const existing = await User.exists({ email });
-    return Boolean(existing);
-  } catch {
-    return false;
-  }
-};
 
 const skipForAuthLimiter = async (req) => {
   const path = String(req.path || "").trim().toLowerCase();
   if (path === "/login-challenge") return true;
-  return skipForSignedInOrRegistered(req);
+  return skipForSignedIn(req);
 };
 
 const formatCountdown = (seconds) => {
@@ -141,7 +119,6 @@ export const authLimiter = createLimiter({
 export const loginChallengeLimiter = createLimiter({
   max: 30,
   messagePrefix: "Too many security check requests.",
-  skipCondition: () => true,
 });
 
 // Stricter login limit
@@ -150,7 +127,7 @@ export const loginLimiter = createLimiter({
   messagePrefix: "Too many login attempts.",
   skipSuccessfulRequests: true,
   keyGenerator: keyByEmailOrIp,
-  skipCondition: skipForSignedInOrRegistered,
+  skipCondition: skipForSignedIn,
 });
 
 // Register limit
@@ -159,7 +136,7 @@ export const registerLimiter = createLimiter({
   messagePrefix: "Too many registration attempts.",
   skipSuccessfulRequests: true,
   keyGenerator: keyByEmailOrIp,
-  skipCondition: skipForSignedInOrRegistered,
+  skipCondition: skipForSignedIn,
 });
 
 // OTP limit
@@ -168,21 +145,21 @@ export const otpLimiter = createLimiter({
   messagePrefix: "Too many OTP attempts.",
   skipSuccessfulRequests: true,
   keyGenerator: keyByEmailOrIp,
-  skipCondition: skipForSignedInOrRegistered,
+  skipCondition: skipForSignedIn,
 });
 
 // Logged-in KYC limit
 export const kycLimiter = createLimiter({
   max: 20,
   messagePrefix: "Too many KYC attempts.",
-  skipCondition: skipForSignedIn,
+  keyGenerator: keyByUserOrIp,
 });
 
 // Pre-registration KYC limit
 export const preKycLimiter = createLimiter({
   max: 15,
   messagePrefix: "Too many verification attempts.",
-  skipCondition: skipForSignedInOrRegistered,
+  skipCondition: skipForSignedIn,
 });
 
 // Booking create limit
@@ -190,7 +167,6 @@ export const bookingCreateLimiter = createLimiter({
   max: 10,
   messagePrefix: "Too many booking requests.",
   keyGenerator: keyByUserOrIp,
-  skipCondition: skipForSignedIn,
 });
 
 // Payment verify limit
@@ -198,7 +174,6 @@ export const paymentVerifyLimiter = createLimiter({
   max: 20,
   messagePrefix: "Too many payment verification requests.",
   keyGenerator: keyByUserOrIp,
-  skipCondition: skipForSignedIn,
 });
 
 // Security headers

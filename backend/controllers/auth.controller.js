@@ -16,10 +16,13 @@ import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
 import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
+const OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 45);
 const PASSWORD_RESET_TOKEN_EXPIRE = process.env.PASSWORD_RESET_TOKEN_EXPIRE || "15m";
 const PASSWORD_RESET_TOKEN_SECRET = process.env.PASSWORD_RESET_TOKEN_SECRET || process.env.JWT_SECRET;
 const tokenBlacklist = new Set();
 const MIN_RENTER_AGE = 18;
+const EMERGENCY_CONTACT_NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
+const MAX_EMERGENCY_CONTACT_NAME_LENGTH = 50;
 const LOGIN_CHALLENGE_TTL_MINUTES = Number(process.env.LOGIN_CHALLENGE_TTL_MINUTES || 180);
 const LOGIN_CHALLENGE_MAX_ATTEMPTS = Number(process.env.LOGIN_CHALLENGE_MAX_ATTEMPTS || 5);
 const CLEAR_PREKYC_ON_REGISTER =
@@ -289,6 +292,14 @@ const createOtpRecord = async ({ email, otp, purpose }) => {
     expiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
     lastSentAt: new Date(),
   });
+};
+
+const getOtpCooldownRemainingSeconds = (lastSentAt) => {
+  if (!lastSentAt) return 0;
+  const sentAtMs = new Date(lastSentAt).getTime();
+  if (!Number.isFinite(sentAtMs)) return 0;
+  const remaining = Math.ceil(OTP_RESEND_COOLDOWN_SECONDS - (Date.now() - sentAtMs) / 1000);
+  return remaining > 0 ? remaining : 0;
 };
 
 const findOtpRecord = async ({ email, otp, purpose }) =>
@@ -646,6 +657,29 @@ export const sendOTP = async (req, res) => {
     }
 
     const recipientEmail = normalizeEmail(user.email);
+    const existingOtp = await Otp.findOne({
+      email: recipientEmail,
+      purpose: "verification",
+    }).select("lastSentAt");
+    const retryAfterSeconds = getOtpCooldownRemainingSeconds(existingOtp?.lastSentAt);
+    if (retryAfterSeconds > 0) {
+      const retryAfterMs = retryAfterSeconds * 1000;
+      const retryAfterAt = new Date(Date.now() + retryAfterMs).toISOString();
+      const countdown = `${String(Math.floor(retryAfterSeconds / 60)).padStart(2, "0")}:${String(
+        retryAfterSeconds % 60
+      ).padStart(2, "0")}`;
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      return res.status(429).json({
+        success: false,
+        message: `Too many OTP attempts. Try again in ${countdown}.`,
+        retryAfterSeconds,
+        retryAfterMs,
+        retryAfterAt,
+        countdown,
+        serverTime: new Date().toISOString(),
+      });
+    }
+
     const otp = createOtpCode();
     await createOtpRecord({ email: recipientEmail, otp, purpose: "verification" });
     await sendEmail(recipientEmail, otp, "verification");
@@ -752,6 +786,29 @@ export const forgotPassword = async (req, res) => {
     }
 
     const recipientEmail = normalizeEmail(user.email);
+    const existingOtp = await Otp.findOne({
+      email: recipientEmail,
+      purpose: "password_reset",
+    }).select("lastSentAt");
+    const retryAfterSeconds = getOtpCooldownRemainingSeconds(existingOtp?.lastSentAt);
+    if (retryAfterSeconds > 0) {
+      const retryAfterMs = retryAfterSeconds * 1000;
+      const retryAfterAt = new Date(Date.now() + retryAfterMs).toISOString();
+      const countdown = `${String(Math.floor(retryAfterSeconds / 60)).padStart(2, "0")}:${String(
+        retryAfterSeconds % 60
+      ).padStart(2, "0")}`;
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      return res.status(429).json({
+        success: false,
+        message: `Too many OTP attempts. Try again in ${countdown}.`,
+        retryAfterSeconds,
+        retryAfterMs,
+        retryAfterAt,
+        countdown,
+        serverTime: new Date().toISOString(),
+      });
+    }
+
     const otp = createOtpCode();
     await createOtpRecord({ email: recipientEmail, otp, purpose: "password_reset" });
     await sendEmail(recipientEmail, otp, "password_reset");
@@ -1147,6 +1204,28 @@ export const updateProfile = async (req, res) => {
       }
 
       req.body.phone = phone;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "emergencyContactName")) {
+      const emergencyContactName = toText(req.body.emergencyContactName);
+      if (emergencyContactName) {
+        if (!EMERGENCY_CONTACT_NAME_REGEX.test(emergencyContactName)) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Emergency contact name can only contain letters and single spaces between names.",
+          });
+        }
+        if (emergencyContactName.length > MAX_EMERGENCY_CONTACT_NAME_LENGTH) {
+          return res.status(400).json({
+            success: false,
+            message: `Emergency contact name is too long (max ${MAX_EMERGENCY_CONTACT_NAME_LENGTH} characters).`,
+          });
+        }
+        req.body.emergencyContactName = emergencyContactName;
+      } else {
+        req.body.emergencyContactName = "";
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "emergencyContactPhone")) {

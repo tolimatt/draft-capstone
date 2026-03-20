@@ -35,12 +35,41 @@ import API from "../utils/api";
 const TOTAL_STEPS = 3;
 const STEP_LABELS = ["Personal Details", "Face Verification", "Review"];
 const ACTION_COOLDOWN_MS = 2000;
+const RATE_LIMIT_FALLBACK_SECONDS = 5 * 60;
+const REGISTER_RATE_LIMIT_STORAGE_KEY = "rentifypro.registerRateLimitUntil";
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 const normalizePhMobileInput = (value = "") => {
   const digits = String(value || "").replace(/\D/g, "");
   if (!digits) return "";
   if (!digits.startsWith("9")) return "";
   return digits.slice(0, 10);
+};
+
+const formatCountdown = (seconds) => {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
+
+const getRemainingRateLimitSeconds = (untilMs) => {
+  const safeUntilMs = Number(untilMs) || 0;
+  if (safeUntilMs <= 0) return 0;
+  return Math.max(0, Math.ceil((safeUntilMs - Date.now()) / 1000));
+};
+
+const readStoredRateLimitUntil = () => {
+  if (typeof window === "undefined") return 0;
+  try {
+    const stored = Number(window.localStorage.getItem(REGISTER_RATE_LIMIT_STORAGE_KEY) || 0);
+    if (!Number.isFinite(stored) || stored <= Date.now()) {
+      window.localStorage.removeItem(REGISTER_RATE_LIMIT_STORAGE_KEY);
+      return 0;
+    }
+    return stored;
+  } catch {
+    return 0;
+  }
 };
 
 // Turn service errors into user-friendly text
@@ -112,8 +141,44 @@ export default function RegisterPage({
   const [touched, setTouched] = useState({});
   const [stepErrors, setStepErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
+  const [rateLimitUntil, setRateLimitUntil] = useState(() => readStoredRateLimitUntil());
+  const [rateLimitSeconds, setRateLimitSeconds] = useState(() =>
+    getRemainingRateLimitSeconds(readStoredRateLimitUntil())
+  );
   const [successMessage, setSuccessMessage] = useState("");
   const [legalModalType, setLegalModalType] = useState("");
+  const isRateLimited = rateLimitSeconds > 0;
+  const isFormLocked = isLoading || isRateLimited;
+
+  const clearRateLimit = useCallback(() => {
+    setRateLimitUntil(0);
+    setRateLimitSeconds(0);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.removeItem(REGISTER_RATE_LIMIT_STORAGE_KEY);
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, []);
+
+  const activateRateLimit = useCallback((seconds, retryAfterAt = "") => {
+    const fallbackSeconds = Math.max(1, Math.floor(Number(seconds) || RATE_LIMIT_FALLBACK_SECONDS));
+    const parsedRetryAfterAt = Date.parse(String(retryAfterAt || "").trim());
+    const untilMs =
+      Number.isFinite(parsedRetryAfterAt) && parsedRetryAfterAt > Date.now()
+        ? parsedRetryAfterAt
+        : Date.now() + fallbackSeconds * 1000;
+
+    setRateLimitUntil(untilMs);
+    setRateLimitSeconds(getRemainingRateLimitSeconds(untilMs));
+
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(REGISTER_RATE_LIMIT_STORAGE_KEY, String(untilMs));
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, []);
 
   // Input refs
   const firstNameRef = useRef(null);
@@ -137,6 +202,7 @@ export default function RegisterPage({
   // Small cooldown to avoid double clicks
   const lastActionRef = useRef(0);
   const canAct = () => {
+    if (isFormLocked) return false;
     const now = Date.now();
     if (now - lastActionRef.current < ACTION_COOLDOWN_MS) return false;
     lastActionRef.current = now;
@@ -293,6 +359,25 @@ export default function RegisterPage({
       active = false;
     };
   }, [form.city]);
+
+  useEffect(() => {
+    if (rateLimitUntil <= 0) {
+      setRateLimitSeconds(0);
+      return undefined;
+    }
+
+    const syncCountdown = () => {
+      const remaining = getRemainingRateLimitSeconds(rateLimitUntil);
+      setRateLimitSeconds(remaining);
+      if (remaining <= 0) {
+        clearRateLimit();
+      }
+    };
+
+    syncCountdown();
+    const timer = setInterval(syncCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [rateLimitUntil, clearRateLimit]);
 
   // Input handlers
 
@@ -792,11 +877,22 @@ export default function RegisterPage({
       });
       const registeredEmail = String(response?.user?.email || form.email || "").trim().toLowerCase();
       setSuccessMessage(response?.message || "Registration successful! Redirecting to OTP verification...");
+      clearRateLimit();
       await API.sendOTP(registeredEmail).catch(() => {});
       setTimeout(() => { onNavigateToRegisterOTP(registeredEmail, form.phone, fullName); }, 1500);
     } catch (error) {
       const raw = error?.message || "";
       const lower = raw.toLowerCase();
+      const retryAfterSeconds = Number(error?.retryAfterSeconds || error?.details?.retryAfterSeconds || 0);
+      const retryAfterAt = error?.retryAfterAt || error?.details?.retryAfterAt || "";
+      const isRateLimitError = Number(error?.status) === 429 || lower.includes("too many");
+      if (isRateLimitError) {
+        const waitSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : RATE_LIMIT_FALLBACK_SECONDS;
+        activateRateLimit(waitSeconds, retryAfterAt);
+        setErrors({});
+        setStepErrors({});
+        return;
+      }
       const phoneConflict = lower.includes("phone") && lower.includes("already");
       const msg = raw.includes("already")
         ? phoneConflict
@@ -913,6 +1009,7 @@ export default function RegisterPage({
   return (
     <AuthShell
       onNavigateToHome={onNavigateToHome}
+      disableNavigation={isRateLimited}
       badge="Guided account onboarding"
       panelTitle="Create your RentifyPro account."
       panelDescription="Finish setup in guided steps with secure identity checks and instant booking access."
@@ -962,6 +1059,7 @@ export default function RegisterPage({
         )}
 
         <form onSubmit={handleFinalRegister} className="space-y-4" noValidate>
+          <fieldset disabled={isFormLocked} className="space-y-4">
                 {/* step 1 */}
                 {step === 1 && (
                   <>
@@ -1080,7 +1178,20 @@ export default function RegisterPage({
                         <p className="text-sm text-gray-500 mt-1">Add someone we can reach if you need urgent support during a booking.</p>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <FormInput label="Contact Name" value={form.emergencyContactName} onChange={(e) => handleChange("emergencyContactName", e.target.value)} onBlur={() => handleFieldBlur("emergencyContactName")} error={errors.emergencyContactName} disabled={isLoading} placeholder="Maria Dela Cruz" required icon={User} inputRef={emergencyNameRef} maxLength={100} />
+                        <FormInput
+                          label="Contact Name"
+                          value={form.emergencyContactName}
+                          onChange={(e) => handleChange("emergencyContactName", e.target.value)}
+                          onBlur={() => handleFieldBlur("emergencyContactName")}
+                          error={errors.emergencyContactName}
+                          disabled={isLoading}
+                          placeholder="Maria Dela Cruz"
+                          required
+                          icon={User}
+                          onlyLetters
+                          inputRef={emergencyNameRef}
+                          maxLength={50}
+                        />
                         <FormInput label="Phone Number" type="tel" value={form.emergencyContactPhone} onChange={(e) => handleChange("emergencyContactPhone", normalizePhMobileInput(e.target.value))} onBlur={() => handleFieldBlur("emergencyContactPhone")} error={errors.emergencyContactPhone} disabled={isLoading} placeholder="9XXXXXXXXX" required icon={Phone} onlyNumbers inputRef={emergencyPhoneRef} maxLength={10} prefixText="+63" />
                       </div>
                       <SelectField label="Relationship" value={form.emergencyContactRelationship} onChange={(value) => handleChange("emergencyContactRelationship", value)} onBlur={() => handleFieldBlur("emergencyContactRelationship")} options={RELATIONSHIP_OPTIONS.map((option) => ({ value: option, label: option }))} error={errors.emergencyContactRelationship} disabled={isLoading} required inputRef={emergencyRelationshipRef} />
@@ -1296,19 +1407,33 @@ export default function RegisterPage({
 
                 {/* navigation */}
                 <div className="flex items-center gap-3 pt-1">
-                  <button type="button" onClick={goBack} disabled={step === 1 || isLoading}
+                  <button type="button" onClick={goBack} disabled={step === 1 || isFormLocked}
                     className="rp-btn-secondary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-50">
                     <ArrowLeft size={18} /> Back
                   </button>
                   {step < TOTAL_STEPS ? (
-                    <button type="button" onClick={goNext} disabled={isLoading}
+                    <button type="button" onClick={goNext} disabled={isFormLocked}
                       className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
-                      Next <ArrowRight size={18} />
+                      {isRateLimited ? (
+                        `Try again in ${formatCountdown(rateLimitSeconds)}`
+                      ) : (
+                        <>
+                          Next <ArrowRight size={18} />
+                        </>
+                      )}
                     </button>
                   ) : (
-                    <button type="submit" disabled={isLoading}
+                    <button type="submit" disabled={isFormLocked}
                       className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
-                      {isLoading ? <><Loader size={18} className="animate-spin" /> Creating...</> : "Create Account"}
+                      {isLoading ? (
+                        <>
+                          <Loader size={18} className="animate-spin" /> Creating...
+                        </>
+                      ) : isRateLimited ? (
+                        `Try again in ${formatCountdown(rateLimitSeconds)}`
+                      ) : (
+                        "Create Account"
+                      )}
                     </button>
                   )}
                 </div>
@@ -1316,12 +1441,18 @@ export default function RegisterPage({
                 {step === 1 && (
                   <p className="text-center text-gray-500 text-sm mt-1">
                     Already have an account?{" "}
-                    <button type="button" onClick={onNavigateToSignIn} disabled={isLoading}
+                    <button type="button" onClick={onNavigateToSignIn} disabled={isFormLocked}
                       className="text-[#017FE6] font-semibold hover:underline transition-colors disabled:opacity-50">
                       Sign In
                     </button>
                   </p>
                 )}
+          </fieldset>
+          {isRateLimited && (
+            <p className="text-center text-xs font-semibold text-amber-600">
+              Too many attempts. You can register again in {formatCountdown(rateLimitSeconds)}.
+            </p>
+          )}
         </form>
       </div>
       <LegalPolicyModal

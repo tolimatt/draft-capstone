@@ -126,9 +126,13 @@ export const VALIDATION_RULES = {
     return "";
   },
   emergencyContactName: (value) => {
-    if (!value) return "Emergency contact name is required.";
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return "Emergency contact name is required.";
     if (EMOJI_REGEX.test(value)) return "Emergency contact name must not contain emoji.";
-    if (value.length > 100) return "Emergency contact name is too long (max 100 characters).";
+    if (!NAME_REGEX.test(trimmed)) {
+      return "Emergency contact name can only contain letters and single spaces between names.";
+    }
+    if (trimmed.length > 50) return "Emergency contact name is too long (max 50 characters).";
     return "";
   },
   emergencyContactPhone: (value) => {

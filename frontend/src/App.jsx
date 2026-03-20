@@ -32,6 +32,7 @@ import OwnerLayout from "./owner/OwnerLayout";
 // Shared parts
 import LogoutModal from "./components/LogoutModal";
 import IdleWarningModal from "./components/IdleWarningModal";
+import RenterNotificationsModal from "./components/RenterNotificationsModal";
 import { disconnectSocket } from "./utils/socket";
 import API from "./utils/api";
 import {
@@ -239,6 +240,7 @@ const App = () => {
   // Logout modal state
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showIdleWarningModal, setShowIdleWarningModal] = useState(false);
+  const [showRenterNotificationsModal, setShowRenterNotificationsModal] = useState(false);
   const [idleCountdownSeconds, setIdleCountdownSeconds] = useState(0);
   const lastActivityRef = useRef(Date.now());
   const idleDeadlineRef = useRef(0);
@@ -519,6 +521,12 @@ const App = () => {
     return () => window.removeEventListener("switch-to-user", switchToUser);
   }, []);
 
+  useEffect(() => {
+    if (!isLoggedIn || isOwnerLoggedIn) {
+      setShowRenterNotificationsModal(false);
+    }
+  }, [isLoggedIn, isOwnerLoggedIn]);
+
   const performLogout = useCallback(async ({ redirectPage = "home" } = {}) => {
     if (logoutInProgressRef.current) return;
     logoutInProgressRef.current = true;
@@ -531,6 +539,7 @@ const App = () => {
 
     setShowLogoutModal(false);
     setShowIdleWarningModal(false);
+    setShowRenterNotificationsModal(false);
     setIdleCountdownSeconds(0);
     idleWarningOpenRef.current = false;
     setIsLoggedIn(false);
@@ -690,6 +699,23 @@ const App = () => {
     setCurrentPage("notifications");
   };
 
+  const openRenterNotificationsModal = () => {
+    if (!isLoggedIn || isOwnerLoggedIn) {
+      setCurrentPage("signin");
+      return;
+    }
+    setShowRenterNotificationsModal(true);
+  };
+
+  const closeRenterNotificationsModal = () => {
+    setShowRenterNotificationsModal(false);
+  };
+
+  const handleViewAllRenterNotifications = () => {
+    setShowRenterNotificationsModal(false);
+    goToNotifications();
+  };
+
   const navigateToContacts = () => {
     if (currentPage === "home") {
       const contactsSection = document.getElementById("contacts");
@@ -776,6 +802,13 @@ const App = () => {
         onSignOut={() => performLogout({ redirectPage: "signin" })}
       />
 
+      <RenterNotificationsModal
+        isOpen={showRenterNotificationsModal}
+        isLoggedIn={isLoggedIn && !isOwnerLoggedIn}
+        onClose={closeRenterNotificationsModal}
+        onViewAllNotifications={handleViewAllRenterNotifications}
+      />
+
       {/* home */}
       {currentPage === "home" && (
         <RentifyPro
@@ -791,6 +824,7 @@ const App = () => {
           onNavigateToBookingHistory={goToBookingHistory}
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
+          onOpenNotificationsModal={openRenterNotificationsModal}
           onNavigateToRegister={() => setCurrentPage("register")}
           onNavigateToAbout={navigateToAbout}
           onNavigateToContacts={navigateToContacts}
@@ -887,6 +921,7 @@ const App = () => {
           onNavigateToBookingHistory={goToBookingHistory}
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
+          onOpenNotificationsModal={openRenterNotificationsModal}
           onNavigateToRegister={() => setCurrentPage("register")}
           onNavigateToAbout={navigateToAbout}
           onNavigateToContacts={navigateToContacts}
@@ -1094,6 +1129,7 @@ const App = () => {
           onNavigateToContacts={navigateToContacts}
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
+          onOpenNotificationsModal={openRenterNotificationsModal}
           onNavigateToBookingHistory={goToBookingHistory}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
           onLogout={requestLogout}

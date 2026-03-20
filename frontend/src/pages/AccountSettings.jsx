@@ -36,11 +36,19 @@ const KYC_STATUS_LABELS = {
 };
 const MIN_RENTER_AGE = 18;
 const PHONE_REGEX = /^9[0-9]{9}$/;
+const EMERGENCY_CONTACT_NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 const normalizePhMobileInput = (value = "") => {
   const digits = String(value || "").replace(/\D/g, "");
   if (!digits) return "";
   if (!digits.startsWith("9")) return "";
   return digits.slice(0, 10);
+};
+const normalizeEmergencyContactNameInput = (value = "") => {
+  let nextValue = String(value || "");
+  nextValue = nextValue.replace(/[^A-Za-z ]/g, "");
+  nextValue = nextValue.replace(/\s+/g, " ");
+  if (nextValue.startsWith(" ")) nextValue = nextValue.slice(1);
+  return nextValue.slice(0, 50);
 };
 const DEFAULT_PROFILE = {
   _id: "",
@@ -103,6 +111,7 @@ const InputField = React.memo(function InputField({
   onChange,
   disabled,
   max,
+  maxLength,
   prefixText = "",
 }) {
   const isPasswordField = type === "password";
@@ -152,6 +161,7 @@ const InputField = React.memo(function InputField({
           onPaste={handleInputPaste}
           disabled={disabled}
           max={max}
+          maxLength={maxLength}
           className={`relative z-0 w-full mt-1 border rounded-lg px-3 py-2 text-sm ${
             disabled ? "bg-gray-100" : "bg-white"
           } ${prefixText ? "pl-14" : ""}`}
@@ -261,7 +271,7 @@ const buildProfilePayload = (sectionKey, profile, lists) => {
   }
 
   if (sectionKey === "emergency") {
-    payload.emergencyContactName = profile.emergencyContactName || "";
+    payload.emergencyContactName = String(profile.emergencyContactName || "").trim();
     payload.emergencyContactPhone = profile.emergencyContactPhone || "";
     payload.emergencyContactRelationship = profile.emergencyContactRelationship || "";
   }
@@ -832,6 +842,27 @@ const AccountSettings = ({
       }
     }
 
+    if (sectionKey === "emergency") {
+      const emergencyContactName = String(draftProfile.emergencyContactName || "").trim();
+      if (!emergencyContactName) {
+        setStatusError("Emergency contact name is required.");
+        setStatusMessage("");
+        return;
+      }
+      if (!EMERGENCY_CONTACT_NAME_REGEX.test(emergencyContactName)) {
+        setStatusError(
+          "Emergency contact name can only contain letters and single spaces between names."
+        );
+        setStatusMessage("");
+        return;
+      }
+      if (emergencyContactName.length > 50) {
+        setStatusError("Emergency contact name is too long (max 50 characters).");
+        setStatusMessage("");
+        return;
+      }
+    }
+
     setSavingSection(sectionKey);
     setStatusMessage("");
     setStatusError("");
@@ -1215,8 +1246,12 @@ const AccountSettings = ({
                       }
                       disabled={editingSection !== "emergency"}
                       onChange={(event) =>
-                        updateDraftField("emergencyContactName", event.target.value)
+                        updateDraftField(
+                          "emergencyContactName",
+                          normalizeEmergencyContactNameInput(event.target.value)
+                        )
                       }
+                      maxLength={50}
                     />
                     <InputField
                       label="Phone Number"
@@ -1792,7 +1827,11 @@ const AccountSettings = ({
         </button>
       )}
 
-      <ChatWidget isOpen={showAI} onClose={() => setShowAI(false)} />
+      <ChatWidget
+        isOpen={showAI}
+        onClose={() => setShowAI(false)}
+        onViewAvailableVehicles={onNavigateToVehicles}
+      />
     </div>
   );
 };

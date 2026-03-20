@@ -151,7 +151,7 @@ export default function Navbar({
   };
 
   const handleNotificationClick = () => {
-    if (activePage === "home" && typeof onOpenNotificationsModal === "function") {
+    if (typeof onOpenNotificationsModal === "function") {
       onOpenNotificationsModal();
       return;
     }

@@ -5,6 +5,7 @@ import { normalizePhilippineMobile } from "../utils/phone.js";
 const EMOJI_REGEX = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const PHONE_REGEX = /^9[0-9]{9}$/;
+const NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 const ALLOWED_EMAIL_DOMAINS = new Set([
   "gmail.com",
   "yahoo.com",
@@ -21,6 +22,7 @@ const MAX_BUSINESS_NAME = 120;
 const MAX_LICENSE_NUMBER = 50;
 const MAX_PERMIT_NUMBER = 50;
 const MAX_ADDRESS_LENGTH = 255;
+const MAX_EMERGENCY_CONTACT_NAME_LENGTH = 50;
 
 const toText = (value) => (typeof value === "string" ? value.trim() : "");
 const parseDateOfBirth = (value) => {
@@ -156,8 +158,11 @@ export const validateRegister = (req, res, next) => {
   if (emergencyContactName) {
     if (EMOJI_REGEX.test(emergencyContactName)) {
       errors.emergencyContactName = "Emergency contact name must not contain emoji.";
-    } else if (emergencyContactName.length > 100) {
-      errors.emergencyContactName = "Emergency contact name is too long (max 100 characters).";
+    } else if (!NAME_REGEX.test(emergencyContactName)) {
+      errors.emergencyContactName =
+        "Emergency contact name can only contain letters and single spaces between names.";
+    } else if (emergencyContactName.length > MAX_EMERGENCY_CONTACT_NAME_LENGTH) {
+      errors.emergencyContactName = `Emergency contact name is too long (max ${MAX_EMERGENCY_CONTACT_NAME_LENGTH} characters).`;
     }
   }
 

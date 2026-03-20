@@ -9,6 +9,7 @@ const DEFAULT_HIGHLIGHTS = [
 
 export default function AuthShell({
   onNavigateToHome,
+  disableNavigation = false,
   badge = "Premium Mobility Marketplace",
   panelTitle = "Drive smarter with RentifyPro.",
   panelDescription = "Reserve, manage, and track rentals from one modern workspace.",
@@ -41,7 +42,8 @@ export default function AuthShell({
                 <button
                   type="button"
                   onClick={onNavigateToHome}
-                  className="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-5 py-2 text-sm font-semibold text-white backdrop-blur hover:bg-white/20"
+                  disabled={disableNavigation}
+                  className="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-5 py-2 text-sm font-semibold text-white backdrop-blur transition disabled:cursor-not-allowed disabled:opacity-60 hover:bg-white/20"
                 >
                   Rentify<span className="text-blue-200">Pro</span>
                 </button>
@@ -75,7 +77,8 @@ export default function AuthShell({
             <button
               type="button"
               onClick={onNavigateToHome}
-              className="rp-glass inline-flex items-center rounded-2xl px-4 py-2 text-xl font-extrabold text-slate-900 shadow-sm"
+              disabled={disableNavigation}
+              className="rp-glass inline-flex items-center rounded-2xl px-4 py-2 text-xl font-extrabold text-slate-900 shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
             >
               Rentify<span className="text-[#0b75e7]">Pro</span>
             </button>

@@ -10,10 +10,6 @@ const DISALLOWED_CHAT_INPUT_REGEX = /[^A-Za-z?,. ]+/g;
 const MAX_STORED_MESSAGES = 40;
 const WELCOME_MESSAGE_ID_PREFIX = "welcome-";
 
-const LANGUAGE_OPTIONS = [
-  { value: "english", label: "English" },
-  { value: "filipino", label: "Filipino" },
-];
 const BLOCKED_WORDS = [
   "fuck",
   "fucking",
@@ -31,16 +27,9 @@ const BLOCKED_WORDS = [
 ];
 
 const TIME_BASED_GREETINGS = {
-  english: {
-    morning: "Good morning",
-    afternoon: "Good afternoon",
-    evening: "Good evening",
-  },
-  filipino: {
-    morning: "Magandang umaga",
-    afternoon: "Magandang hapon",
-    evening: "Magandang gabi",
-  },
+  morning: "Good morning",
+  afternoon: "Good afternoon",
+  evening: "Good evening",
 };
 
 const getGreetingPeriod = (date = new Date()) => {
@@ -51,25 +40,19 @@ const getGreetingPeriod = (date = new Date()) => {
   return "evening";
 };
 
-const getWelcomeText = (language, date = new Date()) => {
-  const selectedLanguage = language === "filipino" ? "filipino" : "english";
+const getWelcomeText = (date = new Date()) => {
   const greetingPeriod = getGreetingPeriod(date);
-  const greeting =
-    TIME_BASED_GREETINGS[selectedLanguage][greetingPeriod] ||
-    TIME_BASED_GREETINGS.english[greetingPeriod];
+  const greeting = TIME_BASED_GREETINGS[greetingPeriod] || TIME_BASED_GREETINGS.evening;
 
-  if (selectedLanguage === "filipino") {
-    return `${greeting}, ako si RentifyPro AI. Ano ang maitutulong ko sa iyo?`;
-  }
-
-  return `${greeting}, I am RentifyPro AI. What can I help you with?`;
+  return `${greeting}, I am RentifyPro AI. I automatically reply in English, Filipino, or Taglish based on how you ask your question. What can I help you with today?`;
 };
 
 const createWelcomeMessage = (language, date = new Date()) => ({
   id: `${WELCOME_MESSAGE_ID_PREFIX}${language}-${getGreetingPeriod(date)}`,
   sender: "bot",
-  text: getWelcomeText(language, date),
+  text: getWelcomeText(date),
   recommendations: [],
+  showViewAvailableVehicles: false,
 });
 
 const formatHourlyRate = (value) => {
@@ -112,6 +95,8 @@ const normalizeMessage = (message) => {
     sender,
     text,
     recommendations: sender === "bot" ? normalizeRecommendations(message.recommendations) : [],
+    showViewAvailableVehicles:
+      sender === "bot" ? Boolean(message.showViewAvailableVehicles) : false,
   };
 };
 
@@ -162,7 +147,7 @@ const readStoredChatState = (scope) => {
 
     const parsed = JSON.parse(raw);
     return {
-      language: parsed?.language === "filipino" ? "filipino" : "english",
+      language: "english",
       conversations: {
         english: ensureConversation(parsed?.conversations?.english, "english"),
         filipino: ensureConversation(parsed?.conversations?.filipino, "filipino"),
@@ -177,7 +162,7 @@ const readStoredChatState = (scope) => {
   }
 };
 
-export default function ChatWidget({ isOpen, onClose }) {
+export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles }) {
   const initialStorageScope = resolveStorageScope();
   const initialState = readStoredChatState(initialStorageScope);
   const [storageScope, setStorageScope] = useState(initialStorageScope);
@@ -227,7 +212,7 @@ export default function ChatWidget({ isOpen, onClose }) {
         }
 
         const nextState = readStoredChatState(nextScope);
-        setLanguage(nextState.language);
+        setLanguage("english");
         setMessagesByLanguage(nextState.conversations);
         setDraftByLanguage(nextState.drafts);
         return nextScope;
@@ -284,13 +269,14 @@ export default function ChatWidget({ isOpen, onClose }) {
         sender: "user",
         text: censorBadWords(message),
         recommendations: [],
+        showViewAvailableVehicles: false,
       },
     ]);
     updateDraftForLanguage(activeLanguage, "");
     setIsSending(true);
 
     try {
-      const response = await API.chatWithBot({ message, language: activeLanguage });
+      const response = await API.chatWithBot({ message, language: "auto" });
       updateMessagesForLanguage(activeLanguage, (current) => [
         ...current,
         {
@@ -304,6 +290,10 @@ export default function ChatWidget({ isOpen, onClose }) {
           recommendations: Array.isArray(response.recommendations)
             ? response.recommendations
             : [],
+          showViewAvailableVehicles:
+            response.intent === "available_vehicles" &&
+            Array.isArray(response.recommendations) &&
+            response.recommendations.length > 0,
         },
       ]);
     } catch (error) {
@@ -318,6 +308,7 @@ export default function ChatWidget({ isOpen, onClose }) {
               ? "Hindi maabot ang chatbot service sa ngayon. Pakisubukan muli mamaya."
               : "The chatbot service is unavailable right now. Please try again later."),
           recommendations: [],
+          showViewAvailableVehicles: false,
         },
       ]);
     } finally {
@@ -341,22 +332,6 @@ export default function ChatWidget({ isOpen, onClose }) {
           >
             <X size={18} />
           </button>
-        </div>
-
-        <div className="mt-3 inline-flex rounded-2xl bg-white/10 p-1">
-          {LANGUAGE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              onClick={() => setLanguage(option.value)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${
-                language === option.value
-                  ? "bg-white text-[#0B75E7]"
-                  : "text-white hover:bg-white/10"
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -394,6 +369,17 @@ export default function ChatWidget({ isOpen, onClose }) {
                       </p>
                     </article>
                   ))}
+                  {message.showViewAvailableVehicles && typeof onViewAvailableVehicles === "function" && (
+                    <button
+                      onClick={() => {
+                        onClose?.();
+                        onViewAvailableVehicles();
+                      }}
+                      className="mt-1 inline-flex items-center justify-center rounded-xl bg-[#0B75E7] px-3 py-2 text-xs font-semibold text-white hover:bg-[#095fb8] transition"
+                    >
+                      View available vehicles
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -11,12 +11,33 @@ import { normalizeOwnerProfile, persistOwnerProfile } from "../owner/utils/owner
 // Delay between submit attempts
 const SUBMIT_COOLDOWN_MS = 2000;
 const RATE_LIMIT_FALLBACK_SECONDS = 5 * 60;
+const SIGN_IN_RATE_LIMIT_STORAGE_KEY = "rentifypro.signinRateLimitUntil";
 
 const formatCountdown = (seconds) => {
   const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
   const minutes = Math.floor(safeSeconds / 60);
   const remainingSeconds = safeSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
+
+const getRemainingRateLimitSeconds = (untilMs) => {
+  const safeUntilMs = Number(untilMs) || 0;
+  if (safeUntilMs <= 0) return 0;
+  return Math.max(0, Math.ceil((safeUntilMs - Date.now()) / 1000));
+};
+
+const readStoredRateLimitUntil = () => {
+  if (typeof window === "undefined") return 0;
+  try {
+    const stored = Number(window.localStorage.getItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY) || 0);
+    if (!Number.isFinite(stored) || stored <= Date.now()) {
+      window.localStorage.removeItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY);
+      return 0;
+    }
+    return stored;
+  } catch {
+    return 0;
+  }
 };
 
 export default function SignInPage({
@@ -32,8 +53,43 @@ export default function SignInPage({
   const [successMessage, setSuccessMessage] = useState("");
   const [captcha, setCaptcha] = useState({ id: "", question: "" });
   const [captchaLoading, setCaptchaLoading] = useState(false);
-  const [rateLimitSeconds, setRateLimitSeconds] = useState(0);
+  const [rateLimitUntil, setRateLimitUntil] = useState(() => readStoredRateLimitUntil());
+  const [rateLimitSeconds, setRateLimitSeconds] = useState(() =>
+    getRemainingRateLimitSeconds(readStoredRateLimitUntil())
+  );
   const lastSubmitRef = useRef(0);
+  const isRateLimited = rateLimitSeconds > 0;
+  const isFormLocked = isLoading || isRateLimited;
+
+  const clearRateLimit = useCallback(() => {
+    setRateLimitUntil(0);
+    setRateLimitSeconds(0);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.removeItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY);
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, []);
+
+  const activateRateLimit = useCallback((seconds, retryAfterAt = "") => {
+    const fallbackSeconds = Math.max(1, Math.floor(Number(seconds) || RATE_LIMIT_FALLBACK_SECONDS));
+    const parsedRetryAfterAt = Date.parse(String(retryAfterAt || "").trim());
+    const untilMs =
+      Number.isFinite(parsedRetryAfterAt) && parsedRetryAfterAt > Date.now()
+        ? parsedRetryAfterAt
+        : Date.now() + fallbackSeconds * 1000;
+
+    setRateLimitUntil(untilMs);
+    setRateLimitSeconds(getRemainingRateLimitSeconds(untilMs));
+
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY, String(untilMs));
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, []);
 
   const validateField = useCallback((field, nextForm) => {
     if (field === "email") return SIGN_IN_VALIDATION_RULES.email(nextForm.email);
@@ -90,15 +146,25 @@ export default function SignInPage({
   }, []);
 
   useEffect(() => {
-    if (rateLimitSeconds <= 0) return undefined;
-    const timer = setInterval(() => {
-      setRateLimitSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
+    if (rateLimitUntil <= 0) {
+      setRateLimitSeconds(0);
+      return undefined;
+    }
+
+    const syncCountdown = () => {
+      const remaining = getRemainingRateLimitSeconds(rateLimitUntil);
+      setRateLimitSeconds(remaining);
+      if (remaining <= 0) {
+        clearRateLimit();
+      }
+    };
+
+    syncCountdown();
+    const timer = setInterval(syncCountdown, 1000);
     return () => clearInterval(timer);
-  }, [rateLimitSeconds]);
+  }, [rateLimitUntil, clearRateLimit]);
 
   useEffect(() => {
-    if (rateLimitSeconds > 0) return;
     setErrors((prev) => {
       if (!prev.email || !/too many/i.test(prev.email)) return prev;
       return { ...prev, email: "" };
@@ -119,13 +185,7 @@ export default function SignInPage({
   const handleSignIn = async (e) => {
     e.preventDefault();
 
-    if (rateLimitSeconds > 0) {
-      setErrors((prev) => ({
-        ...prev,
-        email: `Too many attempts. Try again in ${formatCountdown(rateLimitSeconds)}.`,
-      }));
-      return;
-    }
+    if (rateLimitSeconds > 0) return;
 
     // Ignore very fast repeat clicks
     const now = Date.now();
@@ -200,18 +260,17 @@ export default function SignInPage({
           kycStatus: response.user.kycStatus,
         });
       }, 1500);
-      setRateLimitSeconds(0);
+      clearRateLimit();
     } catch (error) {
       const msg = error.message || "";
       const retryAfterSeconds = Number(error?.retryAfterSeconds || error?.details?.retryAfterSeconds || 0);
-      const isRateLimited = Number(error?.status) === 429 || msg.includes("Too many");
+      const retryAfterAt = error?.retryAfterAt || error?.details?.retryAfterAt || "";
+      const isRateLimitError = Number(error?.status) === 429 || msg.includes("Too many");
 
-      if (isRateLimited) {
+      if (isRateLimitError) {
         const waitSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : RATE_LIMIT_FALLBACK_SECONDS;
-        setRateLimitSeconds(waitSeconds);
-        setErrors({
-          email: `Too many attempts. Try again in ${formatCountdown(waitSeconds)}.`,
-        });
+        activateRateLimit(waitSeconds, retryAfterAt);
+        setErrors({});
       } else if (msg.includes("Invalid email or password")) {
         setErrors({
           email: "Invalid email or password.",
@@ -224,7 +283,7 @@ export default function SignInPage({
       } else {
         setErrors({ email: "Login failed. Please try again." });
       }
-      if (!isRateLimited) {
+      if (!isRateLimitError) {
         await loadCaptcha();
       }
     } finally {
@@ -235,6 +294,7 @@ export default function SignInPage({
   return (
     <AuthShell
       onNavigateToHome={onNavigateToHome}
+      disableNavigation={isRateLimited}
       badge="Fast and secure access"
       panelTitle="Welcome back to RentifyPro."
       panelDescription="Sign in to continue managing bookings, realtime chats, and your upcoming trips."
@@ -269,7 +329,7 @@ export default function SignInPage({
             value={form.email}
             onChange={(e) => handleChange("email", e.target.value.toLowerCase().trim())}
             error={errors.email}
-            disabled={isLoading}
+            disabled={isFormLocked}
             placeholder="Enter Email"
             required
             icon={Mail}
@@ -284,7 +344,7 @@ export default function SignInPage({
             value={form.password}
             onChange={(e) => handleChange("password", e.target.value)}
             error={errors.password}
-            disabled={isLoading}
+            disabled={isFormLocked}
             placeholder="Enter Password"
             required
             maxLength={128}
@@ -313,7 +373,7 @@ export default function SignInPage({
                       value={form.captchaAnswer}
                       onChange={(e) => handleChange("captchaAnswer", e.target.value.replace(/[^0-9]/g, ""))}
                       onBlur={() => handleFieldBlur("captchaAnswer")}
-                      disabled={isLoading || captchaLoading}
+                      disabled={isFormLocked || captchaLoading}
                       placeholder="?"
                       inputMode="numeric"
                       pattern="[0-9]*"
@@ -324,7 +384,7 @@ export default function SignInPage({
                   <button
                     type="button"
                     onClick={loadCaptcha}
-                    disabled={captchaLoading || isLoading}
+                    disabled={captchaLoading || isFormLocked}
                     className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50"
                     aria-label="Refresh security check"
                   >
@@ -341,7 +401,7 @@ export default function SignInPage({
             <button
               type="button"
               onClick={onNavigateToForgotPassword}
-              disabled={isLoading}
+              disabled={isFormLocked}
               className="text-sm font-medium text-slate-600 transition-colors hover:text-[#017FE6] disabled:opacity-50"
             >
               Forgot password?
@@ -350,7 +410,7 @@ export default function SignInPage({
 
           <button
             type="submit"
-            disabled={isLoading || rateLimitSeconds > 0}
+            disabled={isFormLocked}
             className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3.5 text-sm disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isLoading ? (
@@ -367,7 +427,7 @@ export default function SignInPage({
 
           {rateLimitSeconds > 0 && (
             <p className="text-center text-xs font-semibold text-amber-600">
-              Rate limit active. You can sign in again in {formatCountdown(rateLimitSeconds)}.
+              Too many attempts. You can sign in again in {formatCountdown(rateLimitSeconds)}.
             </p>
           )}
 
@@ -376,7 +436,7 @@ export default function SignInPage({
             <button
               type="button"
               onClick={onNavigateToRegister}
-              disabled={isLoading}
+              disabled={isFormLocked}
               className="font-semibold text-[#017FE6] transition-colors hover:text-[#0165B8] disabled:opacity-50"
             >
               Register

@@ -188,6 +188,7 @@ export default function BookingsPage({
   onNavigateToContacts,
   onNavigateToChat,
   onNavigateToNotifications,
+  onOpenNotificationsModal,
   onNavigateToBookingHistory,
   onNavigateToAccountSettings,
   onLogout,
@@ -825,6 +826,7 @@ export default function BookingsPage({
           onNavigateToContacts={onNavigateToContacts}
           onNavigateToChat={onNavigateToChat}
           onNavigateToNotifications={onNavigateToNotifications}
+          onOpenNotificationsModal={onOpenNotificationsModal}
           onNavigateToAccountSettings={onNavigateToAccountSettings}
           isAIOpen={showAI}
           onShowAI={() => setShowAI(true)}
@@ -864,7 +866,11 @@ export default function BookingsPage({
           onRegister={onNavigateToRegister}
           onBrowseVehicles={onNavigateToVehicles}
         />
-        <ChatWidget isOpen={showAI} onClose={() => setShowAI(false)} />
+        <ChatWidget
+          isOpen={showAI}
+          onClose={() => setShowAI(false)}
+          onViewAvailableVehicles={onNavigateToVehicles}
+        />
       </div>
     );
   }
@@ -884,6 +890,7 @@ export default function BookingsPage({
         onNavigateToContacts={onNavigateToContacts}
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
+        onOpenNotificationsModal={onOpenNotificationsModal}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
         isAIOpen={showAI}
         onShowAI={() => setShowAI(true)}
@@ -1651,7 +1658,11 @@ export default function BookingsPage({
           </div>
         </>
       )}
-      <ChatWidget isOpen={showAI} onClose={() => setShowAI(false)} />
+      <ChatWidget
+        isOpen={showAI}
+        onClose={() => setShowAI(false)}
+        onViewAvailableVehicles={onNavigateToVehicles}
+      />
     </div>
   );
 }

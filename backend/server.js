@@ -43,6 +43,8 @@ import {
 } from "./jobs/bookingLifecycle.job.js";
 
 const app = express();
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1);
+app.set("trust proxy", Number.isFinite(trustProxyHops) ? trustProxyHops : 1);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendUploadsDir = path.resolve(__dirname, "uploads");
