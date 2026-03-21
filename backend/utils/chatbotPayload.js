@@ -334,10 +334,14 @@ const INTENT_PATTERNS = {
     /\bavailable vehicles?\b/i,
     /\bwhat vehicles are available\b/i,
     /\bwhat cars are available\b/i,
+    /\bwhat (vehicle|car) options (are )?available\b/i,
     /\bcars?\s+ang\s+available\b/i,
     /\banong?\s+(mga\s+)?cars?\s+ang\s+available\b/i,
+    /\banong?\s+(mga\s+)?kotse\s+ang\s+available\b/i,
     /\bano\s+ang\s+mga\s+available\s+na\s+(sasakyan|vehicles?|cars?)\b/i,
+    /\bano\s+ang\s+mga\s+available\s+na\s+kotse\b/i,
     /\banong?\s+available\s+na\s+(sasakyan|vehicles?|cars?)\b/i,
+    /\banong?\s+available\s+na\s+kotse\b/i,
     /\brecommend (a )?(vehicle|car|van|suv|pickup)\b/i,
     /\blooking for\b.*\b(vehicle|car|van|suv|pickup)\b/i,
     /\bneed\b.*\b(car|van|suv|pickup|vehicle)\b/i,
@@ -345,7 +349,12 @@ const INTENT_PATTERNS = {
     /\bmeron bang\b.*\b(car|van|suv|pickup|sedan|kotse)\b/i,
     /\bhanap\b.*\b(sasakyan|kotse|van|suv|pickup)\b/i,
     /\banong mga sasakyan ang available\b/i,
+    /\banong mga kotse ang available\b/i,
     /\banong sasakyan\b/i,
+    /\banong kotse\b/i,
+    /\bavailable na (sasakyan|kotse|vehicles?|cars?)\b/i,
+    /\b(?:sasakyan|kotse|vehicles?|cars?)\s+na\s+available\b/i,
+    /\b(?:meron|may)\s+available\s+na\s+(sasakyan|kotse|vehicles?|cars?)\b/i,
     /\bavailable ba\b/i,
   ],
   available_transmission: [
@@ -547,6 +556,7 @@ function getDatasetPath() {
   }
 
   const candidates = [
+    path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset_v5.json"),
     path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset_v4.json"),
     path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset.json"),
   ];
@@ -575,23 +585,56 @@ function loadDataset() {
   const raw = JSON.parse(fs.readFileSync(datasetPath, "utf-8"));
   const items = Array.isArray(raw?.items) ? raw.items : [];
   const intentsById = {};
+  const normalizeAnswerList = (values = []) => {
+    const source = Array.isArray(values) ? values : [values];
+    const deduped = [];
+    const seen = new Set();
+    for (const value of source) {
+      const text = cleanText(value);
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(text);
+    }
+    return deduped;
+  };
 
   for (const item of items) {
     const intentId = cleanText(item?.id);
     if (!intentId) continue;
 
+    const examples = Array.isArray(item?.examples) ? item.examples.map((example) => cleanText(example)).filter(Boolean) : [];
+    const firstExample = examples[0] || "";
+
+    const responses = item?.responses && typeof item.responses === "object" ? item.responses : {};
+    const responseEn = cleanText(responses?.en || item?.answer_en);
+    const responseFil = cleanText(responses?.fil || item?.answer_fil);
+    const responseTaglish = cleanText(responses?.taglish || item?.answer_taglish);
+
+    const englishLegacyAnswers = Array.isArray(item?.english?.answers) ? item.english.answers : [];
+    const filipinoLegacyAnswers = Array.isArray(item?.filipino?.answers) ? item.filipino.answers : [];
+
+    const englishAnswers = normalizeAnswerList(
+      englishLegacyAnswers.length > 0 ? englishLegacyAnswers : responseEn ? [responseEn] : []
+    );
+    const filipinoAnswers = normalizeAnswerList(
+      filipinoLegacyAnswers.length > 0 ? filipinoLegacyAnswers : responseFil ? [responseFil] : []
+    );
+    const taglishAnswers = normalizeAnswerList(responseTaglish ? [responseTaglish] : []);
+
     intentsById[intentId] = {
       english: {
-        question: cleanText(item?.english?.question),
-        answers: Array.isArray(item?.english?.answers)
-          ? item.english.answers.map((answer) => cleanText(answer)).filter(Boolean)
-          : [],
+        question: cleanText(item?.english?.question) || firstExample,
+        answers: englishAnswers,
       },
       filipino: {
-        question: cleanText(item?.filipino?.question),
-        answers: Array.isArray(item?.filipino?.answers)
-          ? item.filipino.answers.map((answer) => cleanText(answer)).filter(Boolean)
-          : [],
+        question: cleanText(item?.filipino?.question) || firstExample,
+        answers: filipinoAnswers,
+      },
+      taglish: {
+        question: firstExample,
+        answers: taglishAnswers,
       },
     };
   }
@@ -608,8 +651,8 @@ function getCanonicalQuestion(intentId, language) {
   const preferredLanguage = normalizeLanguage(language);
   const languageOrder =
     preferredLanguage === "taglish"
-      ? ["english", "filipino"]
-      : [preferredLanguage, preferredLanguage === "english" ? "filipino" : "english"];
+      ? ["taglish", "english", "filipino"]
+      : [preferredLanguage, preferredLanguage === "english" ? "filipino" : "english", "taglish"];
 
   for (const candidateLanguage of languageOrder) {
     const question = cleanText(record[candidateLanguage]?.question);
@@ -627,8 +670,8 @@ function getIntentAnswers(intentId, language) {
   const preferredLanguage = normalizeLanguage(language);
   const languageOrder =
     preferredLanguage === "taglish"
-      ? ["english", "filipino"]
-      : [preferredLanguage, preferredLanguage === "english" ? "filipino" : "english"];
+      ? ["taglish", "english", "filipino"]
+      : [preferredLanguage, preferredLanguage === "english" ? "filipino" : "english", "taglish"];
 
   for (const candidateLanguage of languageOrder) {
     const answers = Array.isArray(record[candidateLanguage]?.answers) ? record[candidateLanguage].answers : [];
@@ -643,6 +686,10 @@ function getIntentAnswers(intentId, language) {
 function pickDatasetAnswer(intentId, language, seed = "") {
   const selectedLanguage = normalizeLanguage(language);
   if (selectedLanguage === "taglish") {
+    const taglishAnswers = getIntentAnswers(intentId, "taglish");
+    if (taglishAnswers.length > 0) {
+      return pickDeterministicText(taglishAnswers, `${intentId}:taglish:${seed}`);
+    }
     const englishAnswers = getIntentAnswers(intentId, "english");
     const filipinoAnswers = getIntentAnswers(intentId, "filipino");
     const englishReply = pickDeterministicText(englishAnswers, `${intentId}:english:${seed}`);
@@ -960,9 +1007,21 @@ export function buildChatbotPayload(message, language, vehicles = []) {
   let hintIntentId = patternHint.intentId;
   let hintConfidence = patternHint.confidence;
   const normalizedOriginalMessage = normalizeText(originalMessage);
+  const hasVehicleTerm =
+    /\b(vehicle|vehicles|car|cars|kotse|sasakyan|sedan|suv|van|pickup|truck)\b/i.test(normalizedOriginalMessage);
+  const hasAvailabilityTerm =
+    /\b(available|availability|right now|currently|ngayon|meron bang|may available)\b/i.test(normalizedOriginalMessage);
+  const hasVehicleListQuestion = /\banong?\s+(mga\s+)?(sasakyan|kotse|vehicles?|cars?)\b/i.test(normalizedOriginalMessage);
+  const hasCapacitySignal = /\b(passengers?|pax|capacity|kasya|kayang isakay|pasahero)\b/i.test(normalizedOriginalMessage);
+  const hasVehicleAvailabilitySignal =
+    hasVehicleTerm && (hasAvailabilityTerm || hasVehicleListQuestion) && (!hasCapacitySignal || hasAvailabilityTerm);
 
   const hasVehicleRecommendationFilters = Boolean(
-    slots.type || slots.pax || slots.budget || (slots.transmission && /\b(available|recommend|suggest|need|want|hanap)\b/i.test(originalMessage))
+    hasVehicleAvailabilitySignal ||
+      slots.type ||
+      slots.pax ||
+      slots.budget ||
+      (slots.transmission && /\b(available|recommend|suggest|need|want|hanap)\b/i.test(originalMessage))
   );
   const hasHowToBookSignal =
     /\b(how|paano|pano)\b.*\bmag[-\s]?book\b/i.test(normalizedOriginalMessage) ||
