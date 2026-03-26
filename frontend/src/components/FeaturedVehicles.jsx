@@ -33,8 +33,8 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
           {vehicle.rating}
         </span>
 
-        <div className="bg-gray-50 rounded-t-xl p-6 h-60 flex items-center justify-center overflow-hidden">
-          <img src={vehicle.image} alt={vehicle.name} className="max-h-full object-contain transition-transform duration-500 group-hover:scale-110" />
+        <div className="rp-image-frame rounded-t-xl">
+          <img src={vehicle.image} alt={vehicle.name} className="rp-image-fit" />
         </div>
       </div>
 

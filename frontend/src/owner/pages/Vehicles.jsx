@@ -331,7 +331,7 @@ function VehicleModal({
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {form.existingImages.map((image, index) => (
                     <div key={`existing-${index}`} className="group relative overflow-hidden rounded-xl border border-slate-200">
-                      <img src={image} alt="vehicle" className="h-24 w-full object-cover" />
+                      <img src={image} alt="vehicle" className="h-24 w-full bg-slate-50 object-contain object-center p-1.5" />
                       <button
                         type="button"
                         className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-700 shadow transition hover:bg-red-500 hover:text-white"
@@ -351,7 +351,7 @@ function VehicleModal({
 
                   {newImagePreviews.map((preview, index) => (
                     <div key={preview.key} className="group relative overflow-hidden rounded-xl border border-slate-200">
-                      <img src={preview.url} alt={preview.name} className="h-24 w-full object-cover" />
+                      <img src={preview.url} alt={preview.name} className="h-24 w-full bg-slate-50 object-contain object-center p-1.5" />
                       <button
                         type="button"
                         className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-700 shadow transition hover:bg-red-500 hover:text-white"
@@ -610,12 +610,12 @@ function Vehicles() {
         {filteredVehicles.map((vehicle) => (
           <article key={vehicle._id} className="rp-surface rp-hover-lift overflow-hidden">
             <div className="px-4 pt-4">
-              <div className="relative h-48 bg-gradient-to-br from-slate-50 to-slate-200 flex items-center justify-center overflow-hidden rp-image-frame">
+              <div className="rp-image-frame">
                 {vehicle.imageUrl ? (
                   <img
                     src={vehicle.imageUrl}
                     alt={vehicle.name}
-                    className="relative z-0 h-full w-full object-cover object-center drop-shadow-sm"
+                    className="rp-image-fit relative z-0 drop-shadow-sm"
                   />
                 ) : (
                   <span className="text-sm text-slate-500">No image</span>

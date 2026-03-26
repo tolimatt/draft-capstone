@@ -4,6 +4,7 @@ import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
 import BookingAccessModal from "../components/BookingAccessModal";
+import VehiclePreviewModal from "../components/VehiclePreviewModal";
 import { sanitizeBookingRange } from "../utils/dateUtils";
 
 const normalizeVehicleType = (value = "") => {
@@ -38,8 +39,11 @@ const normalizeVehicle = (vehicle) => ({
   description: vehicle.description || "",
   specs: vehicle.specs || {},
   owner: {
+    _id: vehicle.owner?._id || "",
     name: vehicle.owner?.name || "Vehicle Owner",
     email: vehicle.owner?.email || "",
+    avatar: vehicle.owner?.avatar || "",
+    verified: vehicle.owner?.verified !== false,
   },
 });
 
@@ -67,6 +71,7 @@ export default function VehiclesPage({
   const [error, setError] = useState("");
   const [showAI, setShowAI] = useState(false);
   const [showBookingAccessModal, setShowBookingAccessModal] = useState(false);
+  const [previewVehicle, setPreviewVehicle] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [locationQuery, setLocationQuery] = useState(String(bookingData.location || ""));
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState(
@@ -151,6 +156,50 @@ export default function VehiclesPage({
     setShowBookingAccessModal(false);
     onNavigateToVehicles();
   };
+
+  const openVehiclePreview = (vehicle) => {
+    setPreviewVehicle(vehicle);
+  };
+
+  const closeVehiclePreview = () => {
+    setPreviewVehicle(null);
+  };
+
+  const handleBookNow = (vehicle) => {
+    if (!vehicle?.available) return;
+    if (!isLoggedIn) {
+      setShowBookingAccessModal(true);
+      return;
+    }
+    onViewDetails(vehicle);
+  };
+
+  const handleChatOwner = (vehicle) => {
+    if (!vehicle) return;
+
+    const ownerId = String(vehicle.owner?._id || "");
+    const viewerId = String(user?._id || "");
+    const vehicleId = String(vehicle._id || vehicle.id || "");
+
+    if (!ownerId || ownerId === viewerId) return;
+    if (!isLoggedIn) {
+      onNavigateToSignIn?.();
+      return;
+    }
+
+    onNavigateToChat?.({
+      partnerId: ownerId,
+      partnerName: vehicle.owner?.name || "Vehicle Owner",
+      partnerEmail: vehicle.owner?.email || "",
+      partnerAvatar: vehicle.owner?.avatar || "",
+      ...(vehicleId ? { vehicleId } : {}),
+    });
+  };
+
+  const previewOwnerId = String(previewVehicle?.owner?._id || "");
+  const disablePreviewChat = Boolean(previewVehicle) && (
+    !previewOwnerId || previewOwnerId === String(user?._id || "")
+  );
 
   return (
       <div className="min-h-screen">
@@ -254,13 +303,26 @@ export default function VehiclesPage({
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {vehicles.map((vehicle) => (
-                  <article key={vehicle.id} className="rp-surface rp-hover-lift overflow-hidden flex flex-col">
+                  <article
+                    key={vehicle.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openVehiclePreview(vehicle)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openVehiclePreview(vehicle);
+                      }
+                    }}
+                    aria-label={`Preview ${vehicle.name}`}
+                    className="rp-surface rp-hover-lift overflow-hidden flex flex-col cursor-pointer"
+                  >
                   <div className="px-4 pt-4">
-                    <div className="relative h-48 bg-gradient-to-br from-slate-50 to-slate-200 flex items-center justify-center overflow-hidden rp-image-frame">
+                    <div className="rp-image-frame">
                       <img
                         src={vehicle.image}
                         alt={vehicle.name}
-                        className="relative z-0 h-full w-full object-cover object-center drop-shadow-sm"
+                        className="rp-image-fit relative z-0 drop-shadow-sm"
                       />
                       <span
                         className={`absolute top-3 left-3 z-10 rp-chip ${
@@ -314,13 +376,9 @@ export default function VehiclesPage({
 
                       <div className="pt-4 mt-auto">
                         <button
-                          onClick={() => {
-                            if (!vehicle.available) return;
-                            if (!isLoggedIn) {
-                              setShowBookingAccessModal(true);
-                              return;
-                            }
-                            onViewDetails(vehicle);
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleBookNow(vehicle);
                           }}
                           disabled={!vehicle.available}
                           className={`py-2 text-sm w-full rounded-xl font-semibold transition ${
@@ -339,6 +397,22 @@ export default function VehiclesPage({
             </section>
           </div>
         </div>
+        <VehiclePreviewModal
+          isOpen={Boolean(previewVehicle)}
+          vehicle={previewVehicle}
+          onClose={closeVehiclePreview}
+          onBookNow={() => {
+            if (!previewVehicle) return;
+            closeVehiclePreview();
+            handleBookNow(previewVehicle);
+          }}
+          onChatOwner={() => {
+            if (!previewVehicle) return;
+            closeVehiclePreview();
+            handleChatOwner(previewVehicle);
+          }}
+          disableChat={disablePreviewChat}
+        />
         <BookingAccessModal
           isOpen={showBookingAccessModal}
           onClose={closeBookingAccessModal}

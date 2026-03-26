@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
+import VehiclePreviewModal from "../components/VehiclePreviewModal";
 import API from "../utils/api";
 import {
   formatDateInput,
@@ -33,7 +34,6 @@ const categories = [
     image: "/cars.png",
     tags: ["Sedan", "Hatchback", "SUV", "Luxury"],
     description: "Ideal for family trips, business meetings, and city drives.",
-    price: "P500/hr",
     vehicleType: "car",
   },
   {
@@ -43,7 +43,6 @@ const categories = [
     image: "/motor.png",
     tags: ["Scooter", "Sport Bike", "Cruiser"],
     description: "Great for fast commutes and flexible urban travel.",
-    price: "P300/hr",
     vehicleType: "motorcycle",
   },
   {
@@ -53,7 +52,6 @@ const categories = [
     image: "/van.png",
     tags: ["Passenger", "Mini Van", "Cargo", "Luxury"],
     description: "Spacious and reliable for group trips and transport runs.",
-    price: "P1,500/hr",
     vehicleType: "van",
   },
   {
@@ -63,7 +61,6 @@ const categories = [
     image: "/trucks.png",
     tags: ["Pick-up", "Cargo", "Refrigerated", "Flat Bed"],
     description: "Built for heavy-duty tasks and dependable hauling.",
-    price: "P2,000/hr",
     vehicleType: "truck",
   },
 ];
@@ -93,7 +90,16 @@ const normalizeFeaturedVehicle = (vehicle) => ({
   rating: Number.isFinite(Number(vehicle.averageRating ?? vehicle.rating))
     ? Number(Number(vehicle.averageRating ?? vehicle.rating).toFixed(1))
     : 0,
+  reviewCount: Number.isFinite(Number(vehicle.reviewCount)) ? Number(vehicle.reviewCount) : 0,
   available: vehicle.availabilityStatus === "available",
+  description: vehicle.description || "",
+  owner: {
+    _id: vehicle.owner?._id || "",
+    name: vehicle.owner?.name || "Vehicle Owner",
+    email: vehicle.owner?.email || "",
+    avatar: vehicle.owner?.avatar || "",
+    verified: vehicle.owner?.verified !== false,
+  },
   codingDay: "",
 });
 
@@ -205,6 +211,7 @@ export default function RentifyPro({
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
   const [vehicleType, setVehicleType] = useState("");
   const [showAI, setShowAI] = useState(false);
+  const [previewVehicle, setPreviewVehicle] = useState(null);
   const [validationModalMessage, setValidationModalMessage] = useState("");
 
   const filteredLocations = useMemo(
@@ -248,6 +255,50 @@ export default function RentifyPro({
       active = false;
     };
   }, []);
+
+  const openVehiclePreview = (vehicle) => {
+    setPreviewVehicle(vehicle);
+  };
+
+  const closeVehiclePreview = () => {
+    setPreviewVehicle(null);
+  };
+
+  const handleFeaturedBookNow = (vehicle) => {
+    if (!vehicle) return;
+    if (!isLoggedIn) {
+      onNavigateToSignIn?.();
+      return;
+    }
+    onViewDetails(vehicle);
+  };
+
+  const handleChatOwner = (vehicle) => {
+    if (!vehicle) return;
+
+    const ownerId = String(vehicle.owner?._id || "");
+    const viewerId = String(user?._id || "");
+    const vehicleId = String(vehicle._id || vehicle.id || "");
+
+    if (!ownerId || ownerId === viewerId) return;
+    if (!isLoggedIn) {
+      onNavigateToSignIn?.();
+      return;
+    }
+
+    onNavigateToChat?.({
+      partnerId: ownerId,
+      partnerName: vehicle.owner?.name || "Vehicle Owner",
+      partnerEmail: vehicle.owner?.email || "",
+      partnerAvatar: vehicle.owner?.avatar || "",
+      ...(vehicleId ? { vehicleId } : {}),
+    });
+  };
+
+  const previewOwnerId = String(previewVehicle?.owner?._id || "");
+  const disablePreviewChat = Boolean(previewVehicle) && (
+    !previewOwnerId || previewOwnerId === String(user?._id || "")
+  );
 
   return (
     <div id="home" className="min-h-screen">
@@ -397,11 +448,11 @@ export default function RentifyPro({
               onClick={() => handleSearch(category.vehicleType)}
               className="rp-surface rp-hover-lift overflow-hidden text-left"
             >
-              <div className="h-52 bg-slate-100">
+              <div className="rp-image-frame">
                 <img
                   src={category.image}
                   alt={category.title}
-                  className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
+                  className="rp-image-fit"
                 />
               </div>
               <div className="p-5">
@@ -417,7 +468,6 @@ export default function RentifyPro({
                   ))}
                 </div>
                 <p className="text-sm text-slate-600 mt-3">{category.description}</p>
-                <p className="text-[#0B75E7] font-bold mt-4">Starting from {category.price}</p>
               </div>
             </button>
           ))}
@@ -443,13 +493,26 @@ export default function RentifyPro({
           {!featuredLoading && !featuredError && featuredVehicles.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {featuredVehicles.map((vehicle) => (
-                <article key={vehicle.id} className="rp-surface rp-hover-lift overflow-hidden flex flex-col">
+                <article
+                  key={vehicle.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openVehiclePreview(vehicle)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openVehiclePreview(vehicle);
+                    }
+                  }}
+                  aria-label={`Preview ${vehicle.name}`}
+                  className="rp-surface rp-hover-lift overflow-hidden flex flex-col cursor-pointer"
+                >
                   <div className="px-4 pt-4">
-                    <div className="relative h-48 bg-gradient-to-br from-slate-50 to-slate-200 flex items-center justify-center overflow-hidden rp-image-frame">
+                    <div className="rp-image-frame">
                       <img
                         src={vehicle.image}
                         alt={vehicle.name}
-                        className="relative z-0 h-full w-full object-cover object-center drop-shadow-sm"
+                        className="rp-image-fit relative z-0 drop-shadow-sm"
                       />
                       {vehicle.available && (
                         <span className="absolute top-3 left-3 z-10 rp-chip bg-emerald-100 text-emerald-700">
@@ -501,7 +564,10 @@ export default function RentifyPro({
 
                     <div className="pt-3 mt-auto">
                       <button
-                        onClick={() => (isLoggedIn ? onViewDetails(vehicle) : onNavigateToSignIn())}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleFeaturedBookNow(vehicle);
+                        }}
                         className="rp-btn-primary py-2 text-sm w-full"
                       >
                         Book Now
@@ -642,6 +708,22 @@ export default function RentifyPro({
         isOpen={showAI}
         onClose={() => setShowAI(false)}
         onViewAvailableVehicles={onNavigateToVehicles}
+      />
+      <VehiclePreviewModal
+        isOpen={Boolean(previewVehicle)}
+        vehicle={previewVehicle}
+        onClose={closeVehiclePreview}
+        onBookNow={() => {
+          if (!previewVehicle) return;
+          closeVehiclePreview();
+          handleFeaturedBookNow(previewVehicle);
+        }}
+        onChatOwner={() => {
+          if (!previewVehicle) return;
+          closeVehiclePreview();
+          handleChatOwner(previewVehicle);
+        }}
+        disableChat={disablePreviewChat}
       />
       <InfoModal
         isOpen={Boolean(validationModalMessage)}
