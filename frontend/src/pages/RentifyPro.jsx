@@ -25,6 +25,8 @@ import {
   formatTimeInput,
 } from "../utils/dateUtils";
 import InfoModal from "../components/InfoModal";
+import VehicleCover from "../components/VehicleCover";
+import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
 
 const categories = [
   {
@@ -79,7 +81,8 @@ const normalizeFeaturedVehicle = (vehicle) => ({
   _id: vehicle._id,
   name: vehicle.name,
   location: vehicle.location,
-  image: vehicle.imageUrl || vehicle.images?.[0] || "/bmw-x5.png",
+  coverImageUrl: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
+  image: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
   category: vehicle.specs?.subType
     ? `${vehicle.specs?.type || "Vehicle"} · ${vehicle.specs.subType}`
     : "Owner-listed Vehicle",
@@ -508,12 +511,11 @@ export default function RentifyPro({
                   className="rp-surface rp-hover-lift overflow-hidden flex flex-col cursor-pointer"
                 >
                   <div className="px-4 pt-4">
-                    <div className="rp-image-frame">
-                      <img
-                        src={vehicle.image}
-                        alt={vehicle.name}
-                        className="rp-image-fit relative z-0 drop-shadow-sm"
-                      />
+                    <VehicleCover
+                      vehicle={vehicle}
+                      alt={vehicle.name}
+                      contentClassName="p-4 sm:p-5"
+                    >
                       {vehicle.available && (
                         <span className="absolute top-3 left-3 z-10 rp-chip bg-emerald-100 text-emerald-700">
                           Available
@@ -522,7 +524,7 @@ export default function RentifyPro({
                       <span className="absolute top-3 right-3 z-10 rp-chip bg-slate-900 text-white">
                         {vehicle.rating}
                       </span>
-                    </div>
+                    </VehicleCover>
                   </div>
 
                   <div className="p-5 flex flex-col gap-2 flex-1">

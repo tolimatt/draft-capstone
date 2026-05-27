@@ -66,6 +66,7 @@ Thumbs.db
 
 # Local runtime data
 uploads/
+backend/backups/
 temp/
 tmp/
 

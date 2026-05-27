@@ -84,6 +84,43 @@ const buildImageSet = ({ uploadedPaths = [], linkedPaths = [], existingPaths = [
   return [...new Set(merged)];
 };
 
+const parseUploadIndex = (value) => {
+  if (value === undefined || value === null || value === "") return -1;
+  const numeric = Number.parseInt(String(value), 10);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : -1;
+};
+
+const resolveCoverImagePath = ({
+  requestedCoverPath = "",
+  requestedCoverUploadIndex,
+  uploadedPaths = [],
+  galleryImages = [],
+  fallbackCoverPath = "",
+}) => {
+  const normalizedGalleryImages = buildImageSet({ existingPaths: galleryImages });
+  if (!normalizedGalleryImages.length) return "";
+
+  const normalizedRequestedPath = normalizeImagePath(requestedCoverPath);
+  if (normalizedRequestedPath && normalizedGalleryImages.includes(normalizedRequestedPath)) {
+    return normalizedRequestedPath;
+  }
+
+  const uploadIndex = parseUploadIndex(requestedCoverUploadIndex);
+  if (uploadIndex >= 0 && uploadIndex < uploadedPaths.length) {
+    const uploadedCandidate = normalizeImagePath(uploadedPaths[uploadIndex]);
+    if (uploadedCandidate && normalizedGalleryImages.includes(uploadedCandidate)) {
+      return uploadedCandidate;
+    }
+  }
+
+  const normalizedFallback = normalizeImagePath(fallbackCoverPath);
+  if (normalizedFallback && normalizedGalleryImages.includes(normalizedFallback)) {
+    return normalizedFallback;
+  }
+
+  return normalizedGalleryImages[0] || "";
+};
+
 const normalizeReviewPayload = (review, index) => {
   const rating = Number(review?.rating);
   return {
@@ -101,7 +138,12 @@ const normalizeReviewPayload = (review, index) => {
 const serializeVehicle = (req, vehicle) => {
   const imagePaths = ensureArray(vehicle.images).map((value) => normalizeImagePath(value)).filter(Boolean);
   const images = imagePaths.map((item) => getImageUrl(req, item));
-  const primaryImage = images[0] || getImageUrl(req, normalizeImagePath(vehicle.imageUrl)) || "";
+  const coverImagePath = resolveCoverImagePath({
+    requestedCoverPath: vehicle.imageUrl,
+    galleryImages: imagePaths,
+    fallbackCoverPath: imagePaths[0] || "",
+  });
+  const primaryImage = getImageUrl(req, coverImagePath) || images[0] || "";
   const normalizedReviews = ensureArray(vehicle.reviews).map((review, index) =>
     normalizeReviewPayload(review, index)
   );
@@ -130,6 +172,8 @@ const serializeVehicle = (req, vehicle) => {
     availabilityStatus: vehicle.availabilityStatus,
     images,
     imagePaths,
+    coverImageUrl: primaryImage,
+    coverImagePath,
     imageUrl: primaryImage,
     driverOptionEnabled: Boolean(vehicle.driverOptionEnabled),
     driverDailyRate: getVehicleHourlyRate(vehicle, {
@@ -164,6 +208,12 @@ export const createOwnerVehicle = async (req, res) => {
     const uploadedPaths = extractUploadedPaths(req.files);
     const linkedPaths = ensureArray(req.body.imageUrls);
     const images = buildImageSet({ uploadedPaths, linkedPaths });
+    const coverImagePath = resolveCoverImagePath({
+      requestedCoverPath: req.body.coverImagePath,
+      requestedCoverUploadIndex: req.body.coverUploadIndex,
+      uploadedPaths,
+      galleryImages: images,
+    });
     const specs = buildSpecsFromBody(req.body);
     const driverOptionEnabled = parseBoolean(req.body.driverOptionEnabled, false);
     const driverDailyRate = driverOptionEnabled ? toNumeric(req.body.driverDailyRate, 0) : 0;
@@ -177,7 +227,7 @@ export const createOwnerVehicle = async (req, res) => {
       location: req.body.location.trim(),
       availabilityStatus: req.body.availabilityStatus,
       images,
-      imageUrl: images[0] || "",
+      imageUrl: coverImagePath || images[0] || "",
       driverOptionEnabled,
       driverDailyRate,
       specs,
@@ -228,14 +278,29 @@ export const updateOwnerVehicle = async (req, res) => {
 
     const uploadedPaths = extractUploadedPaths(req.files);
     const linkedPaths = ensureArray(req.body.imageUrls);
-    const existingImages = ensureArray(req.body.existingImages);
+    const hasExistingImagesInput = req.body.existingImages !== undefined;
+    const hasRequestedCoverInput =
+      req.body.coverImagePath !== undefined || req.body.coverUploadIndex !== undefined;
+    const existingImages = hasExistingImagesInput ? ensureArray(req.body.existingImages) : ensureArray(vehicle.images);
 
-    if (uploadedPaths.length || linkedPaths.length || req.body.existingImages !== undefined) {
+    if (
+      uploadedPaths.length ||
+      linkedPaths.length ||
+      hasExistingImagesInput ||
+      hasRequestedCoverInput
+    ) {
       const nextImages = buildImageSet({
         existingPaths: existingImages,
         uploadedPaths,
         linkedPaths,
       });
+
+      if (!nextImages.length) {
+        return res.status(400).json({
+          success: false,
+          message: "At least one image is required.",
+        });
+      }
 
       const previousImageMap = new Map(
         ensureArray(vehicle.images)
@@ -246,7 +311,13 @@ export const updateOwnerVehicle = async (req, res) => {
       removedImages.forEach((image) => removeLocalImageIfExists(previousImageMap.get(image) || image));
 
       vehicle.images = nextImages;
-      vehicle.imageUrl = nextImages[0] || "";
+      vehicle.imageUrl = resolveCoverImagePath({
+        requestedCoverPath: req.body.coverImagePath,
+        requestedCoverUploadIndex: req.body.coverUploadIndex,
+        uploadedPaths,
+        galleryImages: nextImages,
+        fallbackCoverPath: vehicle.imageUrl,
+      });
     }
 
     await vehicle.save();

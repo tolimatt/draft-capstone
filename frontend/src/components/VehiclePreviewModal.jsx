@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { BadgeCheck, MapPin, MessageCircle, Star, X } from "lucide-react";
 import { getInitialsFromName } from "../utils/dateUtils";
 import { resolveAssetUrl } from "../utils/media";
+import VehicleCover from "./VehicleCover";
 
 const STAR_SLOTS = [1, 2, 3, 4, 5];
 
@@ -32,7 +33,6 @@ export default function VehiclePreviewModal({
 
   if (!isOpen || !vehicle) return null;
 
-  const image = vehicle.image || vehicle.imageUrl || vehicle.images?.[0] || "/bmw-x5.png";
   const description =
     String(vehicle.description || "").trim() || "No additional description provided by the owner.";
   const ownerName = vehicle.owner?.name || "Vehicle Owner";
@@ -68,9 +68,12 @@ export default function VehiclePreviewModal({
 
         <div className="max-h-[calc(92vh-92px)] overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.05fr_1fr]">
-            <div className="rp-image-frame min-h-[230px]">
-              <img src={image} alt={vehicle.name} className="rp-image-fit" />
-            </div>
+            <VehicleCover
+              vehicle={vehicle}
+              alt={vehicle.name}
+              className="min-h-[230px]"
+              contentClassName="p-5 sm:p-7"
+            />
 
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">

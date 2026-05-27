@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -33,10 +33,13 @@ import {
   getInitialsFromName,
   sanitizeBookingRange,
 } from "../utils/dateUtils";
-import { resolveAssetUrl } from "../utils/media";
+import {
+  DEFAULT_VEHICLE_IMAGE,
+  getVehicleGalleryImages,
+  resolveAssetUrl,
+} from "../utils/media";
 import { getTransactionFee } from "../utils/fees";
-
-const DEFAULT_IMAGE = "/bmw-x5.png";
+import VehicleCover from "../components/VehicleCover";
 const DOWNPAYMENT_RATE = 0.3;
 const money = (value) => `P${Number(value || 0).toLocaleString()}`;
 const moneyWithCents = (value) =>
@@ -147,17 +150,12 @@ export default function VehicleDetailsPage({
     });
   }, [setBookingData]);
 
-  const galleryImages = useMemo(() => {
-    const candidates = [
-      ...(Array.isArray(currentVehicle?.images) ? currentVehicle.images : []),
-      currentVehicle?.imageUrl,
-      currentVehicle?.image,
-    ]
-      .map((entry) => String(entry || "").trim())
-      .filter(Boolean);
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [vehicleId]);
 
-    const unique = [...new Set(candidates)];
-    return unique.length ? unique : [DEFAULT_IMAGE];
+  const galleryImages = useMemo(() => {
+    return getVehicleGalleryImages(currentVehicle);
   }, [currentVehicle]);
 
   useEffect(() => {
@@ -352,57 +350,59 @@ export default function VehicleDetailsPage({
         onLogout={onLogout}
       />
 
-      <main className="pt-24 sm:pt-28 max-w-[1380px] mx-auto px-4 sm:px-6 pb-16 space-y-6">
-        <section className="rp-surface p-5 sm:p-6">
-          <button
-            onClick={onBack}
-            className="rp-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm"
-          >
-            <ArrowLeft size={16} />
-            Back to Vehicles
-          </button>
+      <main className="mx-auto max-w-[1380px] space-y-5 px-4 pb-16 pt-24 sm:space-y-6 sm:px-6 sm:pt-28">
+        <section className="rp-surface p-5 sm:p-7">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label="Go back"
+                className="rp-btn-secondary mt-1 h-11 w-11 shrink-0 rounded-2xl px-0"
+              >
+                <ArrowLeft size={18} />
+              </button>
 
-          <div className="mt-4 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-3xl sm:text-4xl font-bold text-slate-900">
-                  {currentVehicle?.name || "Vehicle"}
-                </h1>
-                <span
-                  className={`rp-chip ${
-                    isAvailable ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"
-                  }`}
-                >
-                  {isAvailable ? "Available" : "Unavailable"}
-                </span>
+              <div className="min-w-0 max-w-3xl">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h1 className="text-[clamp(1.72rem,4.1vw,2.65rem)] font-bold tracking-[-0.045em] text-slate-900">
+                    {currentVehicle?.name || "Vehicle"}
+                  </h1>
+                  <span
+                    className={`rp-chip ${
+                      isAvailable ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"
+                    }`}
+                  >
+                    {isAvailable ? "Available" : "Unavailable"}
+                  </span>
+                </div>
+                <p className="rp-detail-meta mt-2.5">
+                  <MapPin size={14} className="text-[#0B75E7]" />
+                  {currentVehicle?.location || "Location not provided"}
+                </p>
               </div>
-              <p className="mt-2 text-sm text-slate-600 flex items-center gap-1">
-                <MapPin size={14} className="text-[#0B75E7]" />
-                {currentVehicle?.location || "Location not provided"}
-              </p>
             </div>
 
-            <div className="text-left lg:text-right">
-              <p className="text-sm text-slate-500">Starting price</p>
-              <p className="text-3xl font-extrabold text-[#0B75E7]">
+            <div className="rp-detail-price-panel flex flex-col items-start justify-center text-left lg:items-end lg:text-right">
+              <p className="rp-detail-price-label">Starting price</p>
+              <p className="rp-detail-price-value">
                 {money(hourlyRate)}
-                <span className="text-sm font-semibold text-slate-500"> / hour</span>
+                <span> / hour</span>
               </p>
             </div>
           </div>
         </section>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1.65fr_1fr] gap-6">
-          <div className="space-y-6">
-            <section className="rp-surface p-4 sm:p-5">
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
-                <img
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.65fr_1fr] xl:gap-6">
+          <div className="space-y-5 sm:space-y-6">
+            <section className="rp-surface p-5 sm:p-6">
+              <div className="relative overflow-hidden rounded-[1.35rem] border border-slate-200 bg-slate-100">
+                <VehicleCover
+                  vehicle={currentVehicle}
                   src={galleryImages[activeImageIndex]}
                   alt={currentVehicle?.name || "Vehicle"}
-                  className="w-full h-[250px] sm:h-[360px] lg:h-[440px] object-cover"
-                  onError={(event) => {
-                    event.currentTarget.src = DEFAULT_IMAGE;
-                  }}
+                  className="min-h-[250px] sm:min-h-[360px] lg:min-h-[440px] rounded-none border-0 shadow-none"
+                  contentClassName="p-5 sm:p-7 lg:p-9"
                 />
 
                 {galleryImages.length > 1 && (
@@ -411,7 +411,7 @@ export default function VehicleDetailsPage({
                       type="button"
                       onClick={goPrevImage}
                       aria-label="Previous image"
-                      className="absolute left-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white"
+                      className="absolute left-3 top-1/2 z-10 -translate-y-1/2 h-9 w-9 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white"
                     >
                       <ChevronLeft size={18} className="mx-auto" />
                     </button>
@@ -419,7 +419,7 @@ export default function VehicleDetailsPage({
                       type="button"
                       onClick={goNextImage}
                       aria-label="Next image"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white"
+                      className="absolute right-3 top-1/2 z-10 -translate-y-1/2 h-9 w-9 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white"
                     >
                       <ChevronRight size={18} className="mx-auto" />
                     </button>
@@ -428,13 +428,13 @@ export default function VehicleDetailsPage({
               </div>
 
               {galleryImages.length > 1 && (
-                <div className="mt-3 grid grid-cols-4 sm:grid-cols-6 gap-2">
+                <div className="mt-4 grid grid-cols-4 gap-2.5 sm:grid-cols-6">
                   {galleryImages.map((image, index) => (
                     <button
                       key={`${image}-${index}`}
                       type="button"
                       onClick={() => setActiveImageIndex(index)}
-                      className={`overflow-hidden rounded-xl border transition ${
+                      className={`overflow-hidden rounded-2xl border transition ${
                         index === activeImageIndex
                           ? "border-[#0B75E7] ring-2 ring-blue-100"
                           : "border-slate-200 hover:border-slate-300"
@@ -443,9 +443,9 @@ export default function VehicleDetailsPage({
                       <img
                         src={image}
                         alt={`Vehicle preview ${index + 1}`}
-                        className="h-16 w-full object-cover"
+                        className="h-16 w-full object-cover sm:h-[4.5rem]"
                         onError={(event) => {
-                          event.currentTarget.src = DEFAULT_IMAGE;
+                          event.currentTarget.src = DEFAULT_VEHICLE_IMAGE;
                         }}
                       />
                     </button>
@@ -454,9 +454,9 @@ export default function VehicleDetailsPage({
               )}
             </section>
 
-            <section className="rp-surface p-5">
-              <h2 className="text-xl font-bold text-slate-900">Vehicle Specifications</h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4">
+            <section className="rp-surface p-5 sm:p-6">
+              <h2 className="rp-detail-section-title">Vehicle Specifications</h2>
+              <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3">
                 <SpecItem icon={CarFront} label="Type" value={`${vehicleType} / ${vehicleSubType}`} />
                 <SpecItem icon={Users} label="Seats" value={`${seats}`} />
                 <SpecItem icon={Settings} label="Transmission" value={transmission} />
@@ -470,36 +470,41 @@ export default function VehicleDetailsPage({
               </div>
             </section>
 
-            <section className="rp-surface p-5">
-              <h2 className="text-xl font-bold text-slate-900">About This Vehicle</h2>
-              <p className="mt-3 text-slate-600 leading-relaxed">
+            <section className="rp-surface p-5 sm:p-6">
+              <h2 className="rp-detail-section-title">About This Vehicle</h2>
+              <p className="mt-3 text-[0.96rem] leading-7 text-slate-600">
                 {currentVehicle?.description || "No additional description provided by the owner."}
               </p>
             </section>
 
-            <section className="rp-surface p-5">
-              <div className="flex items-start justify-between gap-4">
-                <h2 className="text-xl font-bold text-slate-900">Owner Information</h2>
-                <button
-                  type="button"
-                  onClick={handleChatOwner}
-                  disabled={isOwnVehicle}
-                  className="rp-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <MessageCircle size={15} />
-                  Chat Owner
-                </button>
-              </div>
-              <div className="mt-4 flex items-center gap-4">
-                <div className="w-14 h-14 rounded-full border border-slate-200 bg-[#0B75E7] text-white flex items-center justify-center font-bold">
-                  {ownerInitials}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-slate-900">{ownerName}</p>
-                    {ownerVerified && <BadgeCheck size={18} className="text-[#0B75E7]" />}
+            <section className="rp-surface p-5 sm:p-6">
+              <h2 className="rp-detail-section-title">Owner Information</h2>
+              <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 sm:p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full border border-slate-200 bg-[#0B75E7] text-white font-bold sm:h-16 sm:w-16">
+                      {ownerInitials}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-base font-semibold text-slate-900">{ownerName}</p>
+                        {ownerVerified && <BadgeCheck size={18} className="text-[#0B75E7]" />}
+                      </div>
+                      <p className="mt-1 break-words text-sm text-slate-500">
+                        {ownerEmail || "Verified RentifyPro owner"}
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-sm text-slate-500">{ownerEmail || "Verified RentifyPro owner"}</p>
+
+                  <button
+                    type="button"
+                    onClick={handleChatOwner}
+                    disabled={isOwnVehicle}
+                    className="rp-btn-secondary inline-flex items-center gap-2 self-start px-3.5 py-2.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <MessageCircle size={15} />
+                    Chat Owner
+                  </button>
                 </div>
               </div>
               {chatOwnerError && (
@@ -507,89 +512,45 @@ export default function VehicleDetailsPage({
               )}
             </section>
 
-            <section className="rp-surface p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-xl font-bold text-slate-900">Reviews</h2>
-                <span className="rp-chip bg-amber-100 text-amber-700">
-                  <Star size={13} className="fill-current" />
-                  {reviews.length > 0 ? averageRating : "No reviews"}
-                </span>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                {sortedReviews.length > 0 ? (
-                  sortedReviews.slice(0, 3).map((review) => (
-                    <article key={review.id} className="rounded-xl border border-slate-200 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <ReviewerAvatar name={review.name} avatar={review.avatar} sizeClass="w-9 h-9" />
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">{review.name}</p>
-                            <p className="text-xs text-slate-500">{new Date(review.date).toLocaleDateString()}</p>
-                          </div>
-                        </div>
-                        <div className="rp-chip bg-amber-50 text-amber-700">
-                          <Star size={12} className="fill-current" />
-                          {review.rating}
-                        </div>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-600">{review.comment}</p>
-                    </article>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">
-                    No reviews yet for this vehicle.
-                  </p>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowReviewsModal(true)}
-                className="rp-btn-secondary mt-4 w-full py-2.5 text-sm"
-              >
-                View all reviews
-              </button>
-            </section>
           </div>
 
-          <aside className="xl:sticky xl:top-24 h-fit space-y-5">
-            <section className="rp-surface p-5">
-              <h2 className="text-xl font-bold text-slate-900">Book This Vehicle</h2>
-              <p className="text-sm text-slate-500 mt-1">
+          <aside className="space-y-5 xl:flex xl:h-full xl:flex-col xl:space-y-6">
+            <section className="rp-surface p-5 sm:p-6 xl:sticky xl:top-24">
+              <h2 className="rp-detail-section-title">Book This Vehicle</h2>
+              <p className="rp-detail-section-copy mt-1.5">
                 Choose your dates and review the total before confirming your booking.
               </p>
 
-              <div className="mt-4 space-y-4">
+              <div className="mt-5 space-y-5">
                 <div>
-                  <label className="text-sm font-semibold text-slate-700 block mb-2">Pickup Date & Time</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <label className="rp-detail-form-label">Pickup Date & Time</label>
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     <input
                       type="date"
                       value={pickupDate || ""}
                       min={getMinPickupDate()}
                       onChange={(event) => updateBookingRange({ pickupDate: event.target.value })}
-                      className="rp-input text-sm"
+                      className="rp-input rp-detail-input"
                     />
                     <input
                       type="time"
                       min={pickupDate === getMinPickupDate() ? getMinPickupTime() : undefined}
                       value={pickupTime || ""}
                       onChange={(event) => updateBookingRange({ pickupTime: event.target.value })}
-                      className="rp-input text-sm"
+                      className="rp-input rp-detail-input"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-sm font-semibold text-slate-700 block mb-2">Return Date & Time</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <label className="rp-detail-form-label">Return Date & Time</label>
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     <input
                       type="date"
                       value={returnDate || ""}
                       min={pickupDate || getMinPickupDate()}
                       onChange={(event) => updateBookingRange({ returnDate: event.target.value })}
-                      className="rp-input text-sm"
+                      className="rp-input rp-detail-input"
                     />
                     <input
                       type="time"
@@ -600,19 +561,19 @@ export default function VehicleDetailsPage({
                       }
                       value={returnTime || ""}
                       onChange={(event) => updateBookingRange({ returnTime: event.target.value })}
-                      className="rp-input text-sm"
+                      className="rp-input rp-detail-input"
                     />
                   </div>
                 </div>
 
                 {driverOptionEnabled && (
                   <div>
-                    <label className="text-sm font-semibold text-slate-700 block mb-2">Driver Option</label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <label className="rp-detail-form-label">Driver Option</label>
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                       <button
                         type="button"
                         onClick={() => setDriverSelected(false)}
-                        className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                        className={`rp-detail-toggle border px-3 py-2.5 transition ${
                           !driverSelected
                             ? "border-[#0B75E7] bg-blue-50 text-[#0B75E7]"
                             : "border-slate-200 text-slate-600 hover:border-slate-300"
@@ -623,7 +584,7 @@ export default function VehicleDetailsPage({
                       <button
                         type="button"
                         onClick={() => setDriverSelected(true)}
-                        className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                        className={`rp-detail-toggle border px-3 py-2.5 transition ${
                           driverSelected
                             ? "border-[#0B75E7] bg-blue-50 text-[#0B75E7]"
                             : "border-slate-200 text-slate-600 hover:border-slate-300"
@@ -632,40 +593,40 @@ export default function VehicleDetailsPage({
                         With driver
                       </button>
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">
+                    <p className="mt-2.5 text-sm font-medium text-slate-500">
                       Driver rate: {money(driverHourlyRate)} / hour
                     </p>
                   </div>
                 )}
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm">
+                <div className="rp-detail-summary space-y-2.5">
                   <SummaryRow label="Hourly vehicle rate" value={money(hourlyRate)} />
                   <SummaryRow label="Duration" value={formatDurationMinutes(durationMinutes)} />
                   <SummaryRow label="Vehicle subtotal" value={money(vehicleCost)} />
                   <SummaryRow label="Transaction fee" value={moneyWithCents(transactionFee)} />
                   <SummaryRow label="Downpayment (30%)" value={moneyWithCents(downpaymentFee)} muted />
-                  <div className="h-px bg-slate-200 my-2" />
+                  <div className="my-2.5 h-px bg-slate-200/80" />
                   <SummaryRow label="Estimated total" value={moneyWithCents(estimatedTotal)} strong />
                 </div>
 
-                <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
+                <div className="rp-detail-note flex items-start gap-2 border border-blue-100 bg-blue-50 text-blue-700">
                   <ShieldCheck size={14} className="mt-0.5 flex-shrink-0" />
                   <span>
                     Booking requests are validated with date/time checks and linked to your authenticated account.
                   </span>
                 </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="rp-detail-note border border-amber-200 bg-amber-50 text-amber-800">
                   Payment reminder: complete payment within the booked rental duration, or settle via walk-in upon
                   vehicle return.
                 </div>
 
                 {bookingError && (
-                  <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <p className="rounded-2xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700">
                     {bookingError}
                   </p>
                 )}
                 {bookingSuccess && (
-                  <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                  <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-sm text-emerald-700">
                     {bookingSuccess}
                   </p>
                 )}
@@ -674,7 +635,7 @@ export default function VehicleDetailsPage({
                   type="button"
                   onClick={handleContinueBooking}
                   disabled={bookingLoading || !isAvailable}
-                  className="rp-btn-primary w-full py-3.5 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="rp-btn-primary min-h-[3.3rem] w-full px-4 text-[0.97rem] tracking-[0.01em] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {bookingLoading
                     ? "Submitting..."
@@ -683,6 +644,58 @@ export default function VehicleDetailsPage({
                     : isLoggedIn
                     ? "Book Now"
                     : "Sign In to Book"}
+                </button>
+              </div>
+            </section>
+
+            <section className="rp-surface p-5 sm:p-6 xl:flex xl:flex-1 xl:flex-col">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="rp-detail-section-title">Reviews</h2>
+                  <p className="rp-detail-section-copy mt-1.5">Recent renter feedback for this vehicle.</p>
+                </div>
+                <span className="rp-chip self-start bg-amber-100 text-amber-700">
+                  <Star size={13} className="fill-current" />
+                  {reviews.length > 0 ? averageRating : "No reviews"}
+                </span>
+              </div>
+
+              <div className="mt-4 flex flex-1 flex-col">
+                <div className={sortedReviews.length > 0 ? "space-y-2.5 sm:space-y-3 xl:flex-1" : "flex flex-1 items-center"}>
+                  {sortedReviews.length > 0 ? (
+                    sortedReviews.slice(0, 3).map((review) => (
+                      <article key={review.id} className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <ReviewerAvatar name={review.name} avatar={review.avatar} sizeClass="w-9 h-9" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-900">{review.name}</p>
+                              <p className="text-[0.72rem] text-slate-400">
+                                {new Date(review.date).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="rp-chip shrink-0 bg-amber-50 text-amber-700">
+                            <Star size={12} className="fill-current" />
+                            {review.rating}
+                          </div>
+                        </div>
+                        <p className="mt-2.5 text-sm leading-6 text-slate-600">{review.comment}</p>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="w-full rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500 xl:flex xl:min-h-[9rem] xl:items-center">
+                      No reviews yet for this vehicle.
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowReviewsModal(true)}
+                  className="rp-btn-secondary mt-5 w-full py-3 text-sm"
+                >
+                  View all reviews
                 </button>
               </div>
             </section>
@@ -762,12 +775,12 @@ export default function VehicleDetailsPage({
 function SpecItem({ icon, label, value }) {
   const IconComponent = icon;
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold flex items-center gap-1">
-        <IconComponent size={13} className="text-[#0B75E7]" />
+    <div className="rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+      <p className="flex items-center gap-1.5 text-[0.68rem] font-extrabold uppercase tracking-[0.12em] text-slate-500">
+        <IconComponent size={12} className="text-[#0B75E7]" />
         {label}
       </p>
-      <p className="text-sm font-semibold text-slate-900 mt-1">{value}</p>
+      <p className="mt-2 text-[0.95rem] font-semibold leading-snug text-slate-900">{value}</p>
     </div>
   );
 }
@@ -799,9 +812,11 @@ function ReviewerAvatar({ name, avatar, sizeClass = "w-9 h-9" }) {
 
 function SummaryRow({ label, value, strong = false, muted = false }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className={`text-sm ${muted ? "text-slate-500" : "text-slate-600"}`}>{label}</span>
-      <span className={`text-sm ${strong ? "font-bold text-slate-900" : "font-semibold text-slate-800"}`}>
+    <div className="rp-detail-summary-row">
+      <span className={`rp-detail-summary-label ${muted ? "rp-detail-summary-label--muted" : ""}`}>
+        {label}
+      </span>
+      <span className={`rp-detail-summary-value ${strong ? "rp-detail-summary-value--strong" : ""}`}>
         {value}
       </span>
     </div>

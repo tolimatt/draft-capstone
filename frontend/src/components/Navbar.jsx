@@ -209,18 +209,18 @@ export default function Navbar({
   }, []);
 
   return (
-    <>
+      <>
       <nav className="fixed inset-x-0 top-0 z-50 px-3 sm:px-5 pt-3">
-        <div className="rp-glass max-w-7xl mx-auto h-16 rounded-2xl border shadow-[0_10px_28px_rgba(2,20,46,0.12)]">
-          <div className="h-full px-4 sm:px-6 flex items-center justify-between gap-4">
+        <div className="rp-glass mx-auto max-w-7xl rounded-[1.35rem] border border-white/70 shadow-[0_18px_40px_rgba(2,20,46,0.12)]">
+          <div className="flex min-h-[4.25rem] items-center justify-between gap-4 px-4 py-2 sm:px-6">
             <button
               onClick={handleHomeClick}
-              className="flex items-center gap-2.5 text-xl sm:text-2xl font-extrabold hover:opacity-85 transition-opacity text-slate-900"
+              className="flex items-center gap-3 text-lg font-extrabold tracking-[-0.03em] text-slate-900 transition-opacity hover:opacity-85 sm:text-[1.35rem]"
             >
               <img
                 src={BRAND_LOGO_SRC}
                 alt="RentifyPro logo"
-                className="w-9 h-9 rounded-xl object-cover"
+                className="h-10 w-10 rounded-[0.95rem] object-cover"
               />
               <span>
                 Rentify<span className="text-[#0B75E7]">Pro</span>
@@ -228,7 +228,7 @@ export default function Navbar({
             </button>
 
             <div className="flex-1 hidden lg:flex justify-center px-2">
-              <div className="flex items-center gap-1 bg-slate-50/90 border border-slate-200 rounded-full px-2 py-1">
+              <div className="flex items-center gap-1 rounded-full border border-slate-200/80 bg-white/75 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)]">
                 <button
                   onClick={handleHomeClick}
                   data-active={activePage === "home"}
@@ -273,11 +273,11 @@ export default function Navbar({
                   <button
                     onClick={onNavigateToChat}
                     aria-label="Chatroom"
-                    className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-[#DCEEFF] transition-all hover:-translate-y-0.5"
+                    className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-[#0B75E7] shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-100 hover:bg-blue-50/90"
                   >
                     <MessageCircle size={18} className="text-[#0B75E7]" />
                     {unreadMessages > 0 && (
-                      <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full font-semibold">
+                      <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-semibold text-white shadow-sm">
                         {formatBadgeCount(unreadMessages)}
                       </span>
                     )}
@@ -285,11 +285,11 @@ export default function Navbar({
                   <button
                     onClick={handleNotificationClick}
                     aria-label="Notifications"
-                    className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-[#DCEEFF] transition-all hover:-translate-y-0.5"
+                    className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-[#0B75E7] shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-100 hover:bg-blue-50/90"
                   >
                     <Bell size={18} className="text-[#0B75E7]" />
                     {unreadNotifications > 0 && (
-                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full font-semibold">
+                      <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white shadow-sm">
                         {formatBadgeCount(unreadNotifications)}
                       </span>
                     )}
@@ -301,13 +301,13 @@ export default function Navbar({
                 <>
                   <button
                     onClick={onNavigateToSignIn}
-                    className="hidden sm:block px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-100 transition"
+                    className="hidden rounded-2xl px-3.5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-white/80 hover:text-slate-900 sm:inline-flex"
                   >
                     Sign In
                   </button>
                   <button
                     onClick={onNavigateToRegister}
-                    className="rp-btn-primary px-4 sm:px-5 py-2 text-sm"
+                    className="rp-btn-primary px-4 py-2.5 text-sm sm:px-5"
                   >
                     Register
                   </button>
@@ -336,12 +336,12 @@ export default function Navbar({
               <button
                 type="button"
                 onClick={() => setShowMobileMenu((prev) => !prev)}
-                className="lg:hidden relative w-10 h-10 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-[#DCEEFF] transition-all text-[#0B75E7]"
+                className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-[#0B75E7] shadow-sm transition-all hover:border-blue-100 hover:bg-blue-50/90 lg:hidden"
                 aria-label={showMobileMenu ? "Close menu" : "Open menu"}
               >
                 {showMobileMenu ? <X size={18} /> : <Menu size={18} />}
                 {mobileUnreadTotal > 0 && !showMobileMenu && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full font-semibold">
+                  <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white shadow-sm">
                     {formatBadgeCount(mobileUnreadTotal)}
                   </span>
                 )}
@@ -360,13 +360,13 @@ export default function Navbar({
             className="absolute inset-0 bg-slate-900/35 backdrop-blur-[1px]"
           />
 
-          <div className="absolute right-3 top-20 w-[min(92vw,340px)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.30)]">
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <div className="absolute right-3 top-20 w-[min(92vw,352px)] overflow-hidden rounded-[1.4rem] border border-slate-200/90 bg-white/95 shadow-[0_30px_80px_rgba(15,23,42,0.28)] backdrop-blur">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <p className="text-sm font-semibold text-slate-900">Navigation</p>
               <button
                 type="button"
                 onClick={() => setShowMobileMenu(false)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-50"
                 aria-label="Close menu"
               >
                 <X size={16} />
@@ -379,7 +379,7 @@ export default function Navbar({
                   key={item.key}
                   type="button"
                   onClick={item.onClick}
-                  className={`w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+                  className={`flex w-full items-center justify-between rounded-2xl px-3.5 py-3 text-left text-sm font-semibold transition ${
                     isMobileItemActive(item.key)
                       ? "bg-[#017FE6]/10 text-[#017FE6]"
                       : "text-slate-700 hover:bg-slate-100"
@@ -453,7 +453,7 @@ function ProfileMenu({
     <div className="relative" ref={menuRef}>
       <button
         onClick={onToggle}
-        className="flex items-center gap-2 bg-slate-100 px-2.5 py-1.5 rounded-xl hover:bg-slate-200 transition-all"
+        className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/75 px-2.5 py-2 shadow-sm transition-all hover:bg-white"
       >
         {avatar && !avatarError ? (
           <img
@@ -473,8 +473,8 @@ function ProfileMenu({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-3 w-72 bg-white rounded-2xl shadow-2xl z-50 animate-fadeIn border border-slate-100 overflow-hidden">
-          <div className="px-4 py-4 border-b border-slate-100 bg-slate-50">
+        <div className="absolute right-0 z-50 mt-3 w-72 overflow-hidden rounded-[1.4rem] border border-slate-200/90 bg-white/95 shadow-[0_28px_70px_rgba(15,23,42,0.22)] backdrop-blur animate-fadeIn">
+          <div className="border-b border-slate-100 bg-slate-50/90 px-4 py-4">
             <div className="flex items-center gap-3">
               {avatar && !avatarError ? (
                 <img
@@ -496,19 +496,19 @@ function ProfileMenu({
           </div>
           <button
             onClick={onAccountSettings}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition-colors text-slate-700"
+            className="flex w-full items-center gap-3 px-4 py-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-[#017FE6]/10"
           >
             <Settings size={18} /> Account Settings
           </button>
           <button
             onClick={onBookingHistory}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#017FE6]/10 transition-colors text-slate-700"
+            className="flex w-full items-center gap-3 px-4 py-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-[#017FE6]/10"
           >
             <Car size={18} /> My Bookings
           </button>
           <button
             onClick={onLogout}
-            className="w-full px-4 py-3 text-red-500 hover:bg-red-50 transition-colors flex items-center gap-3"
+            className="flex w-full items-center gap-3 px-4 py-3.5 text-sm font-medium text-red-500 transition-colors hover:bg-red-50"
           >
             Sign Out
           </button>

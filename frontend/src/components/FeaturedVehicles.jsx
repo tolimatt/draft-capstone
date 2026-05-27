@@ -1,5 +1,6 @@
 import React from "react";
-import { Users, Settings, Fuel, Car } from "lucide-react";
+import { Users, Settings, Fuel } from "lucide-react";
+import VehicleCover from "./VehicleCover";
 
 export default function FeaturedVehicles({ vehicles, isLoggedIn, onViewDetails, onSignIn }) {
   return (
@@ -33,9 +34,7 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
           {vehicle.rating}
         </span>
 
-        <div className="rp-image-frame rounded-t-xl">
-          <img src={vehicle.image} alt={vehicle.name} className="rp-image-fit" />
-        </div>
+        <VehicleCover vehicle={vehicle} alt={vehicle.name} className="rounded-t-xl rounded-b-none border-x-0 border-t-0 shadow-none" />
       </div>
 
       <div className="p-6">

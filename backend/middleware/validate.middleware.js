@@ -317,6 +317,18 @@ const sanitizeVehicleBody = (req, { isUpdate = false } = {}) => {
     req.body.existingImages = [];
   }
 
+  if (hasOwn(req.body, "coverImagePath")) {
+    req.body.coverImagePath = toText(req.body.coverImagePath);
+  } else if (!isUpdate) {
+    req.body.coverImagePath = "";
+  }
+
+  if (hasOwn(req.body, "coverUploadIndex")) {
+    req.body.coverUploadIndex = toText(req.body.coverUploadIndex);
+  } else if (!isUpdate) {
+    req.body.coverUploadIndex = "";
+  }
+
   if (req.body.driverOptionEnabled !== undefined) {
     req.body.driverOptionEnabled = parseBoolean(req.body.driverOptionEnabled, false);
   } else if (!isUpdate) {
@@ -372,6 +384,15 @@ export const validateVehicleCreate = (req, res, next) => {
     errors.images = "At least one image is required.";
   }
 
+  if (body.coverUploadIndex) {
+    const coverUploadIndex = Number.parseInt(body.coverUploadIndex, 10);
+    if (!Number.isFinite(coverUploadIndex) || coverUploadIndex < 0) {
+      errors.coverUploadIndex = "Cover image selection is invalid.";
+    } else {
+      body.coverUploadIndex = coverUploadIndex;
+    }
+  }
+
   if (Object.keys(errors).length) {
     return res.status(400).json({ success: false, message: "Validation failed.", errors });
   }
@@ -422,6 +443,15 @@ export const validateVehicleUpdate = (req, res, next) => {
       errors.driverDailyRate = "Driver hourly rate must be zero or greater.";
     } else {
       body.driverDailyRate = driverDailyRate;
+    }
+  }
+
+  if (body.coverUploadIndex) {
+    const coverUploadIndex = Number.parseInt(body.coverUploadIndex, 10);
+    if (!Number.isFinite(coverUploadIndex) || coverUploadIndex < 0) {
+      errors.coverUploadIndex = "Cover image selection is invalid.";
+    } else {
+      body.coverUploadIndex = coverUploadIndex;
     }
   }
 
