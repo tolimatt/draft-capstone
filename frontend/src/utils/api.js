@@ -187,6 +187,11 @@ const API = {
       method: "PATCH",
       body: JSON.stringify({ action, ...body }),
     }),
+  reviewOwnerBookingCancellationRequest: (id, action, body = {}) =>
+    request(`/owner/bookings/${id}/cancellation-request`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...body }),
+    }),
   reviewOwnerWalkInPaymentRequest: (id, action, body = {}) =>
     request(`/owner/bookings/${id}/walk-in-request`, {
       method: "PATCH",
@@ -203,6 +208,14 @@ const API = {
   getOwnerAnalytics: () => request("/owner/analytics"),
 
   getConversations: () => request("/chat/conversations"),
+  getOwnerRenterThreads: () => request("/chat/owner/renters"),
+  openOwnerRenterThread: (renterId) =>
+    request(`/chat/owner/renters/${renterId}/open`, { method: "POST" }),
+  setOwnerRenterThreadPin: (renterId, pinned) =>
+    request(`/chat/owner/renters/${renterId}/pin`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned }),
+    }),
   chatWithBot: (body) => request("/chat", { method: "POST", body: JSON.stringify(body) }),
   getMessagesWithUser: (userId, context = "") =>
     request(`/chat/messages/${userId}${buildQueryString(normalizeChatContext(context))}`),

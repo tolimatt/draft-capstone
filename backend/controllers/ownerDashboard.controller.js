@@ -1,6 +1,7 @@
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
-import { createNotification } from "../utils/notification.js";
+import eventBus from "../events/eventBus.js";
+import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import { emitToUser } from "../socket/index.js";
 import { syncVehicleAvailabilityByBookingState } from "../utils/vehicleAvailability.js";
 import { getTransactionFee } from "../utils/fees.js";
@@ -26,6 +27,8 @@ const WALK_IN_PAYMENT_STATUSES = new Set(["none", "requested", "approved", "reje
 const WALK_IN_REVIEW_ACTIONS = new Set(["approve", "reject"]);
 const EXTENSION_STATUSES = new Set(["none", "requested", "approved", "rejected"]);
 const EXTENSION_REVIEW_ACTIONS = new Set(["approve", "reject"]);
+const CANCELLATION_STATUSES = new Set(["none", "requested", "approved", "rejected"]);
+const CANCELLATION_REVIEW_ACTIONS = new Set(["approve", "reject"]);
 const ACTIVE_BOOKING_STATUSES = new Set(["confirmed", "extended"]);
 const ACTIVE_OVERLAP_STATUSES = ["pending", "confirmed", "extended"];
 const LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT = 0.25;
@@ -121,6 +124,12 @@ const normalizeWalkInStatus = (value, fallback = "none") => {
 const normalizeExtensionStatus = (value, fallback = "none") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (EXTENSION_STATUSES.has(normalized)) return normalized;
+  return fallback;
+};
+
+const normalizeCancellationStatus = (value, fallback = "none") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (CANCELLATION_STATUSES.has(normalized)) return normalized;
   return fallback;
 };
 
@@ -304,6 +313,17 @@ const serializeExtensionRequest = (booking) => ({
   reviewNote: toOptionalText(booking?.extensionReviewNote),
 });
 
+const serializeCancellationRequest = (booking) => ({
+  status: normalizeCancellationStatus(booking?.cancellationStatus, "none"),
+  requestedAt: booking?.cancellationRequestedAt || null,
+  requestedBy: toIdString(booking?.cancellationRequestedBy),
+  requestNote: toOptionalText(booking?.cancellationRequestNote),
+  reviewedAt: booking?.cancellationReviewedAt || null,
+  reviewedBy: toIdString(booking?.cancellationReviewedBy),
+  reviewAction: String(booking?.cancellationReviewAction || "").trim().toLowerCase() || null,
+  reviewNote: toOptionalText(booking?.cancellationReviewNote),
+});
+
 const getOwnerBookingEarnedAt = (booking) => {
   const status = String(booking?.paymentStatus || "").trim().toLowerCase();
   if (status === "paid") {
@@ -401,6 +421,8 @@ const serializeOwnerBooking = (req, booking) => {
     late_return: serializeLateReturn(booking),
     extensionRequest: serializeExtensionRequest(booking),
     extension_request: serializeExtensionRequest(booking),
+    cancellationRequest: serializeCancellationRequest(booking),
+    cancellation_request: serializeCancellationRequest(booking),
     walkInPayment: serializeWalkInPayment(booking),
     walk_in_payment: serializeWalkInPayment(booking),
     paymongoReference: booking.paymongoReference || null,
@@ -556,19 +578,9 @@ const syncOwnerBookingLifecycleState = async (booking) => {
       await booking.save();
       await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
 
-      await createNotification({
-        user: booking.renter?._id || booking.renter,
-        type: "booking_status",
-        title: "Booking completed automatically",
-        message: "Your rental duration ended and the booking status was updated to completed.",
-        data: { bookingId: booking._id, status: "completed", autoCompleted: true },
-      });
-      await createNotification({
-        user: booking.owner?._id || booking.owner,
-        type: "booking_status",
-        title: "Booking completed automatically",
-        message: "A rental duration ended and the booking was auto-completed.",
-        data: { bookingId: booking._id, status: "completed", autoCompleted: true },
+      eventBus.emit(NOTIFICATION_EVENTS.BOOKING_COMPLETED, {
+        booking,
+        autoCompleted: true,
       });
     }
 
@@ -611,31 +623,9 @@ const syncOwnerBookingLifecycleState = async (booking) => {
   }
 
   if (shouldNotifyOverdue) {
-    await createNotification({
-      user: booking.renter?._id || booking.renter,
-      type: "booking_status",
-      title: "Late return detected",
-      message:
-        "Your booking is overdue. You can extend the rental or proceed with late return from your booking card.",
-      data: {
-        bookingId: booking._id,
-        status: booking.status,
-        isOverdue: true,
-        overdueMinutes,
-        actions: ["extend_rental", "proceed_late_return"],
-      },
-    });
-    await createNotification({
-      user: booking.owner?._id || booking.owner,
-      type: "booking_status",
-      title: "Vehicle return is overdue",
-      message: "The renter has exceeded the scheduled return time.",
-      data: {
-        bookingId: booking._id,
-        status: booking.status,
-        isOverdue: true,
-        overdueMinutes,
-      },
+    eventBus.emit(NOTIFICATION_EVENTS.BOOKING_OVERDUE, {
+      booking,
+      overdueMinutes,
     });
   }
 
@@ -721,12 +711,21 @@ export const updateOwnerBookingStatus = async (req, res) => {
     await booking.save();
     await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
 
-    await createNotification({
-      user: booking.renter._id,
-      type: "booking_status",
-      title: "Booking status updated",
-      message: `Your booking is now ${status}.`,
-      data: { bookingId: booking._id, status },
+    const statusNotificationEvent =
+      status === "confirmed"
+        ? NOTIFICATION_EVENTS.BOOKING_APPROVED
+        : status === "rejected"
+          ? NOTIFICATION_EVENTS.BOOKING_REJECTED
+          : status === "cancelled"
+            ? NOTIFICATION_EVENTS.BOOKING_CANCELLED
+            : NOTIFICATION_EVENTS.BOOKING_STATUS_UPDATED;
+
+    eventBus.emit(statusNotificationEvent, {
+      booking,
+      actor: req.user,
+      status,
+      cancelledBy: status === "cancelled" ? "owner" : "",
+      recipientId: booking.renter?._id || booking.renter,
     });
 
     const payload = serializeOwnerBooking(req, booking);
@@ -776,12 +775,10 @@ export const updateOwnerBookingPaymentStatus = async (req, res) => {
     await booking.save();
     const blockchainResult = await autoRecordOwnerBookingOnChain(booking);
 
-    await createNotification({
-      user: booking.renter._id,
-      type: "booking_payment",
-      title: "Payment status updated",
-      message: `Payment status is now ${requestedPaymentStatus}.`,
-      data: { bookingId: booking._id, paymentStatus: requestedPaymentStatus },
+    eventBus.emit(NOTIFICATION_EVENTS.PAYMENT_STATUS_UPDATED, {
+      booking,
+      actor: req.user,
+      paymentStatus: requestedPaymentStatus,
     });
 
     const payload = serializeOwnerBooking(req, booking);
@@ -892,17 +889,9 @@ export const reviewOwnerBookingExtensionRequest = async (req, res) => {
       const refreshed = await Booking.findById(booking._id).populate(populateFields);
       const payload = serializeOwnerBooking(req, refreshed);
 
-      await createNotification({
-        user: refreshed.renter?._id || refreshed.renter,
-        type: "booking_status",
-        title: "Extension approved",
-        message: "Your extension request was approved. Booking schedule and price were updated.",
-        data: {
-          bookingId: refreshed._id,
-          status: refreshed.status,
-          extensionStatus: "approved",
-          returnAt: refreshed.returnAt,
-        },
+      eventBus.emit(NOTIFICATION_EVENTS.EXTENSION_APPROVED, {
+        booking: refreshed,
+        actor: req.user,
       });
 
       emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);
@@ -927,16 +916,9 @@ export const reviewOwnerBookingExtensionRequest = async (req, res) => {
     const refreshed = await Booking.findById(booking._id).populate(populateFields);
     const payload = serializeOwnerBooking(req, refreshed);
 
-    await createNotification({
-      user: refreshed.renter?._id || refreshed.renter,
-      type: "booking_status",
-      title: "Extension rejected",
-      message: "Your extension request was rejected. The original booking schedule remains in effect.",
-      data: {
-        bookingId: refreshed._id,
-        status: refreshed.status,
-        extensionStatus: "rejected",
-      },
+    eventBus.emit(NOTIFICATION_EVENTS.EXTENSION_REJECTED, {
+      booking: refreshed,
+      actor: req.user,
     });
 
     emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);
@@ -949,6 +931,97 @@ export const reviewOwnerBookingExtensionRequest = async (req, res) => {
     });
   } catch {
     return res.status(500).json({ success: false, message: "Failed to review extension request." });
+  }
+};
+
+export const reviewOwnerBookingCancellationRequest = async (req, res) => {
+  try {
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    if (!CANCELLATION_REVIEW_ACTIONS.has(action)) {
+      return res.status(400).json({ success: false, message: "Invalid cancellation review action." });
+    }
+
+    const booking = await Booking.findOne({ _id: req.params.id, owner: req.user._id }).populate(populateFields);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+
+    await syncOwnerBookingLifecycleState(booking);
+
+    const normalizedStatus = String(booking.status || "").trim().toLowerCase();
+    if (["cancelled", "rejected", "completed"].includes(normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "This booking can no longer process cancellation requests.",
+      });
+    }
+
+    const cancellationStatus = normalizeCancellationStatus(booking.cancellationStatus, "none");
+    if (cancellationStatus !== "requested") {
+      return res.status(409).json({
+        success: false,
+        message: "No pending cancellation request found for this booking.",
+      });
+    }
+
+    const now = new Date();
+    const note = toOptionalText(req.body?.note, 500);
+
+    if (action === "approve") {
+      booking.status = "cancelled";
+      booking.cancellationStatus = "approved";
+      booking.cancellationReviewedAt = now;
+      booking.cancellationReviewedBy = req.user._id;
+      booking.cancellationReviewAction = "approve";
+      booking.cancellationReviewNote = note;
+      await booking.save();
+
+      const vehicleId = booking.vehicle?._id || booking.vehicle;
+      await syncVehicleAvailabilityByBookingState(vehicleId);
+
+      const refreshed = await Booking.findById(booking._id).populate(populateFields);
+      const payload = serializeOwnerBooking(req, refreshed);
+
+      eventBus.emit(NOTIFICATION_EVENTS.CANCELLATION_APPROVED, {
+        booking: refreshed,
+        actor: req.user,
+      });
+
+      emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);
+      emitToUser(String(refreshed.owner?._id || refreshed.owner), "booking:updated", payload);
+
+      return res.json({
+        success: true,
+        message: "Cancellation request approved. Booking is now cancelled.",
+        booking: payload,
+      });
+    }
+
+    booking.cancellationStatus = "rejected";
+    booking.cancellationReviewedAt = now;
+    booking.cancellationReviewedBy = req.user._id;
+    booking.cancellationReviewAction = "reject";
+    booking.cancellationReviewNote = note;
+    await booking.save();
+
+    const refreshed = await Booking.findById(booking._id).populate(populateFields);
+    const payload = serializeOwnerBooking(req, refreshed);
+
+    eventBus.emit(NOTIFICATION_EVENTS.CANCELLATION_REJECTED, {
+      booking: refreshed,
+      actor: req.user,
+    });
+
+    emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);
+    emitToUser(String(refreshed.owner?._id || refreshed.owner), "booking:updated", payload);
+
+    return res.json({
+      success: true,
+      message: "Cancellation request rejected. Booking remains active.",
+      booking: payload,
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "Failed to review cancellation request." });
   }
 };
 
@@ -1018,16 +1091,16 @@ export const reviewOwnerWalkInPaymentRequest = async (req, res) => {
     const payload = serializeOwnerBooking(req, refreshed);
     const walkInLabel = action === "approve" ? "approved" : "rejected";
 
-    await createNotification({
-      user: refreshed.renter?._id || refreshed.renter,
-      type: "booking_payment",
-      title: action === "approve" ? "Walk-in payment approved" : "Walk-in payment rejected",
-      message:
-        action === "approve"
-          ? "Your walk-in payment request was approved by the owner."
-          : "Your walk-in payment request was rejected by the owner.",
-      data: { bookingId: refreshed._id, walkInPaymentStatus: walkInLabel },
-    });
+    eventBus.emit(
+      action === "approve"
+        ? NOTIFICATION_EVENTS.WALKIN_PAYMENT_APPROVED
+        : NOTIFICATION_EVENTS.WALKIN_PAYMENT_REJECTED,
+      {
+        booking: refreshed,
+        actor: req.user,
+        walkInPaymentStatus: walkInLabel,
+      }
+    );
 
     emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);
     emitToUser(String(refreshed.owner?._id || refreshed.owner), "booking:updated", payload);
@@ -1112,12 +1185,9 @@ export const confirmOwnerWalkInPayment = async (req, res) => {
     const refreshed = await Booking.findById(booking._id).populate(populateFields);
     const payload = serializeOwnerBooking(req, refreshed);
 
-    await createNotification({
-      user: refreshed.renter?._id || refreshed.renter,
-      type: "booking_payment",
-      title: "Walk-in payment confirmed",
-      message: "The owner confirmed your remaining balance payment.",
-      data: { bookingId: refreshed._id, paymentStatus: "paid", walkInPaymentStatus: "completed" },
+    eventBus.emit(NOTIFICATION_EVENTS.WALKIN_PAYMENT_CONFIRMED, {
+      booking: refreshed,
+      actor: req.user,
     });
 
     emitToUser(String(refreshed.renter?._id || refreshed.renter), "booking:updated", payload);

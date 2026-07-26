@@ -64,6 +64,14 @@ const getExtensionRequestInfo = (booking) => {
     reviewNote: String(extension?.reviewNote || "").trim(),
   };
 };
+const getCancellationRequestInfo = (booking) => {
+  const cancellation = booking?.cancellationRequest || booking?.cancellation_request || {};
+  return {
+    status: String(cancellation?.status || "none").trim().toLowerCase(),
+    requestNote: String(cancellation?.requestNote || "").trim(),
+    reviewNote: String(cancellation?.reviewNote || "").trim(),
+  };
+};
 const getBookingDurationMinutesForPricing = (booking) => {
   const directMinutes = Number(booking?.bookingDurationMinutes);
   if (Number.isFinite(directMinutes) && directMinutes > 0) return Math.round(directMinutes);
@@ -274,6 +282,7 @@ export default function Bookings() {
         {filteredBookings.map((booking) => {
           const lateReturnInfo = getLateReturnInfo(booking);
           const extensionInfo = getExtensionRequestInfo(booking);
+          const cancellationInfo = getCancellationRequestInfo(booking);
 
           return (
           <article key={booking._id} className="bg-white rounded-xl border p-5">
@@ -366,6 +375,8 @@ export default function Bookings() {
               </div>
             )}
 
+
+
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="flex gap-2 flex-wrap">
                 {booking.status === "pending" && (
@@ -418,6 +429,7 @@ export default function Bookings() {
                     </button>
                   </>
                 )}
+
                 {getWalkInStatus(booking) === "requested" && (
                   <>
                     <button
@@ -466,6 +478,17 @@ export default function Bookings() {
                   <p className="w-full text-xs text-rose-700">
                     Extension request rejected.
                     {extensionInfo.reviewNote ? ` Note: ${extensionInfo.reviewNote}` : ""}
+                  </p>
+                )}
+                {cancellationInfo.status === "approved" && (
+                  <p className="w-full text-xs text-amber-700">
+                    Cancellation request approved. Booking has been cancelled.
+                  </p>
+                )}
+                {cancellationInfo.status === "rejected" && (
+                  <p className="w-full text-xs text-slate-700">
+                    Cancellation request rejected. Booking remains active.
+                    {cancellationInfo.reviewNote ? ` Note: ${cancellationInfo.reviewNote}` : ""}
                   </p>
                 )}
               </div>

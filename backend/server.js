@@ -30,6 +30,7 @@ import bookingRoutes from "./routes/booking.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { initSocket } from "./socket/index.js";
+import { registerNotificationHandlers } from "./handlers/notification.handlers.js";
 import { warmupFaceService } from "./utils/faceServiceManager.js";
 import { warmupChatbotService } from "./utils/chatbotServiceManager.js";
 import { createOriginChecker } from "./utils/corsOrigins.js";
@@ -148,6 +149,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 const httpServer = http.createServer(app);
 initSocket(httpServer);
+registerNotificationHandlers();
 let server = null;
 
 httpServer.on("error", (error) => {

@@ -34,6 +34,7 @@ import {
   updateOwnerBookingStatus,
   updateOwnerBookingPaymentStatus,
   reviewOwnerBookingExtensionRequest,
+  reviewOwnerBookingCancellationRequest,
   reviewOwnerWalkInPaymentRequest,
   confirmOwnerWalkInPayment,
 } from "../controllers/ownerDashboard.controller.js";
@@ -97,6 +98,13 @@ router.patch(
   authorize("owner"),
   validateObjectIdParam("id"),
   reviewOwnerBookingExtensionRequest
+);
+router.patch(
+  "/bookings/:id/cancellation-request",
+  protect,
+  authorize("owner"),
+  validateObjectIdParam("id"),
+  reviewOwnerBookingCancellationRequest
 );
 router.patch(
   "/bookings/:id/walk-in-request",

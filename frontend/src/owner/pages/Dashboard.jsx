@@ -96,6 +96,14 @@ const getBookingEarnedAt = (booking) =>
       booking?.createdAt
   );
 
+const isCancellationRequested = (booking) =>
+  booking?.cancellationRequest?.status === "requested" || booking?.cancellation_request?.status === "requested";
+
+const getCancellationRequestedAt = (booking) => {
+  const dateStr = booking?.cancellationRequest?.requestedAt || booking?.cancellation_request?.requestedAt;
+  return dateStr ? new Date(dateStr) : null;
+};
+
 const getRangeStart = (range) => {
   const start = new Date();
   start.setSeconds(0, 0);
@@ -208,17 +216,21 @@ export default function Dashboard() {
     () => ({
       myVehicles: vehicles.length,
       activeRentals: bookings.filter((booking) => booking.status === "confirmed").length,
-      pendingRequests: bookings.filter((booking) => booking.status === "pending").length,
+      pendingRequests: bookings.filter((booking) => booking.status === "pending" || isCancellationRequested(booking)).length,
       completedRentals: bookings.filter((booking) => booking.status === "completed").length,
     }),
     [vehicles, bookings]
   );
 
-  const pendingRequests = useMemo(
+  const renterRequests = useMemo(
     () =>
       bookings
-        .filter((booking) => booking.status === "pending")
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .filter((booking) => booking.status === "pending" || isCancellationRequested(booking))
+        .sort((a, b) => {
+          const dateA = isCancellationRequested(a) ? (getCancellationRequestedAt(a) || new Date(a.updatedAt)) : new Date(a.createdAt);
+          const dateB = isCancellationRequested(b) ? (getCancellationRequestedAt(b) || new Date(b.updatedAt)) : new Date(b.createdAt);
+          return dateB - dateA;
+        })
         .slice(0, 5),
     [bookings]
   );
@@ -275,7 +287,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard title="My Vehicles" value={stats.myVehicles} accent="blue" />
         <StatCard title="Active Rentals" value={stats.activeRentals} accent="emerald" />
-        <StatCard title="Pending Requests" value={stats.pendingRequests} accent="amber" />
+        <StatCard title="Renter Requests" value={stats.pendingRequests} accent="amber" />
         <StatCard title="Completed Rentals" value={stats.completedRentals} accent="indigo" />
       </div>
 
@@ -302,15 +314,34 @@ export default function Dashboard() {
         </Panel>
 
         <Panel>
-          <h2 className="font-semibold text-gray-800 mb-4">Booking Requests</h2>
+          <h2 className="font-semibold text-gray-800 mb-4">Renter Requests</h2>
 
-          {pendingRequests.length === 0 ? (
-            <p className="text-sm text-gray-500">No pending requests</p>
+          {renterRequests.length === 0 ? (
+            <p className="text-sm text-gray-500">No requests</p>
           ) : (
             <div className="space-y-4">
-              {pendingRequests.map((booking) => {
+              {renterRequests.map((booking) => {
                 const renter = getRenterProfile(booking.renter);
                 const isUpdating = updatingBookingId === booking._id;
+                const isCancellation = isCancellationRequested(booking);
+
+                const reviewCancellation = async (action) => {
+                  setUpdatingBookingId(booking._id);
+                  try {
+                    const response = await API.reviewOwnerBookingCancellationRequest(booking._id, action);
+                    const updated = normalizeBookingStatus(response.booking);
+
+                    setBookings((prev) =>
+                      prev.map((b) => (b._id === booking._id ? updated : b))
+                    );
+                    setLastUpdated(new Date().toISOString());
+                    loadDashboard({ silent: true });
+                  } catch (err) {
+                    setError(err.message || "Failed to update cancellation request.");
+                  } finally {
+                    setUpdatingBookingId("");
+                  }
+                };
 
                 return (
                   <div key={booking._id} className="p-3 rounded-xl bg-gray-200/60">
@@ -321,6 +352,13 @@ export default function Dashboard() {
                         <p className="text-xs text-gray-500 truncate">{renter.email || "No email provided"}</p>
                       </div>
                     </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {isCancellation ? (
+                        <span className="font-semibold text-amber-700">Cancellation Request</span>
+                      ) : (
+                        <span className="font-semibold text-blue-700">Booking Request</span>
+                      )}
+                    </p>
                     <p className="text-sm text-gray-600">
                       {booking.vehicle?.name || "Vehicle"} -{" "}
                       {formatDurationMinutes(
@@ -331,20 +369,41 @@ export default function Dashboard() {
                     </p>
 
                     <div className="flex gap-2 mt-3">
-                      <button
-                        disabled={isUpdating}
-                        onClick={() => updateBookingStatus(booking._id, "confirmed")}
-                        className="flex-1 bg-green-200 text-green-800 rounded-lg py-1 hover:bg-green-300 disabled:opacity-60"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        disabled={isUpdating}
-                        onClick={() => updateBookingStatus(booking._id, "rejected")}
-                        className="flex-1 bg-red-200 text-red-700 rounded-lg py-1 hover:bg-red-300 disabled:opacity-60"
-                      >
-                        Decline
-                      </button>
+                      {isCancellation ? (
+                        <>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => reviewCancellation("approve")}
+                            className="flex-1 bg-green-200 text-green-800 rounded-lg py-1 hover:bg-green-300 disabled:opacity-60"
+                          >
+                            Approve Cancel
+                          </button>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => reviewCancellation("reject")}
+                            className="flex-1 bg-red-200 text-red-700 rounded-lg py-1 hover:bg-red-300 disabled:opacity-60"
+                          >
+                            Decline Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => updateBookingStatus(booking._id, "confirmed")}
+                            className="flex-1 bg-green-200 text-green-800 rounded-lg py-1 hover:bg-green-300 disabled:opacity-60"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => updateBookingStatus(booking._id, "rejected")}
+                            className="flex-1 bg-red-200 text-red-700 rounded-lg py-1 hover:bg-red-300 disabled:opacity-60"
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -355,10 +414,10 @@ export default function Dashboard() {
       </div>
 
       <Panel>
-        <h2 className="font-semibold text-gray-800 mb-4">My Recent Activity</h2>
+        <h2 className="font-semibold text-gray-800 mb-4">Recent Rentals</h2>
 
         {recentActivity.length === 0 ? (
-          <p className="text-sm text-gray-500">No recent activity yet.</p>
+          <p className="text-sm text-gray-500">No recent rentals yet.</p>
         ) : (
           <div className="space-y-3">
             {recentActivity.map((booking) => {

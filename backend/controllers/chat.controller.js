@@ -1,14 +1,18 @@
 import mongoose from "mongoose";
 import ChatMessage from "../models/ChatMessage.js";
+import ChatThread from "../models/ChatThread.js";
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
-import { createNotification } from "../utils/notification.js";
+import eventBus from "../events/eventBus.js";
+import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import { emitToUser } from "../socket/index.js";
 import { censorProfanityInText } from "../utils/chatModeration.js";
 
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
 const toIdString = (value) => String(value?._id || value || "");
 const DELETED_MESSAGE_PLACEHOLDER = "This message was deleted.";
+const OWNER_RENTER_BOOKING_STATUSES = ["confirmed", "extended", "completed"];
+const ACTIVE_RENTER_BOOKING_STATUSES = new Set(["confirmed", "extended"]);
 
 const buildOwnerRenterQuery = (userA, userB) => ({
   $or: [
@@ -54,6 +58,71 @@ const sanitizeChatMessage = (message = {}) => {
 const isHiddenForUser = (message, userId) =>
   Array.isArray(message?.hiddenFor) &&
   message.hiddenFor.some((entry) => String(entry) === String(userId));
+
+const toTimeValue = (value) => {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+};
+
+const getRentalActivityAt = (booking = {}) =>
+  booking.actualReturnAt || booking.returnAt || booking.updatedAt || booking.createdAt || null;
+
+const isActiveRenterBooking = (booking = {}) =>
+  ACTIVE_RENTER_BOOKING_STATUSES.has(String(booking.status || ""));
+
+const serializeRenterBooking = (booking = {}) => ({
+  _id: booking._id,
+  status: booking.status,
+  pickupAt: booking.pickupAt || null,
+  returnAt: booking.returnAt || null,
+  actualReturnAt: booking.actualReturnAt || null,
+  updatedAt: booking.updatedAt || null,
+  createdAt: booking.createdAt || null,
+  activityAt: getRentalActivityAt(booking),
+  vehicle: booking.vehicle
+    ? {
+        _id: booking.vehicle?._id || booking.vehicle,
+        name: booking.vehicle?.name || "Vehicle",
+      }
+    : null,
+});
+
+const getPreferredRenterBooking = (bookings = []) => {
+  const activeBookings = bookings.filter(isActiveRenterBooking);
+  const pool = activeBookings.length ? activeBookings : bookings;
+
+  return [...pool].sort((a, b) => {
+    const returnDiff = toTimeValue(b.returnAt) - toTimeValue(a.returnAt);
+    if (returnDiff) return returnDiff;
+    return toTimeValue(getRentalActivityAt(b)) - toTimeValue(getRentalActivityAt(a));
+  })[0];
+};
+
+const ensureOwnerRenterBookingAccess = (ownerId, renterId) =>
+  Booking.findOne({
+    owner: ownerId,
+    renter: renterId,
+    status: { $in: OWNER_RENTER_BOOKING_STATUSES },
+  })
+    .sort({ createdAt: -1 })
+    .select("_id")
+    .lean();
+
+const upsertChatThread = ({ ownerId, renterId, update = {} }) =>
+  ChatThread.findOneAndUpdate(
+    { owner: ownerId, renter: renterId },
+    {
+      $set: {
+        ...update,
+        lastOpenedAt: update.lastOpenedAt || new Date(),
+      },
+      $setOnInsert: {
+        owner: ownerId,
+        renter: renterId,
+      },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  ).lean();
 
 const applyScopeQuery = (query, relation, context = {}) => {
   if (context.bookingId && relation?.bookingId) {
@@ -218,6 +287,207 @@ export const getConversations = async (req, res) => {
   }
 };
 
+export const getOwnerRenterThreads = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+
+    const bookings = await Booking.find({
+      owner: ownerId,
+      status: { $in: OWNER_RENTER_BOOKING_STATUSES },
+    })
+      .sort({ createdAt: -1 })
+      .select("_id owner renter vehicle status pickupAt returnAt actualReturnAt updatedAt createdAt")
+      .populate("renter", "name email avatar")
+      .populate("vehicle", "name")
+      .lean();
+
+    const byRenter = new Map();
+    for (const booking of bookings) {
+      const renterId = toIdString(booking.renter);
+      if (!renterId) continue;
+
+      if (!byRenter.has(renterId)) {
+        byRenter.set(renterId, {
+          renter: {
+            _id: booking.renter?._id || renterId,
+            name: booking.renter?.name || booking.renter?.email || "User",
+            email: booking.renter?.email || "",
+            avatar: booking.renter?.avatar || "",
+          },
+          bookings: [],
+        });
+      }
+
+      byRenter.get(renterId).bookings.push(booking);
+    }
+
+    const renterIds = Array.from(byRenter.keys());
+    if (!renterIds.length) {
+      return res.json({ success: true, renters: [] });
+    }
+
+    const ownerObjectId = new mongoose.Types.ObjectId(String(ownerId));
+    const renterObjectIds = renterIds.map((id) => new mongoose.Types.ObjectId(id));
+
+    const [threads, unreadCounts, latestMessages] = await Promise.all([
+      ChatThread.find({ owner: ownerId, renter: { $in: renterObjectIds } }).lean(),
+      ChatMessage.aggregate([
+        {
+          $match: {
+            owner: ownerObjectId,
+            renter: { $in: renterObjectIds },
+            receiver: ownerObjectId,
+            readAt: null,
+            hiddenFor: { $ne: ownerObjectId },
+          },
+        },
+        {
+          $group: {
+            _id: "$renter",
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      ChatMessage.aggregate([
+        {
+          $match: {
+            owner: ownerObjectId,
+            renter: { $in: renterObjectIds },
+            hiddenFor: { $ne: ownerObjectId },
+          },
+        },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: "$renter",
+            message: { $first: "$$ROOT" },
+          },
+        },
+      ]),
+    ]);
+
+    const threadByRenter = new Map(threads.map((thread) => [String(thread.renter), thread]));
+    const unreadByRenter = new Map(
+      unreadCounts.map((entry) => [String(entry._id), Number(entry.count || 0)])
+    );
+    const latestMessageByRenter = new Map(
+      latestMessages.map((entry) => [String(entry._id), entry.message])
+    );
+
+    const renters = renterIds.map((renterId) => {
+      const entry = byRenter.get(renterId);
+      const booking = getPreferredRenterBooking(entry.bookings);
+      const serializedBooking = serializeRenterBooking(booking);
+      const thread = threadByRenter.get(renterId);
+      const latestMessage = latestMessageByRenter.get(renterId);
+      const isActive = entry.bookings.some(isActiveRenterBooking);
+
+      return {
+        conversationId: thread?._id || null,
+        hasConversation: Boolean(thread?._id || latestMessage?._id),
+        renter: entry.renter,
+        partner: entry.renter,
+        isActive,
+        status: isActive ? "active" : "previous",
+        statusLabel: isActive ? "Active Rental" : "Previous Renter",
+        vehicle: serializedBooking.vehicle,
+        latestBooking: serializedBooking,
+        latestActivityAt: serializedBooking.activityAt,
+        unreadCount: unreadByRenter.get(renterId) || 0,
+        isPinned: Boolean(thread?.pinned),
+        pinnedAt: thread?.pinnedAt || null,
+        lastMessage: latestMessage ? sanitizeChatMessage(latestMessage) : null,
+      };
+    });
+
+    renters.sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      if (a.isPinned && b.isPinned) {
+        const pinnedDiff = toTimeValue(b.pinnedAt) - toTimeValue(a.pinnedAt);
+        if (pinnedDiff) return pinnedDiff;
+      }
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+      return toTimeValue(b.latestActivityAt) - toTimeValue(a.latestActivityAt);
+    });
+
+    return res.json({ success: true, renters });
+  } catch {
+    return res.status(500).json({ success: false, message: "Failed to fetch renters." });
+  }
+};
+
+export const openOwnerRenterThread = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const renterId = req.params.renterId;
+
+    if (!isObjectId(renterId)) {
+      return res.status(400).json({ success: false, message: "Invalid renter ID." });
+    }
+
+    const booking = await ensureOwnerRenterBookingAccess(ownerId, renterId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Renter not found for this owner.",
+      });
+    }
+
+    const thread = await upsertChatThread({
+      ownerId,
+      renterId,
+      update: { lastOpenedAt: new Date() },
+    });
+
+    return res.json({
+      success: true,
+      conversationId: thread._id,
+      pinned: Boolean(thread.pinned),
+      pinnedAt: thread.pinnedAt || null,
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "Failed to open conversation." });
+  }
+};
+
+export const updateOwnerRenterThreadPin = async (req, res) => {
+  try {
+    const ownerId = req.user._id;
+    const renterId = req.params.renterId;
+    const pinned = Boolean(req.body?.pinned);
+
+    if (!isObjectId(renterId)) {
+      return res.status(400).json({ success: false, message: "Invalid renter ID." });
+    }
+
+    const booking = await ensureOwnerRenterBookingAccess(ownerId, renterId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Renter not found for this owner.",
+      });
+    }
+
+    const thread = await upsertChatThread({
+      ownerId,
+      renterId,
+      update: {
+        pinned,
+        pinnedAt: pinned ? new Date() : null,
+      },
+    });
+
+    return res.json({
+      success: true,
+      conversationId: thread._id,
+      pinned: Boolean(thread.pinned),
+      pinnedAt: thread.pinnedAt || null,
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "Failed to update pinned chat." });
+  }
+};
+
 export const getMessagesWithUser = async (req, res) => {
   try {
     const partnerId = req.params.userId;
@@ -321,16 +591,13 @@ export const sendMessageToUser = async (req, res) => {
     const populated = await populateChatMessage(message._id);
     const sanitizedMessage = sanitizeChatMessage(populated);
 
-    await createNotification({
-      user: receiverId,
-      type: "chat_message",
-      title: "New message",
-      message: `${req.user.name || "Someone"} sent you a message.`,
-      data: {
-        senderId,
-        bookingId: relation.bookingId || null,
-        vehicleId: relation.vehicleId || null,
-      },
+    eventBus.emit(NOTIFICATION_EVENTS.CHAT_MESSAGE_RECEIVED, {
+      message,
+      actor: req.user,
+      senderId,
+      receiverId,
+      bookingId: relation.bookingId || null,
+      vehicleId: relation.vehicleId || null,
     });
 
     emitToUser(String(receiverId), "chat:message", sanitizedMessage);

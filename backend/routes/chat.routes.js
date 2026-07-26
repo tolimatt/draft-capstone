@@ -2,6 +2,9 @@ import axios from "axios";
 import express from "express";
 import {
   getConversations,
+  getOwnerRenterThreads,
+  openOwnerRenterThread,
+  updateOwnerRenterThreadPin,
   getMessagesWithUser,
   sendMessageToUser,
   markMessagesAsRead,
@@ -123,6 +126,9 @@ router.post("/", async (req, res, next) => {
 });
 
 router.get("/conversations", protect, authorize("user", "owner", "admin"), getConversations);
+router.get("/owner/renters", protect, authorize("owner", "admin"), getOwnerRenterThreads);
+router.post("/owner/renters/:renterId/open", protect, authorize("owner", "admin"), openOwnerRenterThread);
+router.patch("/owner/renters/:renterId/pin", protect, authorize("owner", "admin"), updateOwnerRenterThreadPin);
 router.delete("/conversations/:userId", protect, authorize("user", "owner", "admin"), deleteConversation);
 router.get("/messages/:userId", protect, authorize("user", "owner", "admin"), getMessagesWithUser);
 router.post("/messages/:userId", protect, authorize("user", "owner", "admin"), sendMessageToUser);

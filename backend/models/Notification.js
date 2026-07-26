@@ -14,6 +14,56 @@ const notificationSchema = new mongoose.Schema(
       default: "system",
       index: true,
     },
+    category: {
+      type: String,
+      enum: ["booking", "payment", "chat", "system"],
+      default: "system",
+      index: true,
+    },
+    event: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: "",
+      index: true,
+    },
+    priority: {
+      type: String,
+      enum: ["low", "normal", "important", "urgent"],
+      default: "normal",
+      index: true,
+    },
+    actor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    entityType: {
+      type: String,
+      trim: true,
+      maxlength: 60,
+      default: "",
+    },
+    entityId: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: "",
+      index: true,
+    },
+    actionUrl: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
+    dedupeKey: {
+      type: String,
+      trim: true,
+      maxlength: 220,
+      default: "",
+      index: true,
+    },
     title: {
       type: String,
       required: true,
@@ -45,6 +95,15 @@ const notificationSchema = new mongoose.Schema(
 
 notificationSchema.index({ user: 1, archived_at: 1, createdAt: -1 });
 notificationSchema.index({ archived_at: 1 });
+notificationSchema.index(
+  { user: 1, dedupeKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { dedupeKey: { $exists: true, $gt: "" } },
+  }
+);
+notificationSchema.index({ user: 1, category: 1, readAt: 1, createdAt: -1 });
+notificationSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 
 export default mongoose.model("Notification", notificationSchema);
 

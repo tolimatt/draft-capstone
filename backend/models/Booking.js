@@ -187,6 +187,47 @@ const bookingSchema = new mongoose.Schema(
       maxlength: 500,
       default: "",
     },
+    cancellationStatus: {
+      type: String,
+      enum: ["none", "requested", "approved", "rejected"],
+      default: "none",
+      index: true,
+    },
+    cancellationRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    cancellationRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    cancellationRequestNote: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
+    cancellationReviewedAt: {
+      type: Date,
+      default: null,
+    },
+    cancellationReviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    cancellationReviewAction: {
+      type: String,
+      enum: ["", "approve", "reject"],
+      default: "",
+    },
+    cancellationReviewNote: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
     paymentStatus: {
       type: String,
       enum: ["unpaid", "partial", "paid", "refunded"],

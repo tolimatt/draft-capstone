@@ -1,5 +1,6 @@
 import Booking from "../models/Booking.js";
-import { createNotification } from "../utils/notification.js";
+import eventBus from "../events/eventBus.js";
+import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import { syncVehicleAvailabilityByBookingState } from "../utils/vehicleAvailability.js";
 import {
   getBookingDriverHourlyRate,
@@ -104,19 +105,9 @@ const syncOneBookingLifecycle = async (booking, now = new Date()) => {
     if (!changed) return false;
     await booking.save();
     await syncVehicleAvailabilityByBookingState(booking.vehicle);
-    await createNotification({
-      user: booking.renter,
-      type: "booking_status",
-      title: "Booking completed automatically",
-      message: "Your rental duration ended and the booking status was updated to completed.",
-      data: { bookingId: booking._id, status: "completed", autoCompleted: true },
-    });
-    await createNotification({
-      user: booking.owner,
-      type: "booking_status",
-      title: "Booking completed automatically",
-      message: "A rental duration ended and the booking was auto-completed.",
-      data: { bookingId: booking._id, status: "completed", autoCompleted: true },
+    eventBus.emit(NOTIFICATION_EVENTS.BOOKING_COMPLETED, {
+      booking,
+      autoCompleted: true,
     });
     return true;
   }
@@ -154,31 +145,9 @@ const syncOneBookingLifecycle = async (booking, now = new Date()) => {
   await booking.save();
 
   if (shouldNotify) {
-    await createNotification({
-      user: booking.renter,
-      type: "booking_status",
-      title: "Late return detected",
-      message:
-        "Your booking is overdue. You can extend the rental or proceed with late return from your booking card.",
-      data: {
-        bookingId: booking._id,
-        status: booking.status,
-        isOverdue: true,
-        overdueMinutes,
-        actions: ["extend_rental", "proceed_late_return"],
-      },
-    });
-    await createNotification({
-      user: booking.owner,
-      type: "booking_status",
-      title: "Vehicle return is overdue",
-      message: "The renter has exceeded the scheduled return time.",
-      data: {
-        bookingId: booking._id,
-        status: booking.status,
-        isOverdue: true,
-        overdueMinutes,
-      },
+    eventBus.emit(NOTIFICATION_EVENTS.BOOKING_OVERDUE, {
+      booking,
+      overdueMinutes,
     });
   }
 

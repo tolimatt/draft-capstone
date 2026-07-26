@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { MessageCircle, MoreHorizontal, Pencil, Send, Trash2, X } from "lucide-react";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
 import Navbar from "../components/Navbar";
@@ -11,10 +12,12 @@ import {
   formatDateInput,
   formatDurationMinutes,
   formatTimeInput,
+  getInitialsFromName,
   getDateTime,
   getDurationHoursFromMinutes,
   getDurationMinutesBetween,
 } from "../utils/dateUtils";
+import { resolveAssetUrl } from "../utils/media";
 
 const statusStyles = {
   pending: "bg-amber-100 text-amber-800 border border-amber-200",
@@ -48,6 +51,10 @@ const toTitleCase = (value = "") =>
   String(value)
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+const getOwnerDisplayName = (booking) => {
+  const owner = booking?.owner || {};
+  return String(owner.name || owner.email || "").trim() || "Owner";
+};
 const appendUniqueMessage = (list, message) =>
   list.some((item) => item._id === message._id) ? list : [...list, message];
 const replaceMessageById = (list, message) =>
@@ -938,6 +945,7 @@ export default function BookingsPage({
           {filteredBookings.map((booking) => {
             const lateReturnInfo = getLateReturnInfo(booking);
             const extensionInfo = getExtensionRequestInfo(booking);
+            const ownerDisplayName = getOwnerDisplayName(booking);
             const isPaymentEligibleStatus = ["confirmed", "extended", "completed"].includes(
               String(booking.status || "").toLowerCase()
             );
@@ -1028,13 +1036,18 @@ export default function BookingsPage({
                 </div>
               )}
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  onClick={() => openChat(booking)}
-                  className="px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-sm"
-                >
-                  Chat Owner
-                </button>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <div className="flex min-w-0 max-w-full items-center gap-2">
+                  <span className="min-w-0 truncate text-sm text-slate-600">
+                    Owner: <span className="font-medium text-slate-900">{ownerDisplayName}</span>
+                  </span>
+                  <button
+                    onClick={() => openChat(booking)}
+                    className="shrink-0 px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-sm"
+                  >
+                    Chat Owner
+                  </button>
+                </div>
 
                 {["unpaid", "partial"].includes(String(booking.paymentStatus || "").toLowerCase()) &&
                   !["cancelled", "rejected"].includes(booking.status) && (
@@ -1175,37 +1188,66 @@ export default function BookingsPage({
             onClick={closeChatModal}
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)] flex flex-col max-h-[80vh]">
-              <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-[#0B75E7]/10 via-white to-white">
-                <div>
-                  <p className="font-semibold text-slate-900">Chat with {chatBooking.owner?.name || "Owner"}</p>
-                  <p className="text-xs text-slate-500">{chatBooking.vehicle?.name}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowDeleteChatConversationConfirm(true)}
-                    className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs text-rose-700 transition hover:bg-rose-50"
-                  >
-                    Delete Conversation
-                  </button>
-                  <button
-                    onClick={closeChatModal}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
-                    aria-label="Close chat"
-                  >
-                    x
-                  </button>
+            <div className="flex w-full max-w-2xl max-h-[86vh] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)] flex-col">
+              <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <OwnerAvatar owner={chatBooking.owner} />
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate text-base font-semibold text-slate-950">
+                          {getOwnerDisplayName(chatBooking)}
+                        </p>
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                          Owner
+                        </span>
+                      </div>
+                      <p className="truncate text-xs text-slate-500">
+                        {chatBooking.vehicle?.name || "Booking conversation"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteChatConversationConfirm(true)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-rose-200 text-rose-600 transition hover:bg-rose-50"
+                      aria-label="Delete conversation"
+                      title="Delete conversation"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    <button
+                      onClick={closeChatModal}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200"
+                      aria-label="Close chat"
+                      title="Close chat"
+                    >
+                      <X size={17} />
+                    </button>
+                  </div>
                 </div>
               </div>
 
               <div
-                className="p-4 overflow-y-auto flex-1 space-y-2 bg-slate-50"
+                className="flex-1 space-y-4 overflow-y-auto bg-slate-50 px-4 py-5 sm:px-5"
                 onClick={() => setActiveChatMessageActionId("")}
               >
-                {chatError && <p className="text-sm text-red-600">{chatError}</p>}
+                {chatError && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {chatError}
+                  </div>
+                )}
                 {!chatMessages.length && (
-                  <p className="text-sm text-slate-500">No messages yet.</p>
+                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
+                    <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-[#017FE6]">
+                      <MessageCircle size={22} />
+                    </div>
+                    <p className="text-sm font-medium text-slate-800">No messages yet</p>
+                    <p className="mt-1 max-w-xs text-xs text-slate-500">
+                      Start the conversation about this booking with the vehicle owner.
+                    </p>
+                  </div>
                 )}
                 {chatMessages.map((message) => {
                   const isMe = String(message.sender?._id || message.sender) === String(currentUserId);
@@ -1216,10 +1258,12 @@ export default function BookingsPage({
                     !message.isDeleted &&
                     activeChatMessageActionId === String(message._id);
                   return (
-                    <div key={message._id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                    <div key={message._id} className={`group flex ${isMe ? "justify-end" : "justify-start"}`}>
                       <div
-                        className={`max-w-[75%] rounded-xl px-3 py-2 text-sm ${
-                          isMe ? "bg-[#017FE6] text-white" : "bg-white border"
+                        className={`relative max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[74%] ${
+                          isMe
+                            ? "rounded-br-md bg-[#017FE6] text-white"
+                            : "rounded-bl-md border border-slate-200 bg-white text-slate-800"
                         }`}
                         onClick={(event) => {
                           if (!isMe || isEditing || message.isDeleted) return;
@@ -1241,13 +1285,13 @@ export default function BookingsPage({
                                 }
                               }}
                               onClick={(event) => event.stopPropagation()}
-                              className="w-full rounded border border-white/30 bg-white px-2 py-1 text-sm text-slate-900"
+                              className="w-full rounded-lg border border-white/30 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-2 ring-transparent transition focus:ring-white/30"
                             />
                             <div className="flex justify-end gap-2 text-[11px]">
                               <button
                                 type="button"
                                 onClick={cancelEditChatMessage}
-                                className="rounded bg-white/20 px-2 py-0.5"
+                                className="rounded-lg bg-white/20 px-2.5 py-1"
                                 disabled={savingChatEdit}
                               >
                                 Cancel
@@ -1255,7 +1299,7 @@ export default function BookingsPage({
                               <button
                                 type="button"
                                 onClick={saveEditedChatMessage}
-                                className="rounded bg-white px-2 py-0.5 text-[#017FE6]"
+                                className="rounded-lg bg-white px-2.5 py-1 text-[#017FE6]"
                                 disabled={savingChatEdit}
                               >
                                 {savingChatEdit ? "Saving..." : "Save"}
@@ -1263,21 +1307,30 @@ export default function BookingsPage({
                             </div>
                           </div>
                         ) : (
-                          <p className={message.isDeleted ? "italic opacity-85" : ""}>{message.text}</p>
+                          <p className={`whitespace-pre-wrap break-words ${message.isDeleted ? "italic opacity-85" : ""}`}>
+                            {message.text}
+                          </p>
                         )}
-                        <p className={`text-[10px] mt-1 ${isMe ? "text-white/80" : "text-gray-500"}`}>
+                        <p className={`mt-1.5 text-[10px] ${isMe ? "text-white/80" : "text-slate-400"}`}>
                           {formatDate(message.createdAt)}
                           {message.isEdited && !message.isDeleted ? " - edited" : ""}
                         </p>
+                        {isMe && !isEditing && !message.isDeleted && (
+                          <span className="mt-1 inline-flex items-center text-white/75" aria-hidden="true">
+                            <MoreHorizontal size={13} />
+                          </span>
+                        )}
                         {showActions && (
-                          <div className="mt-1 flex justify-end gap-2 text-[10px] text-white/80">
+                          <div className="mt-2 flex justify-end gap-1.5 text-[11px] text-white">
                             <button
                               type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 startEditChatMessage(message);
                               }}
+                              className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-1 transition hover:bg-white/30"
                             >
+                              <Pencil size={12} />
                               Edit
                             </button>
                             <button
@@ -1289,7 +1342,9 @@ export default function BookingsPage({
                               disabled={
                                 deletingChatMessageId === message._id || Boolean(confirmDeleteChatMessageId)
                               }
+                              className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-1 transition hover:bg-white/30 disabled:opacity-60"
                             >
+                              <Trash2 size={12} />
                               {deletingChatMessageId === message._id ? "Deleting..." : "Delete"}
                             </button>
                           </div>
@@ -1300,19 +1355,29 @@ export default function BookingsPage({
                 })}
               </div>
 
-              <div className="border-t border-slate-200 p-3 flex gap-2">
-                <input
-                  className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-[#0B75E7] focus:outline-none focus:ring-4 focus:ring-blue-100"
-                  placeholder="Type your message"
-                  value={chatText}
-                  onChange={(e) => setChatText(e.target.value)}
-                />
-                <button
-                  onClick={sendChatMessage}
-                  className="rp-btn-primary px-4 py-2 text-sm"
-                >
-                  Send
-                </button>
+              <div className="border-t border-slate-200 bg-white p-3">
+                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 focus-within:border-[#0B75E7] focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
+                  <input
+                    className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                    placeholder="Type your message"
+                    value={chatText}
+                    onChange={(e) => setChatText(e.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        sendChatMessage();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={sendChatMessage}
+                    disabled={!chatText.trim()}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#017FE6] text-white shadow-sm transition hover:bg-[#0165B8] disabled:cursor-not-allowed disabled:bg-slate-300"
+                    aria-label="Send message"
+                  >
+                    <Send size={17} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1663,6 +1728,28 @@ export default function BookingsPage({
         onClose={() => setShowAI(false)}
         onViewAvailableVehicles={onNavigateToVehicles}
       />
+    </div>
+  );
+}
+
+function OwnerAvatar({ owner }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const name = getOwnerDisplayName({ owner });
+  const avatar = resolveAssetUrl(owner?.avatar || "");
+  const showImage = Boolean(avatar) && !imageFailed;
+
+  return (
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#017FE6] text-sm font-semibold text-white ring-4 ring-blue-50">
+      {showImage ? (
+        <img
+          src={avatar}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        getInitialsFromName(name || "Owner")
+      )}
     </div>
   );
 }
