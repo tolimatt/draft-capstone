@@ -20,7 +20,7 @@ export default function SearchCard({
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <InputField label="Vehicle Types" type="select" value={vehicleType} onChange={onVehicleTypeChange}
             options={[
-              { label: "Select type", value: "" },
+              { label: "All Vehicles", value: "" },
               { label: "Car", value: "car" },
               { label: "Motorcycle", value: "motorcycle" },
               { label: "Van", value: "van" },

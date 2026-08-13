@@ -1,15 +1,72 @@
 import { useEffect, useMemo, useState } from "react";
 import API from "../../utils/api";
-
+import { getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
 const money = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
-const getPayableAmount = (booking) => {
+const getBookingAmountPayable = (booking) => {
   const payable = Number(booking?.amountPayable);
-  if (Number.isFinite(payable) && payable >= 0) {
-    return payable;
+  if (Number.isFinite(payable) && payable >= 0) return payable;
+
+  const total = Number(booking?.totalAmount);
+  const gasFee = Number(booking?.blockchainGasFee);
+  if (Number.isFinite(total) && total >= 0) {
+    return total + (Number.isFinite(gasFee) ? gasFee : 0);
   }
-  const total = Number(booking?.totalAmount || 0);
-  const gasFee = Number(booking?.blockchainGasFee || 0);
-  return total + (Number.isFinite(gasFee) && gasFee >= 0 ? gasFee : 0);
+
+  const baseAmount = Number(booking?.baseAmount);
+  const driverAmount = Number(booking?.driverAmount);
+  if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount >= 0) {
+    return baseAmount + driverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+  }
+
+  const directMinutes = Number(booking?.bookingDurationMinutes);
+  const durationMinutes =
+    Number.isFinite(directMinutes) && directMinutes > 0
+      ? Math.round(directMinutes)
+      : booking?.pickupAt && booking?.returnAt
+        ? getDurationMinutesBetween(booking.pickupAt, booking.returnAt)
+        : Number.isFinite(Number(booking?.bookingDays))
+          ? Math.round(Number(booking.bookingDays) * 24 * 60)
+          : 0;
+  const durationHours = getDurationHoursFromMinutes(durationMinutes);
+  const hourlyRate = Number((booking?.vehicleHourlyRate ?? booking?.vehicleDailyRate) || 0);
+  if (Number.isFinite(hourlyRate) && hourlyRate >= 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = Number((booking?.driverHourlyRate ?? booking?.driverDailyRate) || 0);
+    const driverSelected = Boolean(booking?.driverSelected);
+    const computedDriverAmount =
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
+        : 0;
+    return hourlyRate * durationHours + computedDriverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+  }
+
+  return 0;
+};
+
+const getBookingAmountEarned = (booking) => {
+  const directEarned = Number(booking?.amountEarned);
+  if (Number.isFinite(directEarned) && directEarned >= 0) return directEarned;
+
+  const totalPayable = getBookingAmountPayable(booking);
+  const paid = Number(booking?.paymentAmountPaid);
+  const status = String(booking?.paymentStatus || "").trim().toLowerCase();
+  if (status === "refunded") return 0;
+  if (Number.isFinite(paid) && paid > 0) return Math.min(paid, totalPayable);
+  if (status === "paid") return totalPayable;
+  return 0;
+};
+
+const getBookingVehicleIncome = (booking) => {
+  const direct = Number(booking?.vehicleIncome);
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+  const baseAmount = Number(booking?.baseAmount);
+  return Number.isFinite(baseAmount) && baseAmount >= 0 ? baseAmount : 0;
+};
+
+const getBookingDriverIncome = (booking) => {
+  const direct = Number(booking?.driverIncome);
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+  const driverAmount = Number(booking?.driverAmount);
+  return Number.isFinite(driverAmount) && driverAmount >= 0 ? driverAmount : 0;
 };
 
 export default function Earnings() {
@@ -84,7 +141,7 @@ export default function Earnings() {
               <th className="text-left px-4 py-3">Renter</th>
               <th className="text-right px-4 py-3">Vehicle Income</th>
               <th className="text-right px-4 py-3">Driver Income</th>
-              <th className="text-right px-4 py-3">Total</th>
+              <th className="text-right px-4 py-3">Earned</th>
               <th className="text-left px-4 py-3">Payment Status</th>
             </tr>
           </thead>
@@ -94,16 +151,16 @@ export default function Earnings() {
                 <td className="px-4 py-3">{booking._id.slice(-6).toUpperCase()}</td>
                 <td className="px-4 py-3">{booking.vehicle?.name || "-"}</td>
                 <td className="px-4 py-3">{booking.renter?.name || booking.renter?.email || "-"}</td>
-                <td className="px-4 py-3 text-right">{money(booking.baseAmount)}</td>
-                <td className="px-4 py-3 text-right">{money(booking.driverAmount)}</td>
-                <td className="px-4 py-3 text-right font-semibold">{money(getPayableAmount(booking))}</td>
+                <td className="px-4 py-3 text-right">{money(getBookingVehicleIncome(booking))}</td>
+                <td className="px-4 py-3 text-right">{money(getBookingDriverIncome(booking))}</td>
+                <td className="px-4 py-3 text-right font-semibold">{money(getBookingAmountEarned(booking))}</td>
                 <td className="px-4 py-3">{booking.paymentStatus}</td>
               </tr>
             ))}
             {!loading && bookings.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-5 text-center text-gray-500">
-                  No completed booking earnings available.
+                  No paid booking earnings available yet.
                 </td>
               </tr>
             )}

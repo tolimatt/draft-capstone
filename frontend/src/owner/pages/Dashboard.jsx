@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
-import { formatDisplayName } from "../../utils/dateUtils";
+import {
+  formatDisplayName,
+  formatDurationMinutes,
+  getDurationHoursFromMinutes,
+  getDurationMinutesBetween,
+} from "../../utils/dateUtils";
 import { resolveAssetUrl } from "../../utils/media";
-
 const money = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
     minimumFractionDigits: 0,
@@ -30,14 +34,74 @@ const formatDateTime = (value) => {
   return date ? date.toLocaleString() : "-";
 };
 
-const getPayableAmount = (booking) => {
+const getBookingAmountPayable = (booking) => {
   const payable = Number(booking?.amountPayable);
-  if (Number.isFinite(payable) && payable >= 0) {
-    return payable;
+  if (Number.isFinite(payable) && payable >= 0) return payable;
+
+  const total = Number(booking?.totalAmount);
+  const gasFee = Number(booking?.blockchainGasFee);
+  if (Number.isFinite(total) && total >= 0) {
+    return total + (Number.isFinite(gasFee) ? gasFee : 0);
   }
-  const total = Number(booking?.totalAmount || 0);
-  const gasFee = Number(booking?.blockchainGasFee || 0);
-  return total + (Number.isFinite(gasFee) && gasFee >= 0 ? gasFee : 0);
+
+  const baseAmount = Number(booking?.baseAmount);
+  const driverAmount = Number(booking?.driverAmount);
+  if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount >= 0) {
+    return baseAmount + driverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+  }
+
+  const directMinutes = Number(booking?.bookingDurationMinutes);
+  const durationMinutes =
+    Number.isFinite(directMinutes) && directMinutes > 0
+      ? Math.round(directMinutes)
+      : booking?.pickupAt && booking?.returnAt
+        ? getDurationMinutesBetween(booking.pickupAt, booking.returnAt)
+        : Number.isFinite(Number(booking?.bookingDays))
+          ? Math.round(Number(booking.bookingDays) * 24 * 60)
+          : 0;
+  const durationHours = getDurationHoursFromMinutes(durationMinutes);
+  const hourlyRate = Number((booking?.vehicleHourlyRate ?? booking?.vehicleDailyRate) || 0);
+  if (Number.isFinite(hourlyRate) && hourlyRate >= 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = Number((booking?.driverHourlyRate ?? booking?.driverDailyRate) || 0);
+    const driverSelected = Boolean(booking?.driverSelected);
+    const computedDriverAmount =
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
+        : 0;
+    return hourlyRate * durationHours + computedDriverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+  }
+
+  return 0;
+};
+
+const getBookingAmountEarned = (booking) => {
+  const directEarned = Number(booking?.amountEarned);
+  if (Number.isFinite(directEarned) && directEarned >= 0) return directEarned;
+
+  const totalPayable = getBookingAmountPayable(booking);
+  const paid = Number(booking?.paymentAmountPaid);
+  const status = String(booking?.paymentStatus || "").trim().toLowerCase();
+  if (status === "refunded") return 0;
+  if (Number.isFinite(paid) && paid > 0) return Math.min(paid, totalPayable);
+  if (status === "paid") return totalPayable;
+  return 0;
+};
+
+const getBookingEarnedAt = (booking) =>
+  toDate(
+    booking?.earnedAt ||
+      booking?.paymentUpdatedAt ||
+      booking?.paidAt ||
+      booking?.updatedAt ||
+      booking?.createdAt
+  );
+
+const isCancellationRequested = (booking) =>
+  booking?.cancellationRequest?.status === "requested" || booking?.cancellation_request?.status === "requested";
+
+const getCancellationRequestedAt = (booking) => {
+  const dateStr = booking?.cancellationRequest?.requestedAt || booking?.cancellation_request?.requestedAt;
+  return dateStr ? new Date(dateStr) : null;
 };
 
 const getRangeStart = (range) => {
@@ -152,17 +216,21 @@ export default function Dashboard() {
     () => ({
       myVehicles: vehicles.length,
       activeRentals: bookings.filter((booking) => booking.status === "confirmed").length,
-      pendingRequests: bookings.filter((booking) => booking.status === "pending").length,
+      pendingRequests: bookings.filter((booking) => booking.status === "pending" || isCancellationRequested(booking)).length,
       completedRentals: bookings.filter((booking) => booking.status === "completed").length,
     }),
     [vehicles, bookings]
   );
 
-  const pendingRequests = useMemo(
+  const renterRequests = useMemo(
     () =>
       bookings
-        .filter((booking) => booking.status === "pending")
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .filter((booking) => booking.status === "pending" || isCancellationRequested(booking))
+        .sort((a, b) => {
+          const dateA = isCancellationRequested(a) ? (getCancellationRequestedAt(a) || new Date(a.updatedAt)) : new Date(a.createdAt);
+          const dateB = isCancellationRequested(b) ? (getCancellationRequestedAt(b) || new Date(b.updatedAt)) : new Date(b.createdAt);
+          return dateB - dateA;
+        })
         .slice(0, 5),
     [bookings]
   );
@@ -178,9 +246,9 @@ export default function Dashboard() {
   const selectedRangeEarnings = useMemo(() => {
     const rangeStart = getRangeStart(earningsRange);
     return earningsBookings.reduce((sum, booking) => {
-      const completedAt = toDate(booking.completedAt || booking.updatedAt || booking.createdAt);
-      if (!completedAt || completedAt < rangeStart) return sum;
-      return sum + getPayableAmount(booking);
+      const earnedAt = getBookingEarnedAt(booking);
+      if (!earnedAt || earnedAt < rangeStart) return sum;
+      return sum + getBookingAmountEarned(booking);
     }, 0);
   }, [earningsBookings, earningsRange]);
 
@@ -219,7 +287,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <StatCard title="My Vehicles" value={stats.myVehicles} accent="blue" />
         <StatCard title="Active Rentals" value={stats.activeRentals} accent="emerald" />
-        <StatCard title="Pending Requests" value={stats.pendingRequests} accent="amber" />
+        <StatCard title="Renter Requests" value={stats.pendingRequests} accent="amber" />
         <StatCard title="Completed Rentals" value={stats.completedRentals} accent="indigo" />
       </div>
 
@@ -246,15 +314,34 @@ export default function Dashboard() {
         </Panel>
 
         <Panel>
-          <h2 className="font-semibold text-gray-800 mb-4">Booking Requests</h2>
+          <h2 className="font-semibold text-gray-800 mb-4">Renter Requests</h2>
 
-          {pendingRequests.length === 0 ? (
-            <p className="text-sm text-gray-500">No pending requests</p>
+          {renterRequests.length === 0 ? (
+            <p className="text-sm text-gray-500">No requests</p>
           ) : (
             <div className="space-y-4">
-              {pendingRequests.map((booking) => {
+              {renterRequests.map((booking) => {
                 const renter = getRenterProfile(booking.renter);
                 const isUpdating = updatingBookingId === booking._id;
+                const isCancellation = isCancellationRequested(booking);
+
+                const reviewCancellation = async (action) => {
+                  setUpdatingBookingId(booking._id);
+                  try {
+                    const response = await API.reviewOwnerBookingCancellationRequest(booking._id, action);
+                    const updated = normalizeBookingStatus(response.booking);
+
+                    setBookings((prev) =>
+                      prev.map((b) => (b._id === booking._id ? updated : b))
+                    );
+                    setLastUpdated(new Date().toISOString());
+                    loadDashboard({ silent: true });
+                  } catch (err) {
+                    setError(err.message || "Failed to update cancellation request.");
+                  } finally {
+                    setUpdatingBookingId("");
+                  }
+                };
 
                 return (
                   <div key={booking._id} className="p-3 rounded-xl bg-gray-200/60">
@@ -265,25 +352,58 @@ export default function Dashboard() {
                         <p className="text-xs text-gray-500 truncate">{renter.email || "No email provided"}</p>
                       </div>
                     </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {isCancellation ? (
+                        <span className="font-semibold text-amber-700">Cancellation Request</span>
+                      ) : (
+                        <span className="font-semibold text-blue-700">Booking Request</span>
+                      )}
+                    </p>
                     <p className="text-sm text-gray-600">
-                      {booking.vehicle?.name || "Vehicle"} - {booking.bookingDays || 1} day(s)
+                      {booking.vehicle?.name || "Vehicle"} -{" "}
+                      {formatDurationMinutes(
+                        Number.isFinite(Number(booking?.bookingDurationMinutes))
+                          ? Number(booking.bookingDurationMinutes)
+                          : Number(booking?.bookingDays || 0) * 24 * 60
+                      )}
                     </p>
 
                     <div className="flex gap-2 mt-3">
-                      <button
-                        disabled={isUpdating}
-                        onClick={() => updateBookingStatus(booking._id, "confirmed")}
-                        className="flex-1 bg-green-200 text-green-800 rounded-lg py-1 hover:bg-green-300 disabled:opacity-60"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        disabled={isUpdating}
-                        onClick={() => updateBookingStatus(booking._id, "rejected")}
-                        className="flex-1 bg-red-200 text-red-700 rounded-lg py-1 hover:bg-red-300 disabled:opacity-60"
-                      >
-                        Decline
-                      </button>
+                      {isCancellation ? (
+                        <>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => reviewCancellation("approve")}
+                            className="flex-1 bg-green-200 text-green-800 rounded-lg py-1 hover:bg-green-300 disabled:opacity-60"
+                          >
+                            Approve Cancel
+                          </button>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => reviewCancellation("reject")}
+                            className="flex-1 bg-red-200 text-red-700 rounded-lg py-1 hover:bg-red-300 disabled:opacity-60"
+                          >
+                            Decline Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => updateBookingStatus(booking._id, "confirmed")}
+                            className="flex-1 bg-green-200 text-green-800 rounded-lg py-1 hover:bg-green-300 disabled:opacity-60"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            disabled={isUpdating}
+                            onClick={() => updateBookingStatus(booking._id, "rejected")}
+                            className="flex-1 bg-red-200 text-red-700 rounded-lg py-1 hover:bg-red-300 disabled:opacity-60"
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -294,10 +414,10 @@ export default function Dashboard() {
       </div>
 
       <Panel>
-        <h2 className="font-semibold text-gray-800 mb-4">My Recent Activity</h2>
+        <h2 className="font-semibold text-gray-800 mb-4">Recent Rentals</h2>
 
         {recentActivity.length === 0 ? (
-          <p className="text-sm text-gray-500">No recent activity yet.</p>
+          <p className="text-sm text-gray-500">No recent rentals yet.</p>
         ) : (
           <div className="space-y-3">
             {recentActivity.map((booking) => {

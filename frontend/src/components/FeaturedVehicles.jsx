@@ -1,5 +1,6 @@
 import React from "react";
-import { Users, Settings, Fuel, Car } from "lucide-react";
+import { Users, Settings, Fuel } from "lucide-react";
+import VehicleCover from "./VehicleCover";
 
 export default function FeaturedVehicles({ vehicles, isLoggedIn, onViewDetails, onSignIn }) {
   return (
@@ -33,9 +34,7 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
           {vehicle.rating}
         </span>
 
-        <div className="bg-gray-50 rounded-t-xl p-6 h-60 flex items-center justify-center overflow-hidden">
-          <img src={vehicle.image} alt={vehicle.name} className="max-h-full object-contain transition-transform duration-500 group-hover:scale-110" />
-        </div>
+        <VehicleCover vehicle={vehicle} alt={vehicle.name} className="rounded-t-xl rounded-b-none border-x-0 border-t-0 shadow-none" />
       </div>
 
       <div className="p-6">
@@ -58,7 +57,7 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
         </div>
 
         <div className="text-lg font-bold text-[#017FE6] mb-4">
-          ₱{vehicle.price.toLocaleString()} / day
+          ₱{vehicle.price.toLocaleString()} / hour
         </div>
 
         <div>
@@ -70,3 +69,4 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
     </div>
   );
 }
+

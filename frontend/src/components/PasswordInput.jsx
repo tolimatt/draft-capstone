@@ -11,6 +11,8 @@ export default function PasswordInput({
   showStrength = false,
   inputRef,
   placeholder = "eg. johndoe@134",
+  maxLength,
+  onBlur,
 }) {
   const [showPassword, setShowPassword] = useState(false);
 
@@ -43,6 +45,31 @@ export default function PasswordInput({
     return "Very Strong";
   };
 
+  const sanitizePasswordValue = (rawValue = "") => String(rawValue).replace(/\s/g, "");
+
+  const handlePasswordChange = (event) => {
+    if (typeof onChange !== "function") return;
+    const sanitizedValue = sanitizePasswordValue(event?.target?.value || "");
+    onChange({ target: { value: sanitizedValue } });
+  };
+
+  const handlePasswordKeyDown = (event) => {
+    if (event.key === " ") event.preventDefault();
+  };
+
+  const handlePasswordPaste = (event) => {
+    const pastedText = String(event.clipboardData?.getData("text") || "");
+    if (!/\s/.test(pastedText)) return;
+    event.preventDefault();
+    const sanitizedText = sanitizePasswordValue(pastedText);
+    const input = event.currentTarget;
+    const currentValue = String(input?.value || "");
+    const start = Number.isInteger(input?.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input?.selectionEnd) ? input.selectionEnd : currentValue.length;
+    const nextValue = currentValue.slice(0, start) + sanitizedText + currentValue.slice(end);
+    if (typeof onChange === "function") onChange({ target: { value: nextValue } });
+  };
+
   return (
     <div className="space-y-2">
       <label className="block text-sm font-semibold text-slate-700">
@@ -63,9 +90,13 @@ export default function PasswordInput({
           ref={inputRef}
           type={showPassword ? "text" : "password"}
           value={value}
-          onChange={onChange}
+          onChange={handlePasswordChange}
+          onKeyDown={handlePasswordKeyDown}
+          onPaste={handlePasswordPaste}
+          onBlur={onBlur}
           disabled={disabled}
           placeholder={placeholder}
+          maxLength={maxLength}
           className={`w-full rounded-xl border bg-white px-4 py-3 pl-12 pr-12 text-[15px] text-slate-900 shadow-sm transition-all duration-200 placeholder:text-slate-400 focus:outline-none ${
             error
               ? "border-red-300 bg-red-50/80 focus:border-red-400 focus:ring-4 focus:ring-red-100"

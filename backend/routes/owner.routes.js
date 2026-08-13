@@ -33,6 +33,10 @@ import {
   getOwnerAnalytics,
   updateOwnerBookingStatus,
   updateOwnerBookingPaymentStatus,
+  reviewOwnerBookingExtensionRequest,
+  reviewOwnerBookingCancellationRequest,
+  reviewOwnerWalkInPaymentRequest,
+  confirmOwnerWalkInPayment,
 } from "../controllers/ownerDashboard.controller.js";
 import { otpLimiter } from "../middleware/security.middleware.js";
 
@@ -87,6 +91,34 @@ router.patch(
   validateObjectIdParam("id"),
   validatePaymentStatusUpdate,
   updateOwnerBookingPaymentStatus
+);
+router.patch(
+  "/bookings/:id/extension-request",
+  protect,
+  authorize("owner"),
+  validateObjectIdParam("id"),
+  reviewOwnerBookingExtensionRequest
+);
+router.patch(
+  "/bookings/:id/cancellation-request",
+  protect,
+  authorize("owner"),
+  validateObjectIdParam("id"),
+  reviewOwnerBookingCancellationRequest
+);
+router.patch(
+  "/bookings/:id/walk-in-request",
+  protect,
+  authorize("owner"),
+  validateObjectIdParam("id"),
+  reviewOwnerWalkInPaymentRequest
+);
+router.post(
+  "/bookings/:id/walk-in-confirm",
+  protect,
+  authorize("owner"),
+  validateObjectIdParam("id"),
+  confirmOwnerWalkInPayment
 );
 router.get("/reviews", protect, authorize("owner"), getOwnerReviews);
 router.get("/earnings", protect, authorize("owner"), getOwnerEarnings);

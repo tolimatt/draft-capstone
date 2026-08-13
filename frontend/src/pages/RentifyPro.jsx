@@ -17,14 +17,16 @@ import {
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
+import VehiclePreviewModal from "../components/VehiclePreviewModal";
+import API from "../utils/api";
 import {
   formatDateInput,
-  getCurrentTime,
-  getDateTime,
-  getTodayDate,
-  getTomorrowDate,
+  getMinPickupDateTime,
+  formatTimeInput,
 } from "../utils/dateUtils";
 import InfoModal from "../components/InfoModal";
+import VehicleCover from "../components/VehicleCover";
+import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
 
 const categories = [
   {
@@ -34,7 +36,6 @@ const categories = [
     image: "/cars.png",
     tags: ["Sedan", "Hatchback", "SUV", "Luxury"],
     description: "Ideal for family trips, business meetings, and city drives.",
-    price: "P500/day",
     vehicleType: "car",
   },
   {
@@ -44,8 +45,7 @@ const categories = [
     image: "/motor.png",
     tags: ["Scooter", "Sport Bike", "Cruiser"],
     description: "Great for fast commutes and flexible urban travel.",
-    price: "P300/day",
-    vehicleType: "motor",
+    vehicleType: "motorcycle",
   },
   {
     id: "vans",
@@ -54,7 +54,6 @@ const categories = [
     image: "/van.png",
     tags: ["Passenger", "Mini Van", "Cargo", "Luxury"],
     description: "Spacious and reliable for group trips and transport runs.",
-    price: "P1,500/day",
     vehicleType: "van",
   },
   {
@@ -64,55 +63,48 @@ const categories = [
     image: "/trucks.png",
     tags: ["Pick-up", "Cargo", "Refrigerated", "Flat Bed"],
     description: "Built for heavy-duty tasks and dependable hauling.",
-    price: "P2,000/day",
     vehicleType: "truck",
   },
 ];
 
-const featuredVehicles = [
-  {
-    id: 1,
-    name: "BMW X5",
-    location: "Dagupan City, Pangasinan",
-    image: "/bmw-x5.png",
-    category: "BMW - SUV",
-    seats: 7,
-    transmission: "Automatic",
-    fuel: "Gasoline",
-    price: 5500,
-    rating: 4.8,
-    available: true,
-    codingDay: "Wednesday",
+const pickRandom = (list, count) => {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, count);
+};
+
+const normalizeFeaturedVehicle = (vehicle) => ({
+  id: vehicle._id,
+  _id: vehicle._id,
+  name: vehicle.name,
+  location: vehicle.location,
+  coverImageUrl: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
+  image: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
+  category: vehicle.specs?.subType
+    ? `${vehicle.specs?.type || "Vehicle"} · ${vehicle.specs.subType}`
+    : "Owner-listed Vehicle",
+  seats: vehicle.specs?.seats || 4,
+  transmission: vehicle.specs?.transmission || "Automatic",
+  fuel: vehicle.specs?.fuel || "Gasoline",
+  price: Number((vehicle.hourlyRentalRate ?? vehicle.dailyRentalRate) || 0),
+  rating: Number.isFinite(Number(vehicle.averageRating ?? vehicle.rating))
+    ? Number(Number(vehicle.averageRating ?? vehicle.rating).toFixed(1))
+    : 0,
+  reviewCount: Number.isFinite(Number(vehicle.reviewCount)) ? Number(vehicle.reviewCount) : 0,
+  available: vehicle.availabilityStatus === "available",
+  description: vehicle.description || "",
+  owner: {
+    _id: vehicle.owner?._id || "",
+    name: vehicle.owner?.name || "Vehicle Owner",
+    email: vehicle.owner?.email || "",
+    avatar: vehicle.owner?.avatar || "",
+    verified: vehicle.owner?.verified !== false,
   },
-  {
-    id: 2,
-    name: "Yamaha R3",
-    location: "Lingayen, Pangasinan",
-    image: "/yamaha-r3.png",
-    category: "Yamaha - Sport",
-    seats: 2,
-    transmission: "Manual",
-    fuel: "Gasoline",
-    price: 1200,
-    rating: 4.6,
-    available: true,
-    codingDay: "Thursday",
-  },
-  {
-    id: 3,
-    name: "Toyota HiAce",
-    location: "San Carlos City, Pangasinan",
-    image: "/toyota-hiAce.png",
-    category: "Toyota - Van",
-    seats: 12,
-    transmission: "Manual",
-    fuel: "Diesel",
-    price: 4800,
-    rating: 4.7,
-    available: true,
-    codingDay: "Saturday",
-  },
-];
+  codingDay: "",
+});
 
 const featureItems = [
   {
@@ -165,20 +157,34 @@ const locations = [
 
 const formatCoding = (day) => (day ? `Coding every ${day}` : "");
 
-const mapSearchPayload = (
-  location,
-  vehicleType,
-  pickupDate,
-  pickupTime,
-  returnDate,
-  returnTime
-) => ({
-  location,
-  vehicleType,
-  pickupDate,
-  pickupTime,
-  returnDate,
-  returnTime,
+const getDefaultSearchDates = () => {
+  const minPickupDateTime = getMinPickupDateTime();
+  const pickupDate = formatDateInput(minPickupDateTime);
+  const pickupTime = formatTimeInput(minPickupDateTime);
+
+  const nextDay = new Date(`${pickupDate}T00:00:00`);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const returnDate = formatDateInput(nextDay);
+
+  return {
+    pickupDate,
+    pickupTime,
+    returnDate,
+    returnTime: pickupTime,
+  };
+};
+
+const normalizeVehicleType = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "motor") return "motorcycle";
+  return normalized;
+};
+
+const mapSearchPayload = (location, vehicleType) => ({
+  location: String(location || "").trim(),
+  vehicleType: normalizeVehicleType(vehicleType),
+  ...getDefaultSearchDates(),
 });
 
 export default function RentifyPro({
@@ -194,35 +200,22 @@ export default function RentifyPro({
   onViewDetails,
   onNavigateToBookingHistory,
   onNavigateToAccountSettings,
+  onNavigateToPrivacyPolicy,
+  onNavigateToTermsAndConditions,
+  onOpenNotificationsModal,
   isLoggedIn,
   user,
   onLogout,
 }) {
+  const [featuredVehicles, setFeaturedVehicles] = useState([]);
+  const [featuredLoading, setFeaturedLoading] = useState(false);
+  const [featuredError, setFeaturedError] = useState("");
   const [location, setLocation] = useState("");
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
   const [vehicleType, setVehicleType] = useState("");
   const [showAI, setShowAI] = useState(false);
+  const [previewVehicle, setPreviewVehicle] = useState(null);
   const [validationModalMessage, setValidationModalMessage] = useState("");
-  const [pickupDate, setPickupDate] = useState(() => getTodayDate());
-  const [pickupTime, setPickupTime] = useState(() => getCurrentTime());
-  const [returnDate, setReturnDate] = useState(() => getTomorrowDate());
-  const [returnTime, setReturnTime] = useState(() => getCurrentTime());
-
-  useEffect(() => {
-    if (returnDate <= pickupDate) {
-      const nextDay = new Date(`${pickupDate}T00:00:00`);
-      nextDay.setDate(nextDay.getDate() + 1);
-      setReturnDate(formatDateInput(nextDay));
-    }
-  }, [pickupDate, returnDate]);
-
-  useEffect(() => {
-    const today = getTodayDate();
-    const now = getCurrentTime();
-    if (pickupDate === today && pickupTime < now) {
-      setPickupTime(now);
-    }
-  }, [pickupDate, pickupTime]);
 
   const filteredLocations = useMemo(
     () =>
@@ -232,29 +225,83 @@ export default function RentifyPro({
     [location]
   );
 
-  const isValidDateTime = () => {
-    const now = new Date();
-    now.setSeconds(0, 0);
-
-    const pickup = getDateTime(pickupDate, pickupTime);
-    const dropoff = getDateTime(returnDate, returnTime);
-
-    if (!pickup || !dropoff) return false;
-    if (pickup < now) return false;
-    if (dropoff <= pickup) return false;
-    return true;
+  const handleSearch = (typeOverride = vehicleType) => {
+    const normalizedLocation = location.trim();
+    const normalizedType = String(typeOverride || "").trim();
+    if (!normalizedLocation && !normalizedType) {
+      setValidationModalMessage("Please enter a location or choose a vehicle type to search.");
+      return;
+    }
+    onSearch(mapSearchPayload(location, typeOverride));
   };
 
-  const handleSearch = (typeOverride = vehicleType) => {
-    if (!isValidDateTime()) {
-      setValidationModalMessage("Pickup must be in the future and return must be after pickup.");
+  useEffect(() => {
+    let active = true;
+    const loadFeatured = async () => {
+      setFeaturedLoading(true);
+      setFeaturedError("");
+      try {
+        const response = await API.getPublicVehicles({ page: 1, limit: 24 });
+        if (!active) return;
+        const normalized = (response.vehicles || []).map(normalizeFeaturedVehicle);
+        setFeaturedVehicles(pickRandom(normalized, 3));
+      } catch (err) {
+        if (!active) return;
+        setFeaturedError(err.message || "Failed to load featured vehicles.");
+      } finally {
+        if (active) setFeaturedLoading(false);
+      }
+    };
+
+    loadFeatured();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const openVehiclePreview = (vehicle) => {
+    setPreviewVehicle(vehicle);
+  };
+
+  const closeVehiclePreview = () => {
+    setPreviewVehicle(null);
+  };
+
+  const handleFeaturedBookNow = (vehicle) => {
+    if (!vehicle) return;
+    if (!isLoggedIn) {
+      onNavigateToSignIn?.();
+      return;
+    }
+    onViewDetails(vehicle);
+  };
+
+  const handleChatOwner = (vehicle) => {
+    if (!vehicle) return;
+
+    const ownerId = String(vehicle.owner?._id || "");
+    const viewerId = String(user?._id || "");
+    const vehicleId = String(vehicle._id || vehicle.id || "");
+
+    if (!ownerId || ownerId === viewerId) return;
+    if (!isLoggedIn) {
+      onNavigateToSignIn?.();
       return;
     }
 
-    onSearch(
-      mapSearchPayload(location, typeOverride, pickupDate, pickupTime, returnDate, returnTime)
-    );
+    onNavigateToChat?.({
+      partnerId: ownerId,
+      partnerName: vehicle.owner?.name || "Vehicle Owner",
+      partnerEmail: vehicle.owner?.email || "",
+      partnerAvatar: vehicle.owner?.avatar || "",
+      ...(vehicleId ? { vehicleId } : {}),
+    });
   };
+
+  const previewOwnerId = String(previewVehicle?.owner?._id || "");
+  const disablePreviewChat = Boolean(previewVehicle) && (
+    !previewOwnerId || previewOwnerId === String(user?._id || "")
+  );
 
   return (
     <div id="home" className="min-h-screen">
@@ -270,6 +317,7 @@ export default function RentifyPro({
         onNavigateToContacts={onNavigateToContacts}
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
+        onOpenNotificationsModal={onOpenNotificationsModal}
         onNavigateToSignIn={onNavigateToSignIn}
         onNavigateToRegister={onNavigateToRegister}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
@@ -315,7 +363,7 @@ export default function RentifyPro({
 
       <section className="max-w-6xl mx-auto px-4 sm:px-6 -mt-16 sm:-mt-20 relative z-20">
         <div className="rp-surface p-5 sm:p-7">
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="sm:col-span-2 relative">
               <label className="text-xs font-semibold text-slate-500">Location</label>
               <div className="relative mt-1.5">
@@ -365,49 +413,12 @@ export default function RentifyPro({
                 value={vehicleType}
                 onChange={(event) => setVehicleType(event.target.value)}
               >
-                <option value="">Select type</option>
+                <option value="">All Vehicles</option>
                 <option value="car">Car</option>
-                <option value="motor">Motorcycle</option>
+                <option value="motorcycle">Motorcycle</option>
                 <option value="van">Van</option>
                 <option value="truck">Truck</option>
               </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Pick-up Date</label>
-              <input
-                type="date"
-                min={getTodayDate()}
-                value={pickupDate}
-                onChange={(event) => setPickupDate(event.target.value)}
-                className="rp-input mt-1.5"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Pick-up Time</label>
-              <input
-                type="time"
-                value={pickupTime}
-                min={pickupDate === getTodayDate() ? getCurrentTime() : undefined}
-                onChange={(event) => setPickupTime(event.target.value)}
-                className="rp-input mt-1.5"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Return Date</label>
-              <input
-                  type="date"
-                  value={returnDate}
-                  min={(() => {
-                    const date = new Date(`${pickupDate}T00:00:00`);
-                    date.setDate(date.getDate() + 1);
-                    return formatDateInput(date);
-                  })()}
-                  onChange={(event) => setReturnDate(event.target.value)}
-                  className="rp-input mt-1.5"
-                />
             </div>
           </div>
 
@@ -440,11 +451,11 @@ export default function RentifyPro({
               onClick={() => handleSearch(category.vehicleType)}
               className="rp-surface rp-hover-lift overflow-hidden text-left"
             >
-              <div className="h-52 bg-slate-100">
+              <div className="rp-image-frame">
                 <img
                   src={category.image}
                   alt={category.title}
-                  className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
+                  className="rp-image-fit"
                 />
               </div>
               <div className="p-5">
@@ -460,7 +471,6 @@ export default function RentifyPro({
                   ))}
                 </div>
                 <p className="text-sm text-slate-600 mt-3">{category.description}</p>
-                <p className="text-[#0B75E7] font-bold mt-4">Starting from {category.price}</p>
               </div>
             </button>
           ))}
@@ -473,68 +483,103 @@ export default function RentifyPro({
             <span className="text-[#0B75E7]">Featured</span> Vehicles
           </h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {featuredVehicles.map((vehicle) => (
-              <article key={vehicle.id} className="rp-surface rp-hover-lift overflow-hidden">
-                <div className="relative h-52 bg-slate-100">
-                  <img src={vehicle.image} alt={vehicle.name} className="w-full h-full object-contain p-4" />
-                  {vehicle.available && (
-                    <span className="absolute top-3 left-3 rp-chip bg-emerald-100 text-emerald-700">
-                      Available
-                    </span>
-                  )}
-                  <span className="absolute top-3 right-3 rp-chip bg-slate-900 text-white">
-                    {vehicle.rating}
-                  </span>
-                </div>
+          {featuredLoading && (
+            <div className="rp-surface p-6 text-sm text-slate-600">Loading featured vehicles...</div>
+          )}
+          {featuredError && (
+            <div className="rp-surface p-6 text-sm text-rose-600">{featuredError}</div>
+          )}
+          {!featuredLoading && !featuredError && featuredVehicles.length === 0 && (
+            <div className="rp-surface p-6 text-sm text-slate-600">No featured vehicles yet.</div>
+          )}
 
-                <div className="p-5">
-                  <h3 className="text-xl font-bold">{vehicle.name}</h3>
-                  <p className="text-sm text-slate-500">{vehicle.category}</p>
-
-                  <div className="flex items-center gap-1 mt-2 text-sm text-slate-600">
-                    <MapPin size={14} className="text-[#0B75E7]" />
-                    {vehicle.location}
-                  </div>
-
-                  <div className="mt-2">
-                    <span className="rp-chip bg-slate-100 text-slate-600">
-                      {formatCoding(vehicle.codingDay)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-4 mt-4 text-sm text-slate-600">
-                    <span className="flex items-center gap-1">
-                      <Users size={14} className="text-[#0B75E7]" />
-                      {vehicle.seats} seats
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Settings size={14} className="text-[#0B75E7]" />
-                      {vehicle.transmission}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Fuel size={14} className="text-[#0B75E7]" />
-                      {vehicle.fuel}
-                    </span>
-                  </div>
-
-                  <p className="text-[#0B75E7] text-2xl font-bold mt-4">
-                    P{vehicle.price.toLocaleString()}
-                    <span className="text-sm text-slate-500 font-medium"> / day</span>
-                  </p>
-
-                  <div className="mt-4">
-                    <button
-                      onClick={() => (isLoggedIn ? onViewDetails(vehicle) : onNavigateToSignIn())}
-                      className="rp-btn-primary py-2 text-sm w-full"
+          {!featuredLoading && !featuredError && featuredVehicles.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {featuredVehicles.map((vehicle) => (
+                <article
+                  key={vehicle.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openVehiclePreview(vehicle)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openVehiclePreview(vehicle);
+                    }
+                  }}
+                  aria-label={`Preview ${vehicle.name}`}
+                  className="rp-surface rp-hover-lift overflow-hidden flex flex-col cursor-pointer"
+                >
+                  <div className="px-4 pt-4">
+                    <VehicleCover
+                      vehicle={vehicle}
+                      alt={vehicle.name}
+                      contentClassName="p-4 sm:p-5"
                     >
-                      Book Now
-                    </button>
+                      {vehicle.available && (
+                        <span className="absolute top-3 left-3 z-10 rp-chip bg-emerald-100 text-emerald-700">
+                          Available
+                        </span>
+                      )}
+                      <span className="absolute top-3 right-3 z-10 rp-chip bg-slate-900 text-white">
+                        {vehicle.rating}
+                      </span>
+                    </VehicleCover>
                   </div>
-                </div>
-              </article>
-            ))}
-          </div>
+
+                  <div className="p-5 flex flex-col gap-2 flex-1">
+                    <h3 className="text-xl font-bold">{vehicle.name}</h3>
+                    <p className="text-sm text-slate-500">{vehicle.category}</p>
+
+                    <div className="flex items-center gap-1 mt-1 text-sm text-slate-600">
+                      <MapPin size={14} className="text-[#0B75E7]" />
+                      {vehicle.location}
+                    </div>
+
+                    {formatCoding(vehicle.codingDay) && (
+                      <div className="mt-1">
+                        <span className="rp-chip bg-slate-100 text-slate-600">
+                          {formatCoding(vehicle.codingDay)}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-4 mt-2 text-sm text-slate-600">
+                      <span className="flex items-center gap-1">
+                        <Users size={14} className="text-[#0B75E7]" />
+                        {vehicle.seats} seats
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Settings size={14} className="text-[#0B75E7]" />
+                        {vehicle.transmission}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Fuel size={14} className="text-[#0B75E7]" />
+                        {vehicle.fuel}
+                      </span>
+                    </div>
+
+                    <p className="text-[#0B75E7] text-2xl font-bold mt-2">
+                      P{vehicle.price.toLocaleString()}
+                      <span className="text-sm text-slate-500 font-medium"> / hour</span>
+                    </p>
+
+                    <div className="pt-3 mt-auto">
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleFeaturedBookNow(vehicle);
+                        }}
+                        className="rp-btn-primary py-2 text-sm w-full"
+                      >
+                        Book Now
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -654,14 +699,34 @@ export default function RentifyPro({
           <div className="border-t border-blue-400/50 mt-10 pt-5 flex flex-col sm:flex-row items-center justify-between text-blue-100 text-sm gap-2">
             <p>Copyright 2026 RentifyPro. All rights reserved.</p>
             <div className="flex gap-5">
-              <button>Privacy Policy</button>
-              <button>Terms and Conditions</button>
+              <button onClick={onNavigateToPrivacyPolicy}>Privacy Policy</button>
+              <button onClick={onNavigateToTermsAndConditions}>Terms and Conditions</button>
             </div>
           </div>
         </div>
       </footer>
 
-      <ChatWidget isOpen={showAI} onClose={() => setShowAI(false)} />
+      <ChatWidget
+        isOpen={showAI}
+        onClose={() => setShowAI(false)}
+        onViewAvailableVehicles={onNavigateToVehicles}
+      />
+      <VehiclePreviewModal
+        isOpen={Boolean(previewVehicle)}
+        vehicle={previewVehicle}
+        onClose={closeVehiclePreview}
+        onBookNow={() => {
+          if (!previewVehicle) return;
+          closeVehiclePreview();
+          handleFeaturedBookNow(previewVehicle);
+        }}
+        onChatOwner={() => {
+          if (!previewVehicle) return;
+          closeVehiclePreview();
+          handleChatOwner(previewVehicle);
+        }}
+        disableChat={disablePreviewChat}
+      />
       <InfoModal
         isOpen={Boolean(validationModalMessage)}
         title="RentifyPro says"

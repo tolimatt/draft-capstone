@@ -1,9 +1,14 @@
- import React, { useState, useEffect } from "react";
- import { Bot, Bell, MessageCircle, Settings, Car, Camera, ShieldCheck} from "lucide-react";
- import API from "../utils/api";
- 
- const PROFILE_PHOTO_KEY = "profilePhoto";
- const PROFILE_PHOTO_USER_KEY = "profilePhotoUserId";
+import React, { useState, useEffect } from "react";
+import { Bot, Bell, MessageCircle, Settings, Car, Camera, ShieldCheck } from "lucide-react";
+import API from "../utils/api";
+import { getStoredUser, persistUserProfile } from "../utils/userProfile";
+import {
+  getMinPickupDate,
+  getMinPickupTime,
+  getMinReturnDate,
+  getMinReturnTime,
+  getTomorrowDate,
+} from "../utils/dateUtils";
  
    const BookingCheckout = ({
     vehicle,
@@ -30,21 +35,6 @@
    const [agreedToTerms, setAgreedToTerms] = useState(false);
    const [showFormError, setShowFormError] = useState(false);
 
-   const getTodayDate = () => {
-  return new Date().toLocaleDateString("en-CA");
-};
-
-const getCurrentTime = () => {
-  return new Date().toTimeString().slice(0, 5);
-};
-
-const getTomorrowDate = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toLocaleDateString("en-CA");
-};
-
-
    const {
   pickupDate,
   pickupTime,
@@ -57,19 +47,19 @@ const getTomorrowDate = () => {
 useEffect(() => {
   if (!pickupDate || !pickupTime) return;
 
-  // Only check the time if pickup is today
-  if (pickupDate !== getTodayDate()) return;
+  const minPickupDate = getMinPickupDate();
+  const minPickupTime = getMinPickupTime();
 
-  const now = new Date();
-  now.setSeconds(0, 0);
+  // Only check the time if pickup is at the minimum allowed date
+  if (pickupDate !== minPickupDate) return;
 
   const selectedPickup = new Date(`${pickupDate}T${pickupTime}`);
 
-  // Reset past pickup times
-  if (selectedPickup < now) {
+  // Reset pickup times earlier than the minimum allowed time
+  if (selectedPickup < new Date(`${minPickupDate}T${minPickupTime}`)) {
     setBookingData((prev) => ({
       ...prev,
-      pickupTime: getCurrentTime(), // Reset to the current time
+      pickupTime: minPickupTime,
     }));
   }
 }, [pickupDate, pickupTime, setBookingData]);
@@ -82,12 +72,19 @@ useEffect(() => {
     returnTime
   ) return;
 
+  const initialPickupDate = getMinPickupDate();
+  const initialPickupTime = getMinPickupTime();
+  const initialReturnDate =
+    getMinReturnDate(initialPickupDate, initialPickupTime) || getTomorrowDate();
+  const initialReturnTime =
+    getMinReturnTime(initialPickupDate, initialPickupTime) || initialPickupTime;
+
   setBookingData((prev) => ({
     ...prev,
-    pickupDate: getTodayDate(),
-    pickupTime: getCurrentTime(),
-    returnDate: getTomorrowDate(),
-    returnTime: getCurrentTime(),
+    pickupDate: initialPickupDate,
+    pickupTime: initialPickupTime,
+    returnDate: initialReturnDate,
+    returnTime: initialReturnTime,
   }));
 }, []);
 
@@ -124,28 +121,23 @@ const dailyRate = vehicle.price;
 useEffect(() => {
   if (!isLoggedIn) return;
   if (driveType !== "with-driver") return;
-  if (!user?.email) return;
-
-  const users = JSON.parse(localStorage.getItem("users")) || [];
-  const currentUser = users.find((u) => u.email === user.email);
-
-  if (!currentUser?.profile) return;
+  if (!user) return;
 
   setEmergencyContact({
-    name: currentUser.profile.emergencyName || "",
-    phone: currentUser.profile.emergencyPhone || "",
-    relationship: currentUser.profile.emergencyRelation || "",
+    name: user.emergencyContactName || "",
+    phone: user.emergencyContactPhone || "",
+    relationship: user.emergencyContactRelationship || "",
   });
 }, [driveType, isLoggedIn, user]);
 
-// Insurance price per day
+// Insurance price per hour
 const INSURANCE_PRICES = {
   basic: 0,
   standard: 500,
   premium: 1000,
 };
 
-// Selected insurance price per day
+// Selected insurance price per hour
 const insurancePerDay = INSURANCE_PRICES[insuranceType] || 0;
 
 // Totals
@@ -203,59 +195,33 @@ const handleBack = () => {
          sender: "ai",
          text: "Hi! 👋 This is RentifyPro AI. How can I assist you today?"
        }
-     ]);
-   }, [showAI]);
- 
-    const [profilePhoto, setProfilePhoto] = useState(() => {
-      const storedUserRaw = localStorage.getItem("user");
-      const photo = String(localStorage.getItem(PROFILE_PHOTO_KEY) || "").trim();
-      if (!photo || !storedUserRaw) return photo || null;
+      ]);
+    }, [showAI]);
 
-      try {
-        const storedUser = JSON.parse(storedUserRaw);
-        const owner = String(localStorage.getItem(PROFILE_PHOTO_USER_KEY) || "").trim();
-        if (!owner) return photo;
+    const [profilePhoto, setProfilePhoto] = useState(
+      String(user?.avatar || getStoredUser()?.avatar || "").trim() || null
+    );
 
-        const userId = String(storedUser?._id || "").trim();
-        const email = String(storedUser?.email || "").trim().toLowerCase();
-        if (owner === userId) return photo;
-        if (email && owner.toLowerCase() === email) return photo;
-      } catch {
-        return null;
-      }
-      return null;
-    });
+    useEffect(() => {
+      const nextAvatar = String(user?.avatar || "").trim() || null;
+      setProfilePhoto(nextAvatar);
+    }, [user?.avatar, user?._id]);
 
     const syncAvatarToProfile = async (avatarValue = "") => {
-      const token = localStorage.getItem("token");
-      const storedUserRaw = localStorage.getItem("user");
-      if (!token || !storedUserRaw) return;
-
-      let storedUser = null;
-      try {
-        storedUser = JSON.parse(storedUserRaw);
-      } catch {
-        return;
-      }
-      if (!storedUser || typeof storedUser !== "object") return;
+      const currentUser = getStoredUser();
+      if (!currentUser || typeof currentUser !== "object") return;
 
       const normalizedAvatar = String(avatarValue || "").trim();
-      const localMergedUser = { ...storedUser, avatar: normalizedAvatar };
-      localStorage.setItem("user", JSON.stringify(localMergedUser));
-      if (normalizedAvatar) {
-        const ownerKey =
-          String(localMergedUser._id || "").trim() ||
-          String(localMergedUser.email || "").trim().toLowerCase();
-        if (ownerKey) localStorage.setItem(PROFILE_PHOTO_USER_KEY, ownerKey);
-      } else {
-        localStorage.removeItem(PROFILE_PHOTO_USER_KEY);
-      }
+      persistUserProfile({
+        ...currentUser,
+        avatar: normalizedAvatar,
+      });
       window.dispatchEvent(new Event("user-profile-updated"));
 
       try {
         const response = await API.updateProfile({ avatar: normalizedAvatar });
         if (response?.user && typeof response.user === "object") {
-          localStorage.setItem("user", JSON.stringify({ ...localMergedUser, ...response.user }));
+          persistUserProfile(response.user);
           window.dispatchEvent(new Event("user-profile-updated"));
         }
       } catch {
@@ -271,11 +237,6 @@ const handleBack = () => {
       reader.onloadend = async () => {
         const nextAvatar = String(reader.result || "");
         setProfilePhoto(nextAvatar || null);
-        localStorage.setItem(PROFILE_PHOTO_KEY, nextAvatar);
-        const ownerKey =
-          String(user?._id || "").trim() ||
-          String(user?.email || "").trim().toLowerCase();
-        if (ownerKey) localStorage.setItem(PROFILE_PHOTO_USER_KEY, ownerKey);
         await syncAvatarToProfile(nextAvatar);
       };
       reader.readAsDataURL(file);
@@ -283,8 +244,6 @@ const handleBack = () => {
     
     const handleRemovePhoto = async () => {
       setProfilePhoto(null);
-      localStorage.removeItem(PROFILE_PHOTO_KEY);
-      localStorage.removeItem(PROFILE_PHOTO_USER_KEY);
       await syncAvatarToProfile("");
     };
  
@@ -475,7 +434,7 @@ const handleBack = () => {
                 <input
                       type="date"
                       value={pickupDate}
-                      min={getTodayDate()}
+                      min={getMinPickupDate()}
                       onChange={(e) =>
                           setBookingData({ ...bookingData, pickupDate: e.target.value })
                       }
@@ -485,7 +444,7 @@ const handleBack = () => {
                       <input
                       type="time"
                       value={pickupTime}
-                      min={pickupDate === getTodayDate() ? getCurrentTime() : undefined}
+                      min={pickupDate === getMinPickupDate() ? getMinPickupTime() : undefined}
                       onChange={(e) =>
                           setBookingData({ ...bookingData, pickupTime: e.target.value })
                       }
@@ -498,7 +457,7 @@ const handleBack = () => {
                 <input
                   type="date"
                   value={returnDate}
-                  min={pickupDate || getTodayDate()}
+                  min={getMinReturnDate(pickupDate, pickupTime) || getMinPickupDate()}
                   onChange={(e) =>
                     setBookingData({ ...bookingData, returnDate: e.target.value })
                   }
@@ -508,6 +467,11 @@ const handleBack = () => {
                 <input
                   type="time"
                   value={returnTime}
+                  min={
+                    returnDate === getMinReturnDate(pickupDate, pickupTime)
+                      ? getMinReturnTime(pickupDate, pickupTime)
+                      : undefined
+                  }
                   onChange={(e) =>
                     setBookingData({ ...bookingData, returnTime: e.target.value })
                   }
@@ -561,7 +525,7 @@ const handleBack = () => {
       </div>
 
       <span className="font-semibold text-[#017FE6]">
-        ₱{INSURANCE_PRICES.standard} / day
+        ₱{INSURANCE_PRICES.standard} / hour
       </span>
     </label>
 
@@ -582,7 +546,7 @@ const handleBack = () => {
       </div>
 
       <span className="font-semibold text-[#017FE6]">
-        ₱{INSURANCE_PRICES.premium} / day
+        ₱{INSURANCE_PRICES.premium} / hour
       </span>
     </label>
 
@@ -834,30 +798,8 @@ const handleBack = () => {
           <img
             src={vehicle.image}
             alt={vehicle.name}
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-            className="w-25 h-25 object-cover object-center rounded-xl bg-gray-50 p-2"
-=======
             className="object-contain object-center rounded-xl bg-gray-50 p-2"
             style={{ width: "6.25rem", height: "6.25rem" }}
->>>>>>> theirs
-=======
-            className="w-25 h-25 object-contain object-center rounded-xl bg-gray-50 p-2"
->>>>>>> theirs
-=======
-            className="object-contain object-center rounded-xl bg-gray-50 p-2"
-            style={{ width: "6.25rem", height: "6.25rem" }}
->>>>>>> theirs
-=======
-            className="w-25 h-25 object-contain object-center rounded-xl bg-gray-50 p-2"
->>>>>>> theirs
-=======
-            className="object-contain object-center rounded-xl bg-gray-50 p-2"
-            style={{ width: "6.25rem", height: "6.25rem" }}
->>>>>>> theirs
           />
         </div>
 
@@ -872,7 +814,7 @@ const handleBack = () => {
 
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
-            <span>Daily Rate</span>
+            <span>Hourly Rate</span>
             <span>₱{dailyRate.toLocaleString()}</span>
           </div>
 
@@ -1037,3 +979,4 @@ const handleBack = () => {
 };
 
 export default BookingCheckout;
+

@@ -2,106 +2,178 @@
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import hpp from "hpp";
 import helmet from "helmet";
+import jwt from "jsonwebtoken";
 
 const isProduction = process.env.NODE_ENV === "production";
 const rateLimitingEnabled =
   isProduction || String(process.env.ENABLE_RATE_LIMIT || "").trim().toLowerCase() === "true";
 const keyByUserOrIp = (req) => (req.user?._id ? `user:${req.user._id}` : `ip:${ipKeyGenerator(req.ip)}`);
+const keyByEmailOrIp = (req) => {
+  const email =
+    String(req.body?.email || "").trim().toLowerCase() ||
+    String(req.query?.email || "").trim().toLowerCase();
+  if (email) return `email:${email}`;
+  return `ip:${ipKeyGenerator(req.ip)}`;
+};
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+
+const hasValidSessionToken = (req) => {
+  const token = String(req.cookies?.token || "").trim();
+  if (!token) return false;
+  try {
+    jwt.verify(token, process.env.JWT_SECRET);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const skipForSignedIn = (req) => hasValidSessionToken(req);
+
+const skipForAuthLimiter = async (req) => {
+  const path = String(req.path || "").trim().toLowerCase();
+  if (path === "/login-challenge") return true;
+  return skipForSignedIn(req);
+};
+
+const formatCountdown = (seconds) => {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
+
+const getRetryAfterSeconds = (resetTime, fallbackWindowMs = RATE_LIMIT_WINDOW_MS) => {
+  if (resetTime) {
+    const resetMs = new Date(resetTime).getTime();
+    if (Number.isFinite(resetMs)) {
+      const remaining = Math.ceil((resetMs - Date.now()) / 1000);
+      if (remaining > 0) return remaining;
+    }
+  }
+  return Math.max(1, Math.ceil(fallbackWindowMs / 1000));
+};
+
+const buildRateLimitHandler = (messagePrefix) => (req, res, _next, options) => {
+  const windowMs = Number(options?.windowMs) > 0 ? Number(options.windowMs) : RATE_LIMIT_WINDOW_MS;
+  const retryAfterSeconds = getRetryAfterSeconds(req.rateLimit?.resetTime, windowMs);
+  const retryAfterMs = retryAfterSeconds * 1000;
+  const retryAfterAt = new Date(Date.now() + retryAfterMs).toISOString();
+  const countdown = formatCountdown(retryAfterSeconds);
+
+  res.setHeader("Retry-After", String(retryAfterSeconds));
+  return res.status(429).json({
+    success: false,
+    message: `${messagePrefix} Try again in ${countdown}.`,
+    retryAfterSeconds,
+    retryAfterMs,
+    retryAfterAt,
+    countdown,
+    serverTime: new Date().toISOString(),
+  });
+};
+
+const createLimiter = ({
+  max,
+  messagePrefix,
+  skipSuccessfulRequests = false,
+  keyGenerator,
+  skipCondition,
+} = {}) =>
+  rateLimit({
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests,
+    keyGenerator,
+    skip: async (req, res) => {
+      if (!rateLimitingEnabled) return true;
+      if (typeof skipCondition !== "function") return false;
+      try {
+        return Boolean(await skipCondition(req, res));
+      } catch {
+        return false;
+      }
+    },
+    handler: buildRateLimitHandler(messagePrefix),
+  });
 
 // General API limit
-export const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const generalLimiter = createLimiter({
   max: 100,
-  message: { success: false, message: "Too many requests. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => !rateLimitingEnabled,
+  messagePrefix: "Too many requests.",
+  skipCondition: skipForSignedIn,
 });
 
 // Auth limit
-export const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const authLimiter = createLimiter({
   max: 10,
-  message: { success: false, message: "Too many attempts. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
+  messagePrefix: "Too many attempts.",
   skipSuccessfulRequests: true,
-  skip: () => !rateLimitingEnabled,
+  keyGenerator: keyByEmailOrIp,
+  skipCondition: skipForAuthLimiter,
+});
+
+// Login challenge limit
+export const loginChallengeLimiter = createLimiter({
+  max: 30,
+  messagePrefix: "Too many security check requests.",
 });
 
 // Stricter login limit
-export const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  message: { success: false, message: "Too many login attempts. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
+export const loginLimiter = createLimiter({
+  max: 3,
+  messagePrefix: "Too many login attempts.",
   skipSuccessfulRequests: true,
-  skip: () => !rateLimitingEnabled,
+  keyGenerator: keyByEmailOrIp,
+  skipCondition: skipForSignedIn,
 });
 
 // Register limit
-export const registerLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const registerLimiter = createLimiter({
   max: 5,
-  message: { success: false, message: "Too many registration attempts. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
+  messagePrefix: "Too many registration attempts.",
   skipSuccessfulRequests: true,
-  skip: () => !rateLimitingEnabled,
+  keyGenerator: keyByEmailOrIp,
+  skipCondition: skipForSignedIn,
 });
 
 // OTP limit
-export const otpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const otpLimiter = createLimiter({
   max: 10,
-  message: { success: false, message: "Too many OTP attempts. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
+  messagePrefix: "Too many OTP attempts.",
   skipSuccessfulRequests: true,
-  skip: () => !rateLimitingEnabled,
+  keyGenerator: keyByEmailOrIp,
+  skipCondition: skipForSignedIn,
 });
 
 // Logged-in KYC limit
-export const kycLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const kycLimiter = createLimiter({
   max: 20,
-  message: { success: false, message: "Too many KYC attempts. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => !rateLimitingEnabled,
+  messagePrefix: "Too many KYC attempts.",
+  keyGenerator: keyByUserOrIp,
 });
 
 // Pre-registration KYC limit
-export const preKycLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const preKycLimiter = createLimiter({
   max: 15,
-  message: { success: false, message: "Too many verification attempts. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => !rateLimitingEnabled,
+  messagePrefix: "Too many verification attempts.",
+  skipCondition: skipForSignedIn,
 });
 
 // Booking create limit
-export const bookingCreateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const bookingCreateLimiter = createLimiter({
   max: 10,
-  message: { success: false, message: "Too many booking requests. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
+  messagePrefix: "Too many booking requests.",
   keyGenerator: keyByUserOrIp,
-  skip: () => !rateLimitingEnabled,
 });
 
 // Payment verify limit
-export const paymentVerifyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+export const paymentVerifyLimiter = createLimiter({
   max: 20,
-  message: { success: false, message: "Too many payment verification requests. Try again in 15 minutes." },
-  standardHeaders: true,
-  legacyHeaders: false,
+  messagePrefix: "Too many payment verification requests.",
   keyGenerator: keyByUserOrIp,
-  skip: () => !rateLimitingEnabled,
 });
 
 // Security headers

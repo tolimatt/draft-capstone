@@ -7,7 +7,9 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 12;
 const MAX_LIMIT = 24;
 const MAX_SEARCH_LENGTH = 100;
+const MAX_LOCATION_LENGTH = 180;
 const REVIEW_PREVIEW_LIMIT = 20;
+const ALLOWED_VEHICLE_TYPES = new Set(["car", "motorcycle", "van", "truck"]);
 const SEARCH_FIELDS = [
   "name",
   "description",
@@ -47,6 +49,54 @@ const buildVehicleSearchQuery = (search) => {
       };
     }),
   };
+};
+
+const normalizeVehicleType = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "motor") return "motorcycle";
+  return normalized;
+};
+
+const buildVehicleLocationQuery = (location) => {
+  const normalized = String(location || "").trim();
+  if (!normalized) return null;
+
+  const tokens = normalized
+    .split(/[,\s]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (!tokens.length) return null;
+
+  return {
+    $and: tokens.map((token) => ({
+      location: new RegExp(`\\b${escapeRegex(token)}\\b`, "i"),
+    })),
+  };
+};
+
+const buildVehicleTypeQuery = (vehicleType) => {
+  const normalizedType = normalizeVehicleType(vehicleType);
+  if (!normalizedType) return null;
+  if (!ALLOWED_VEHICLE_TYPES.has(normalizedType)) return null;
+  return { "specs.type": new RegExp(`^${escapeRegex(normalizedType)}$`, "i") };
+};
+
+const buildVehicleQuery = ({ search, location, vehicleType }) => {
+  const clauses = [];
+  const searchQuery = buildVehicleSearchQuery(search);
+  const locationQuery = buildVehicleLocationQuery(location);
+  const vehicleTypeQuery = buildVehicleTypeQuery(vehicleType);
+
+  if (Object.keys(searchQuery).length) clauses.push(searchQuery);
+  if (locationQuery) clauses.push(locationQuery);
+  if (vehicleTypeQuery) clauses.push(vehicleTypeQuery);
+
+  if (!clauses.length) return {};
+  if (clauses.length === 1) return clauses[0];
+  return { $and: clauses };
 };
 
 const getLockedVehicleIdSet = async (vehicleIds, now = new Date()) => {
@@ -171,10 +221,25 @@ const applyVehicleReviewInsights = (vehicle, reviewInsightsByVehicle) => {
 export const getVehicles = async (req, res, next) => {
   try {
     const search = String(req.query.search || "").trim();
+    const location = String(req.query.location || "").trim();
+    const vehicleType = normalizeVehicleType(req.query.vehicleType || "");
+
     if (search.length > MAX_SEARCH_LENGTH) {
       return res.status(400).json({
         success: false,
         message: `Search must be ${MAX_SEARCH_LENGTH} characters or fewer.`,
+      });
+    }
+    if (location.length > MAX_LOCATION_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        message: `Location must be ${MAX_LOCATION_LENGTH} characters or fewer.`,
+      });
+    }
+    if (vehicleType && !ALLOWED_VEHICLE_TYPES.has(vehicleType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Vehicle type filter is invalid.",
       });
     }
 
@@ -182,11 +247,15 @@ export const getVehicles = async (req, res, next) => {
     const limit = parsePositiveInt(req.query.limit, DEFAULT_LIMIT, MAX_LIMIT);
     const skip = (page - 1) * limit;
     const now = new Date();
-    const vehicleQuery = buildVehicleSearchQuery(search);
+    const vehicleQuery = buildVehicleQuery({
+      search,
+      location,
+      vehicleType,
+    });
 
     const total = await Vehicle.countDocuments(vehicleQuery);
     const vehicles = await Vehicle.find(vehicleQuery)
-      .populate("owner", "name email")
+      .populate("owner", "name email avatar")
       .sort({ availabilityStatus: 1, createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -219,6 +288,8 @@ export const getVehicles = async (req, res, next) => {
       },
       filters: {
         search,
+        location,
+        vehicleType,
       },
     });
   } catch (error) {
@@ -229,7 +300,7 @@ export const getVehicles = async (req, res, next) => {
 export const getVehicleById = async (req, res, next) => {
   try {
     const now = new Date();
-    const vehicle = await Vehicle.findById(req.params.id).populate("owner", "name email").lean();
+    const vehicle = await Vehicle.findById(req.params.id).populate("owner", "name email avatar").lean();
 
     if (!vehicle) {
       return res.status(404).json({

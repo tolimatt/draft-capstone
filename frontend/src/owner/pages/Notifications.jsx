@@ -13,14 +13,27 @@ const formatDateTime = (value) =>
       })
     : "-";
 
+const isNotificationRead = (notification) =>
+  Boolean(notification?.readAt);
+
+const DELETE_ALL_CONFIRMATION_MESSAGE =
+  "\u201cAre you sure you want to delete all read messages? This action can\u2019t be undone.\u201d";
+const ARCHIVE_CONFIRMATION_MESSAGE =
+  "\u201cThis action will store your notifications in the archive for 3 days. Click OK to continue.\u201d";
+
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
+  const [confirmationAction, setConfirmationAction] = useState(null);
 
   const unreadCount = useMemo(
-    () => notifications.filter((notification) => !notification.readAt).length,
+    () => notifications.filter((notification) => !isNotificationRead(notification)).length,
+    [notifications]
+  );
+  const readCount = useMemo(
+    () => notifications.filter((notification) => isNotificationRead(notification)).length,
     [notifications]
   );
 
@@ -81,7 +94,7 @@ export default function Notifications() {
       const now = new Date().toISOString();
       setNotifications((prev) =>
         prev.map((notification) =>
-          notification.readAt ? notification : { ...notification, readAt: now }
+          isNotificationRead(notification) ? notification : { ...notification, readAt: now }
         )
       );
       requestLiveCountersRefresh();
@@ -90,6 +103,48 @@ export default function Notifications() {
     } finally {
       setUpdating(false);
     }
+  };
+
+  const deleteAllRead = async () => {
+    setUpdating(true);
+    setError("");
+    try {
+      await API.deleteAllReadNotifications();
+      setNotifications((prev) => prev.filter((notification) => !isNotificationRead(notification)));
+      requestLiveCountersRefresh();
+    } catch (err) {
+      setError(err.message || "Failed to delete read notifications.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const archiveRead = async () => {
+    setUpdating(true);
+    setError("");
+    try {
+      await API.archiveReadNotifications();
+      setNotifications((prev) => prev.filter((notification) => !isNotificationRead(notification)));
+      requestLiveCountersRefresh();
+    } catch (err) {
+      setError(err.message || "Failed to archive read notifications.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const confirmAction = async () => {
+    const action = confirmationAction;
+    setConfirmationAction(null);
+    if (!action) return;
+    if (!readCount || updating) return;
+
+    if (action === "delete") {
+      await deleteAllRead();
+      return;
+    }
+
+    await archiveRead();
   };
 
   return (
@@ -101,13 +156,29 @@ export default function Notifications() {
             {unreadCount} unread notification{unreadCount === 1 ? "" : "s"}.
           </p>
         </div>
-        <button
-          onClick={markAllAsRead}
-          disabled={!unreadCount || updating}
-          className="px-4 py-2 rounded-lg bg-[#017FE6] text-white text-sm disabled:opacity-50"
-        >
-          Mark all as read
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setConfirmationAction("delete")}
+            disabled={!readCount || updating}
+            className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm disabled:opacity-50"
+          >
+            Delete All
+          </button>
+          <button
+            onClick={() => setConfirmationAction("archive")}
+            disabled={!readCount || updating}
+            className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm disabled:opacity-50"
+          >
+            Archive
+          </button>
+          <button
+            onClick={markAllAsRead}
+            disabled={!unreadCount || updating}
+            className="px-4 py-2 rounded-lg bg-[#017FE6] text-white text-sm disabled:opacity-50"
+          >
+            Mark all as read
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -121,7 +192,7 @@ export default function Notifications() {
 
       <div className="space-y-3">
         {notifications.map((notification) => {
-          const isUnread = !notification.readAt;
+          const isUnread = !isNotificationRead(notification);
 
           return (
             <article
@@ -161,6 +232,40 @@ export default function Notifications() {
           );
         })}
       </div>
+
+      {confirmationAction && (
+        <div
+          className="fixed inset-0 z-[60] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center p-4"
+          onClick={() => setConfirmationAction(null)}
+        >
+          <div
+            className="w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-[0_25px_80px_rgba(15,23,42,0.25)] p-5"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="text-lg font-bold text-slate-900 mb-2">Confirm Action</h2>
+            <p className="text-sm text-slate-700">
+              {confirmationAction === "delete"
+                ? DELETE_ALL_CONFIRMATION_MESSAGE
+                : ARCHIVE_CONFIRMATION_MESSAGE}
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setConfirmationAction(null)}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAction}
+                disabled={updating}
+                className="px-4 py-2 rounded-lg bg-[#017FE6] text-white text-sm disabled:opacity-50"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

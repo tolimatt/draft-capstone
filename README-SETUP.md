@@ -1,0 +1,232 @@
+# RentifyPro Setup Guide (Local Development)
+
+This guide covers full local setup for the RentifyPro website:
+- `frontend` (React + Vite)
+- `backend` (Node.js + Express)
+- `face-service` (FastAPI + DeepFace)
+- `chatbot-service` (FastAPI + Sentence Transformers)
+
+## 1. Prerequisites
+
+Install these first:
+- Node.js 20+ (LTS recommended)
+- npm (comes with Node.js)
+- Python 3.10 or 3.11
+- Git
+- MongoDB access:
+1. MongoDB Atlas cluster (recommended), or
+2. Local MongoDB server
+
+## 2. Open Project Root
+
+From PowerShell:
+
+```powershell
+cd c:\Users\charlie\RentifyPro
+```
+
+## 3. Install Node Dependencies
+
+```powershell
+cd backend
+npm install
+
+cd ..\frontend
+npm install
+
+cd ..
+```
+
+## 4. Create Python Environments and Install Dependencies
+
+### 4.1 Face Service
+
+```powershell
+cd face-service
+py -3.10 -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+deactivate
+cd ..
+```
+
+### 4.2 Chatbot Service
+
+```powershell
+cd chatbot-service
+py -3.10 -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+deactivate
+cd ..
+```
+
+If `py -3.10` is not available, use `python -m venv venv`.
+
+## 5. Create Environment Files
+
+### 5.1 Backend `.env`
+
+```powershell
+Copy-Item backend\.env.example backend\.env
+```
+
+Set at least the values below in `backend/.env`:
+
+```env
+PORT=5000
+NODE_ENV=development
+
+MONGO_URI=mongodb+srv://<username>:<password>@<cluster-url>/rentifypro?retryWrites=true&w=majority&appName=RentifyPro
+MONGO_URI_DIRECT=mongodb://<username>:<password>@<host1>:27017,<host2>:27017,<host3>:27017/rentifypro?ssl=true&replicaSet=<replicaSet>&authSource=admin&retryWrites=true&w=majority
+MONGO_DB_NAME=rentifypro
+
+JWT_SECRET=<strong-random-secret>
+PASSWORD_RESET_TOKEN_SECRET=<strong-random-secret>
+JWT_EXPIRE=7d
+PASSWORD_RESET_TOKEN_EXPIRE=15m
+
+FRONTEND_URL=http://localhost:5173
+FACE_SERVICE_URL=http://localhost:8000
+CHATBOT_URL=http://localhost:8001
+INTERNAL_API_KEY=<shared-internal-secret>
+FACE_SERVICE_AUTOSTART=true
+CHATBOT_SERVICE_AUTOSTART=true
+```
+
+Optional but needed for specific features:
+- SMTP for OTP email:
+  `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `EMAIL_FROM_NAME`
+  (or legacy `EMAIL_USER`, `EMAIL_PASS`)
+- `PAYMONGO_SECRET_KEY` (checkout/payment)
+- `GEMINI_API_KEY` (AI KYC/document checks)
+- `SEPOLIA_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `BOOKING_LEDGER_CONTRACT_ADDRESS` (blockchain recording)
+
+### 5.2 Frontend `.env`
+
+```powershell
+Copy-Item frontend\.env.example frontend\.env
+```
+
+Use:
+
+```env
+VITE_API_BASE_URL=http://localhost:5000
+VITE_SOCKET_URL=http://localhost:5000
+VITE_BOOKING_LEDGER_CONTRACT_ADDRESS=
+```
+
+### 5.3 Face Service `.env`
+
+```powershell
+Copy-Item face-service\.env.example face-service\.env
+```
+
+Make sure this matches backend values:
+
+```env
+MONGO_URI=<same mongo uri as backend>
+MONGO_URI_DIRECT=<same direct mongo uri as backend>
+MONGO_DB_NAME=rentifypro
+FRONTEND_URL=http://localhost:5173
+NODE_BACKEND_URL=http://localhost:5000
+INTERNAL_API_KEY=<same shared key as backend>
+FACE_SERVICE_PORT=8000
+```
+
+## 6. Run the Project
+
+You have two options.
+
+### Option A (Recommended): Backend auto-starts Python services
+
+Run only backend + frontend terminals after setup.
+
+Terminal 1:
+
+```powershell
+cd c:\Users\charlie\RentifyPro\backend
+npm run dev
+```
+
+Terminal 2:
+
+```powershell
+cd c:\Users\charlie\RentifyPro\frontend
+npm run dev
+```
+
+### Option B: Start all services manually
+
+Terminal 1 (backend):
+
+```powershell
+cd c:\Users\charlie\RentifyPro\backend
+npm run dev
+```
+
+Terminal 2 (face-service):
+
+```powershell
+cd c:\Users\charlie\RentifyPro\face-service
+.\venv\Scripts\Activate.ps1
+python main.py
+```
+
+Terminal 3 (chatbot-service):
+
+```powershell
+cd c:\Users\charlie\RentifyPro\chatbot-service
+.\venv\Scripts\Activate.ps1
+python -m uvicorn app:app --host 127.0.0.1 --port 8001 --reload
+```
+
+Terminal 4 (frontend):
+
+```powershell
+cd c:\Users\charlie\RentifyPro\frontend
+npm run dev
+```
+
+## 7. Verify Everything Is Running
+
+Expected URLs:
+- Frontend: `http://localhost:5173`
+- Backend health: `http://localhost:5000/api/health`
+- Face service: `http://localhost:8000/`
+- Chatbot health: `http://localhost:8001/health`
+
+Useful backend checks:
+
+```powershell
+cd c:\Users\charlie\RentifyPro\backend
+npm run db:check
+npm run services:check
+```
+
+## 8. Common Issues
+
+1. MongoDB auth/SRV errors
+- Recheck Atlas username/password and IP allowlist.
+- If SRV DNS fails, fill `MONGO_URI_DIRECT` too.
+
+2. `EADDRINUSE` on port `5000`, `5173`, `8000`, or `8001`
+- Another process is already using the port; stop it or change env ports.
+
+3. PowerShell blocks venv activation
+- Run once in PowerShell (Current User):
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+4. Face service startup is slow on first run
+- Initial DeepFace model download can take several minutes.
+
+5. Chatbot service fails to boot
+- Confirm `chatbot-service/venv` exists and dependencies installed.
+- Retry:
+```powershell
+cd c:\Users\charlie\RentifyPro\chatbot-service
+.\venv\Scripts\Activate.ps1
+python -m uvicorn app:app --host 127.0.0.1 --port 8001 --reload
+```

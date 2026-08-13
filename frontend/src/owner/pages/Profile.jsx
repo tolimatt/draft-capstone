@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   BadgeCheck,
   ShieldCheck,
   User,
   Building2,
   Wallet,
+  Pencil,
 } from "lucide-react";
 import API from "../../utils/api";
 import {
@@ -16,17 +17,31 @@ import {
 import { connectMetaMaskWallet, getEthereumProvider } from "../../blockchain/metamask";
 import { shortAddress } from "../../blockchain/config";
 
-const InputField = ({ label, value, onChange, disabled }) => (
+const normalizePhMobileInput = (value = "") => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (!digits.startsWith("9")) return "";
+  return digits.slice(0, 10);
+};
+
+const InputField = ({ label, value, onChange, disabled, prefixText = "" }) => (
   <div>
     <label className="text-xs text-gray-500">{label}</label>
-    <input
-      value={value}
-      onChange={onChange}
-      disabled={disabled}
-      className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm ${
-        disabled ? "bg-gray-100" : "bg-white"
-      }`}
-    />
+    <div className="relative">
+      {prefixText ? (
+        <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-gray-500">
+          {prefixText}
+        </span>
+      ) : null}
+      <input
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className={`relative z-0 w-full mt-1 border rounded-lg px-3 py-2 text-sm ${
+          disabled ? "bg-gray-100" : "bg-white"
+        } ${prefixText ? "pl-14" : ""}`}
+      />
+    </div>
   </div>
 );
 
@@ -77,6 +92,10 @@ export default function Profile() {
   const [statusError, setStatusError] = useState("");
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState("");
+  const [walletEditing, setWalletEditing] = useState(false);
+  const [walletSaving, setWalletSaving] = useState(false);
+  const [walletSnapshot, setWalletSnapshot] = useState("");
+  const walletInputRef = useRef(null);
 
   const [profile, setProfile] = useState(() => {
     const stored = getOwnerProfileFromStorage();
@@ -202,11 +221,45 @@ export default function Profile() {
       }));
 
       setStatusMessage(`Wallet connected: ${shortAddress(persisted.walletAddress || connection.address)}`);
+      setWalletEditing(false);
       window.dispatchEvent(new Event("owner-profile-updated"));
     } catch (error) {
       setWalletError(error?.message || "Failed to connect wallet.");
     } finally {
       setWalletLoading(false);
+    }
+  };
+
+  const saveWalletAddress = async () => {
+    setWalletError("");
+    setStatusError("");
+    setStatusMessage("");
+    setWalletSaving(true);
+
+    try {
+      const response = await API.updateProfile({ walletAddress: profile.walletAddress || "" });
+      const normalized = normalizeOwnerProfile(response?.user || {}, {
+        ...profile,
+        walletAddress: profile.walletAddress || "",
+      });
+      const persisted = persistOwnerProfile({
+        ...profile,
+        ...normalized,
+        walletAddress: normalized.walletAddress || profile.walletAddress || "",
+      });
+
+      setProfile((prev) => ({
+        ...prev,
+        ...persisted,
+        walletAddress: persisted.walletAddress || profile.walletAddress || "",
+      }));
+      setWalletEditing(false);
+      setStatusMessage("Wallet address updated.");
+      window.dispatchEvent(new Event("owner-profile-updated"));
+    } catch (error) {
+      setStatusError(error?.message || "Could not update wallet address.");
+    } finally {
+      setWalletSaving(false);
     }
   };
 
@@ -313,12 +366,48 @@ export default function Profile() {
           label="Phone"
           value={profile.phone}
           disabled={!editing}
-          onChange={(event) => setProfile((prev) => ({ ...prev, phone: event.target.value }))}
+          onChange={(event) =>
+            setProfile((prev) => ({ ...prev, phone: normalizePhMobileInput(event.target.value) }))
+          }
+          prefixText="+63"
         />
       </Section>
 
       <Section title="Blockchain Wallet" icon={Wallet}>
-        <InputField label="Wallet Address" value={profile.walletAddress || ""} disabled />
+        <div className="col-span-2">
+          <label className="text-xs text-gray-500">Wallet Address</label>
+          <div className="relative">
+            <input
+              ref={walletInputRef}
+              value={profile.walletAddress || ""}
+              onChange={(event) =>
+                setProfile((prev) => ({ ...prev, walletAddress: event.target.value }))
+              }
+              disabled={!editing && !walletEditing}
+              className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm pr-10 ${
+                !editing && !walletEditing ? "bg-gray-100" : "bg-white"
+              }`}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (!editing) {
+                  if (!walletEditing) {
+                    setWalletSnapshot(profile.walletAddress || "");
+                    setWalletEditing(true);
+                  }
+                  setTimeout(() => walletInputRef.current?.focus(), 0);
+                } else {
+                  walletInputRef.current?.focus();
+                }
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+              aria-label="Edit wallet address"
+            >
+              <Pencil size={16} />
+            </button>
+          </div>
+        </div>
         <div className="col-span-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -333,9 +422,31 @@ export default function Profile() {
             {walletLoading
               ? "Connecting..."
               : profile.walletAddress
-                ? `Reconnect (${shortAddress(profile.walletAddress)})`
+                ? "Reconnect to Wallet"
                 : "Connect MetaMask"}
           </button>
+          {walletEditing && !editing && (
+            <>
+              <button
+                type="button"
+                onClick={saveWalletAddress}
+                disabled={walletSaving}
+                className="px-3 py-2 rounded-lg text-sm border hover:bg-gray-100 disabled:opacity-60"
+              >
+                {walletSaving ? "Saving..." : "Save Wallet"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProfile((prev) => ({ ...prev, walletAddress: walletSnapshot }));
+                  setWalletEditing(false);
+                }}
+                className="px-3 py-2 rounded-lg text-sm border hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+            </>
+          )}
           {!getEthereumProvider() && (
             <p className="text-xs text-gray-500">MetaMask extension is required for Sepolia wallet linking.</p>
           )}

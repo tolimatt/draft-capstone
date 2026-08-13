@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentTime, getTodayDate, getTomorrowDate } from "./utils/dateUtils";
 
 // Main pages
@@ -9,6 +9,9 @@ import VehicleDetailsPage from "./pages/VehicleDetailsPage";
 import BookingsPage from "./pages/BookingsPage";
 import RealtimeChatPage from "./pages/RealtimeChatPage";
 import NotificationsPage from "./pages/NotificationsPage";
+import AboutPage from "./pages/AboutPage";
+import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
+import TermsAndConditionsPage from "./pages/TermsAndConditionsPage";
 import AccountSettings from "./pages/AccountSettings";
 import ProceedVehicleOwner from "./pages/ProceedVehicleOwner";
 import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
@@ -29,19 +32,41 @@ import OwnerLayout from "./owner/OwnerLayout";
 
 // Shared parts
 import LogoutModal from "./components/LogoutModal";
+import IdleWarningModal from "./components/IdleWarningModal";
+import RenterNotificationsModal from "./components/RenterNotificationsModal";
 import { disconnectSocket } from "./utils/socket";
 import API from "./utils/api";
+import {
+  SESSION_USER_UPDATED_EVENT,
+  clearSessionOwnerProfile,
+  clearSessionUser,
+  getSessionUser,
+  setSessionUser,
+} from "./utils/sessionStore";
 
 const ROUTE_TO_PAGE = {
   "/": "home",
   "/vehicles": "vehicles",
+  "/vehicle-details": "vehicle-details",
   "/about": "about",
+  "/privacy": "privacy-policy",
+  "/privacy-policy": "privacy-policy",
+  "/terms": "terms-and-conditions",
+  "/terms-and-conditions": "terms-and-conditions",
   "/bookings": "booking-history",
   "/signin": "signin",
   "/register": "register",
+  "/register-owner": "register-owner",
+  "/registerotp": "registerotp",
+  "/forgot-email": "forgot-email",
+  "/forgot-otp": "forgot-otp",
+  "/reset-password": "reset-password",
   "/chat": "realtime-chat",
   "/notifications": "notifications",
   "/account-settings": "account-settings",
+  "/vehicle-owner-proceed": "vehicle-owner-proceed",
+  "/vehicle-owner-verification": "vehicle-owner-verification",
+  "/owner-dashboard": "owner-dashboard",
   "/admin-account": "admin-account",
 };
 
@@ -51,8 +76,59 @@ const PAGE_TO_ROUTE = Object.entries(ROUTE_TO_PAGE).reduce((map, [route, page]) 
 }, {});
 
 const resolvePageFromPath = (pathname) => {
-  const normalized = String(pathname || "/").toLowerCase();
+  const raw = String(pathname || "/").toLowerCase();
+  const normalized = raw === "/" ? raw : raw.replace(/\/+$/, "");
   return ROUTE_TO_PAGE[normalized] || "home";
+};
+
+const getVehicleIdFromSearch = (search) => {
+  const params = new URLSearchParams(String(search || ""));
+  return String(params.get("vehicleId") || "").trim();
+};
+
+const getQueryParam = (search, key) => {
+  const params = new URLSearchParams(String(search || ""));
+  return String(params.get(key) || "").trim();
+};
+
+const buildRouteWithQuery = (path, query = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    const normalized = String(value || "").trim();
+    if (normalized) params.set(key, normalized);
+  });
+  const search = params.toString();
+  return search ? `${path}?${search}` : path;
+};
+
+const FLOW_STATE_STORAGE_KEY = "rentifypro:flow-state";
+
+const readFlowState = () => {
+  try {
+    const raw = sessionStorage.getItem(FLOW_STATE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeFlowState = (nextState = {}) => {
+  try {
+    const normalized = Object.entries(nextState).reduce((acc, [key, value]) => {
+      const text = String(value || "").trim();
+      if (text) acc[key] = text;
+      return acc;
+    }, {});
+    if (!Object.keys(normalized).length) {
+      sessionStorage.removeItem(FLOW_STATE_STORAGE_KEY);
+      return;
+    }
+    sessionStorage.setItem(FLOW_STATE_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Ignore storage errors.
+  }
 };
 
 const getInitialsFromName = (name) => {
@@ -64,21 +140,39 @@ const getInitialsFromName = (name) => {
   return `${first}${last}`.toUpperCase() || "U";
 };
 
-const PROFILE_PHOTO_KEY = "profilePhoto";
-const PROFILE_PHOTO_USER_KEY = "profilePhotoUserId";
-const getScopedProfilePhoto = (storedUser = {}) => {
-  const photo = String(localStorage.getItem(PROFILE_PHOTO_KEY) || "").trim();
-  if (!photo) return "";
+const normalizeChatNavigationContext = (context = null) => {
+  if (!context || typeof context !== "object") return null;
 
-  const owner = String(localStorage.getItem(PROFILE_PHOTO_USER_KEY) || "").trim();
-  if (!owner) return photo;
+  const partnerId = String(context.partnerId || context.userId || "").trim();
+  if (!partnerId) return null;
 
-  const userId = String(storedUser?._id || "").trim();
-  const email = String(storedUser?.email || "").trim().toLowerCase();
-  if (owner === userId) return photo;
-  if (email && owner.toLowerCase() === email) return photo;
-  return "";
+  const bookingId = String(context.bookingId || "").trim();
+  const vehicleId = String(context.vehicleId || "").trim();
+
+  return {
+    partnerId,
+    partnerName: String(context.partnerName || "").trim(),
+    partnerEmail: String(context.partnerEmail || "").trim(),
+    partnerAvatar: String(context.partnerAvatar || "").trim(),
+    ...(bookingId ? { bookingId } : {}),
+    ...(vehicleId ? { vehicleId } : {}),
+  };
 };
+
+const LEGACY_AUTH_KEYS = ["token"];
+const LEGACY_PROFILE_KEYS = ["user", "ownerProfile", "ownerProfilePhoto", "profilePhoto", "profilePhotoUserId"];
+const AUTH_PAGES = new Set([
+  "signin",
+  "register",
+  "register-owner",
+  "registerotp",
+  "forgot-email",
+  "forgot-otp",
+  "reset-password",
+]);
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const IDLE_WARNING_SECONDS = 60;
+const IDLE_ACTIVITY_EVENTS = ["keydown", "pointerdown", "touchstart", "mousemove", "scroll"];
 
 const hydrateStoredUser = (storedUser = {}) => {
   if (!storedUser || typeof storedUser !== "object") return null;
@@ -87,8 +181,7 @@ const hydrateStoredUser = (storedUser = {}) => {
     String(storedUser.name || "").trim() ||
     String(storedUser.email || "").split("@")[0] ||
     "User";
-  const profilePhoto = getScopedProfilePhoto(storedUser);
-  const avatar = String(storedUser.avatar || profilePhoto || "").trim();
+  const avatar = String(storedUser.avatar || "").trim();
 
   return {
     ...storedUser,
@@ -114,136 +207,212 @@ const App = () => {
   const [currentPage, setCurrentPage] = useState(() =>
     resolvePageFromPath(window.location.pathname)
   );
+  const initialFlowStateRef = useRef(readFlowState());
+  const initialFlowState = initialFlowStateRef.current;
   const [bookingData, setBookingData] = useState(getDefaultBookingData());
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [pendingScrollTarget, setPendingScrollTarget] = useState("");
+  const [chatNavigationContext, setChatNavigationContext] = useState(null);
 
-  const [registeredEmail, setRegisteredEmail] = useState("");
-  const [registeredPhone, setRegisteredPhone] = useState("");
-  const [registeredName, setRegisteredName] = useState("");
-  const [registerRole, setRegisterRole] = useState("user");
+  const [registeredEmail, setRegisteredEmail] = useState(() =>
+    String(initialFlowState.registeredEmail || "").trim()
+  );
+  const [registeredPhone, setRegisteredPhone] = useState(() =>
+    String(initialFlowState.registeredPhone || "").trim()
+  );
+  const [registeredName, setRegisteredName] = useState(() =>
+    String(initialFlowState.registeredName || "").trim()
+  );
+  const [registerRole, setRegisterRole] = useState(() =>
+    String(initialFlowState.registerRole || "").trim().toLowerCase() === "owner" ? "owner" : "user"
+  );
 
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotResetToken, setForgotResetToken] = useState("");
+  const [forgotEmail, setForgotEmail] = useState(() =>
+    String(initialFlowState.forgotEmail || "").trim()
+  );
+  const [forgotResetToken, setForgotResetToken] = useState(() =>
+    String(initialFlowState.forgotResetToken || "").trim()
+  );
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isOwnerLoggedIn, setIsOwnerLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
-  const attemptedAvatarBackfillByUserRef = useRef(new Set());
+  const [isSessionBootstrapping, setIsSessionBootstrapping] = useState(true);
 
   // Logout modal state
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showIdleWarningModal, setShowIdleWarningModal] = useState(false);
+  const [showRenterNotificationsModal, setShowRenterNotificationsModal] = useState(false);
+  const [idleCountdownSeconds, setIdleCountdownSeconds] = useState(0);
+  const lastActivityRef = useRef(Date.now());
+  const idleDeadlineRef = useRef(0);
+  const logoutInProgressRef = useRef(false);
+  const idleWarningOpenRef = useRef(false);
 
   useEffect(() => {
-    if (!localStorage.getItem("token")) {
-      setIsOwnerLoggedIn(false);
-      localStorage.removeItem("isNewOwner");
-    }
+    const purgeLegacyStorage = () => {
+      LEGACY_AUTH_KEYS.forEach((key) => {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+      });
+      LEGACY_PROFILE_KEYS.forEach((key) => {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+      });
+    };
+
+    purgeLegacyStorage();
+
+    let mounted = true;
+
+    const bootstrapSession = async () => {
+      try {
+        const response = await API.getProfile();
+        const profileUser =
+          response?.user && typeof response.user === "object" ? response.user : null;
+        if (!mounted || !profileUser || profileUser.isVerified !== true) {
+          throw new Error("No active session");
+        }
+
+        const hydratedUser = hydrateStoredUser(profileUser);
+        setSessionUser(profileUser);
+        setUser(hydratedUser);
+
+        const isOwner = profileUser.role === "owner";
+        const ownerPreference = String(localStorage.getItem("isNewOwner") || "").trim().toLowerCase();
+        const ownerMode = isOwner && ownerPreference !== "false";
+        if (ownerMode) {
+          localStorage.setItem("isNewOwner", "true");
+          setIsOwnerLoggedIn(true);
+          setIsLoggedIn(false);
+          setCurrentPage("owner-dashboard");
+        } else {
+          if (isOwner) localStorage.setItem("isNewOwner", "false");
+          setIsOwnerLoggedIn(false);
+          setIsLoggedIn(true);
+          const pathPage = resolvePageFromPath(window.location.pathname);
+          if (AUTH_PAGES.has(pathPage) || pathPage === "owner-dashboard") {
+            setCurrentPage("home");
+          }
+        }
+      } catch {
+        if (!mounted) return;
+        setIsLoggedIn(false);
+        setIsOwnerLoggedIn(false);
+        setUser(null);
+        clearSessionUser();
+        clearSessionOwnerProfile();
+        purgeLegacyStorage();
+        localStorage.removeItem("isNewOwner");
+      } finally {
+        if (mounted) setIsSessionBootstrapping(false);
+      }
+    };
+
+    bootstrapSession();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("token");
-    const storedUserRaw = localStorage.getItem("user");
-    if (!storedToken || !storedUserRaw) return;
+    const syncUserProfile = (event) => {
+      const payloadUser =
+        event?.detail && typeof event.detail === "object"
+          ? event.detail
+          : getSessionUser();
 
-    try {
-      const storedUser = JSON.parse(storedUserRaw);
-      if (!storedUser || typeof storedUser !== "object") return;
-      if (storedUser.isVerified !== true) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
+      if (!payloadUser) {
+        setUser(null);
+        setIsLoggedIn(false);
+        setIsOwnerLoggedIn(false);
         return;
       }
 
-      const hydratedUser = hydrateStoredUser(storedUser);
-
-      setUser(hydratedUser);
-
-      const isOwner = storedUser.role === "owner";
-      const isAdmin = storedUser.role === "admin";
-      const ownerMode = localStorage.getItem("isNewOwner") === "true";
-      if (isAdmin) {
-        setIsOwnerLoggedIn(false);
-        setIsLoggedIn(true);
-        setCurrentPage("admin-account");
-      } else if (isOwner && ownerMode) {
-        setIsOwnerLoggedIn(true);
-        setIsLoggedIn(false);
-        setCurrentPage("owner-dashboard");
-      } else {
-        setIsOwnerLoggedIn(false);
-        setIsLoggedIn(true);
-      }
-    } catch {
-      localStorage.removeItem("user");
-    }
-  }, []);
-
-  useEffect(() => {
-    const syncUserProfile = () => {
-      const storedUserRaw = localStorage.getItem("user");
-      if (!storedUserRaw) return;
-
-      try {
-        const storedUser = JSON.parse(storedUserRaw);
-        const hydrated = hydrateStoredUser(storedUser);
-        if (!hydrated) return;
-        setUser((prev) => (prev ? { ...prev, ...hydrated } : hydrated));
-      } catch {
-        // Ignore malformed storage.
-      }
+      const hydrated = hydrateStoredUser(payloadUser);
+      if (!hydrated) return;
+      setUser((prev) => (prev ? { ...prev, ...hydrated } : hydrated));
     };
 
     window.addEventListener("user-profile-updated", syncUserProfile);
-    window.addEventListener("storage", syncUserProfile);
+    window.addEventListener(SESSION_USER_UPDATED_EVENT, syncUserProfile);
 
     return () => {
       window.removeEventListener("user-profile-updated", syncUserProfile);
-      window.removeEventListener("storage", syncUserProfile);
+      window.removeEventListener(SESSION_USER_UPDATED_EVENT, syncUserProfile);
     };
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    const storedUserRaw = localStorage.getItem("user");
-    if (!token || !storedUserRaw) return;
+    const selectedVehicleId = String(selectedVehicle?._id || selectedVehicle?.id || "").trim();
+    writeFlowState({
+      selectedVehicleId,
+      registeredEmail,
+      registeredPhone,
+      registeredName,
+      registerRole,
+      forgotEmail,
+      forgotResetToken,
+    });
+  }, [
+    selectedVehicle?._id,
+    selectedVehicle?.id,
+    registeredEmail,
+    registeredPhone,
+    registeredName,
+    registerRole,
+    forgotEmail,
+    forgotResetToken,
+  ]);
 
-    let storedUser = null;
-    try {
-      storedUser = JSON.parse(storedUserRaw);
-    } catch {
+  useEffect(() => {
+    const query = window.location.search;
+
+    if (currentPage === "registerotp") {
+      const queryEmail = getQueryParam(query, "email");
+      const queryPhone = getQueryParam(query, "phone");
+      const queryRole = getQueryParam(query, "role").toLowerCase();
+
+      if (queryEmail && queryEmail !== registeredEmail) {
+        setRegisteredEmail(queryEmail);
+      }
+      if (queryPhone && queryPhone !== registeredPhone) {
+        setRegisteredPhone(queryPhone);
+      }
+      if ((queryRole === "owner" || queryRole === "user") && queryRole !== registerRole) {
+        setRegisterRole(queryRole);
+      }
+      if (!queryEmail && !registeredEmail) {
+        setCurrentPage("register");
+      }
       return;
     }
-    if (!storedUser || typeof storedUser !== "object") return;
-    if (String(storedUser.role || "").toLowerCase() !== "user") return;
-    const profilePhoto = getScopedProfilePhoto(storedUser);
-    if (!profilePhoto) return;
 
-    const userKey = String(storedUser._id || storedUser.email || "");
-    if (!userKey) return;
-    if (attemptedAvatarBackfillByUserRef.current.has(userKey)) return;
-    attemptedAvatarBackfillByUserRef.current.add(userKey);
-
-    const existingAvatar = String(storedUser.avatar || "").trim();
-    if (existingAvatar && existingAvatar !== profilePhoto) return;
-
-    const syncAvatarToBackend = async () => {
-      try {
-        const response = await API.updateProfile({ avatar: profilePhoto });
-        const mergedUser =
-          response?.user && typeof response.user === "object"
-            ? { ...storedUser, ...response.user }
-            : { ...storedUser, avatar: profilePhoto };
-        localStorage.setItem("user", JSON.stringify(mergedUser));
-        setUser(hydrateStoredUser(mergedUser));
-        window.dispatchEvent(new Event("user-profile-updated"));
-      } catch {
-        // Keep local-only photo if profile sync fails.
+    if (currentPage === "forgot-otp" || currentPage === "reset-password") {
+      const queryEmail = getQueryParam(query, "email");
+      if (queryEmail && queryEmail !== forgotEmail) {
+        setForgotEmail(queryEmail);
       }
-    };
 
-    syncAvatarToBackend();
-  }, [isLoggedIn, isOwnerLoggedIn, user?._id]);
+      const effectiveEmail = queryEmail || forgotEmail;
+      if (!effectiveEmail) {
+        setCurrentPage("forgot-email");
+        return;
+      }
+
+      if (currentPage === "reset-password" && !forgotResetToken) {
+        setCurrentPage("forgot-otp");
+      }
+    }
+  }, [
+    currentPage,
+    registeredEmail,
+    registeredPhone,
+    registerRole,
+    forgotEmail,
+    forgotResetToken,
+  ]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -255,20 +424,165 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    const targetRoute = PAGE_TO_ROUTE[currentPage];
-    if (!targetRoute) return;
-    if (window.location.pathname === targetRoute) return;
+    const baseRoute = PAGE_TO_ROUTE[currentPage];
+    if (!baseRoute) return;
 
+    const targetRoute = (() => {
+      if (currentPage === "vehicle-details") {
+        const queryVehicleId = getVehicleIdFromSearch(window.location.search);
+        const selectedVehicleId = String(selectedVehicle?._id || selectedVehicle?.id || "").trim();
+        const storedVehicleId = String(readFlowState().selectedVehicleId || "").trim();
+        return buildRouteWithQuery(baseRoute, {
+          vehicleId: queryVehicleId || selectedVehicleId || storedVehicleId,
+        });
+      }
+
+      if (currentPage === "registerotp") {
+        const queryEmail = getQueryParam(window.location.search, "email");
+        const queryPhone = getQueryParam(window.location.search, "phone");
+        const queryRole = getQueryParam(window.location.search, "role");
+        const role = registerRole === "owner" ? "owner" : queryRole === "owner" ? "owner" : "user";
+        return buildRouteWithQuery(baseRoute, {
+          email: registeredEmail || queryEmail,
+          phone: registeredPhone || queryPhone,
+          role,
+        });
+      }
+
+      if (currentPage === "forgot-otp" || currentPage === "reset-password") {
+        const queryEmail = getQueryParam(window.location.search, "email");
+        return buildRouteWithQuery(baseRoute, {
+          email: forgotEmail || queryEmail,
+        });
+      }
+
+      if (currentPage === "owner-dashboard") {
+        const tab = getQueryParam(window.location.search, "tab");
+        return buildRouteWithQuery(baseRoute, { tab });
+      }
+
+      return baseRoute;
+    })();
+
+    const currentRoute = `${window.location.pathname}${window.location.search}`;
+    if (currentRoute === targetRoute) return;
     window.history.pushState({ page: currentPage }, "", targetRoute);
-  }, [currentPage]);
+  }, [
+    currentPage,
+    selectedVehicle?._id,
+    selectedVehicle?.id,
+    registeredEmail,
+    registeredPhone,
+    registerRole,
+    forgotEmail,
+  ]);
+
+  useEffect(() => {
+    if (currentPage !== "vehicle-details") return undefined;
+    const storedVehicleId = String(readFlowState().selectedVehicleId || "").trim();
+    const vehicleIdFromQuery = getVehicleIdFromSearch(window.location.search) || storedVehicleId;
+    const selectedVehicleId = String(selectedVehicle?._id || selectedVehicle?.id || "").trim();
+    if (selectedVehicleId && (!vehicleIdFromQuery || vehicleIdFromQuery === selectedVehicleId)) {
+      return undefined;
+    }
+
+    if (!vehicleIdFromQuery) {
+      setCurrentPage("vehicles");
+      return undefined;
+    }
+
+    let active = true;
+    API.getPublicVehicleById(vehicleIdFromQuery)
+      .then((response) => {
+        if (!active) return;
+        const vehicle = response?.vehicle;
+        if (vehicle && (vehicle._id || vehicle.id)) {
+          setSelectedVehicle(vehicle);
+          return;
+        }
+        setCurrentPage("vehicles");
+      })
+      .catch(() => {
+        if (!active) return;
+        setCurrentPage("vehicles");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentPage, selectedVehicle?._id, selectedVehicle?.id]);
 
   useEffect(() => {
     const switchToUser = () => {
+      localStorage.setItem("isNewOwner", "false");
       setIsOwnerLoggedIn(false);
+      setIsLoggedIn(true);
       setCurrentPage("home");
     };
     window.addEventListener("switch-to-user", switchToUser);
     return () => window.removeEventListener("switch-to-user", switchToUser);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn || isOwnerLoggedIn) {
+      setShowRenterNotificationsModal(false);
+    }
+  }, [isLoggedIn, isOwnerLoggedIn]);
+
+  const performLogout = useCallback(async ({ redirectPage = "home" } = {}) => {
+    if (logoutInProgressRef.current) return;
+    logoutInProgressRef.current = true;
+
+    try {
+      await API.logout();
+    } catch {
+      // Local cleanup still runs below.
+    }
+
+    setShowLogoutModal(false);
+    setShowIdleWarningModal(false);
+    setShowRenterNotificationsModal(false);
+    setIdleCountdownSeconds(0);
+    idleWarningOpenRef.current = false;
+    setIsLoggedIn(false);
+    setIsOwnerLoggedIn(false);
+    setUser(null);
+    setPendingScrollTarget("");
+    disconnectSocket();
+    clearSessionOwnerProfile();
+    clearSessionUser();
+    localStorage.removeItem("isNewOwner");
+    LEGACY_AUTH_KEYS.forEach((key) => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+    LEGACY_PROFILE_KEYS.forEach((key) => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+
+    lastActivityRef.current = Date.now();
+    idleDeadlineRef.current = 0;
+    setSelectedVehicle(null);
+    setRegisteredEmail("");
+    setRegisteredPhone("");
+    setRegisteredName("");
+    setRegisterRole("user");
+    setForgotEmail("");
+    setForgotResetToken("");
+    writeFlowState({});
+    setCurrentPage(redirectPage);
+    logoutInProgressRef.current = false;
+  }, []);
+
+  const keepSessionActive = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    idleDeadlineRef.current = 0;
+    if (idleWarningOpenRef.current) {
+      idleWarningOpenRef.current = false;
+      setShowIdleWarningModal(false);
+      setIdleCountdownSeconds(0);
+    }
   }, []);
 
   // Open the logout modal
@@ -278,28 +592,75 @@ const App = () => {
 
   // Finish logout
   const confirmLogout = async () => {
-    setShowLogoutModal(false);
-    try {
-      await API.logout();
-    } catch {
-      // Local cleanup still runs below.
-    }
-    setIsLoggedIn(false);
-    setIsOwnerLoggedIn(false);
-    setUser(null);
-    setPendingScrollTarget("");
-    disconnectSocket();
-    localStorage.removeItem("isNewOwner");
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem(PROFILE_PHOTO_KEY);
-    localStorage.removeItem(PROFILE_PHOTO_USER_KEY);
-    setCurrentPage("home");
+    await performLogout({ redirectPage: "home" });
   };
 
   const cancelLogout = () => {
     setShowLogoutModal(false);
   };
+
+  useEffect(() => {
+    idleWarningOpenRef.current = showIdleWarningModal;
+  }, [showIdleWarningModal]);
+
+  useEffect(() => {
+    const sessionActive = isLoggedIn || isOwnerLoggedIn;
+
+    if (!sessionActive) {
+      setShowIdleWarningModal(false);
+      setIdleCountdownSeconds(0);
+      idleDeadlineRef.current = 0;
+      idleWarningOpenRef.current = false;
+      return undefined;
+    }
+
+    keepSessionActive();
+
+    const markActivity = () => {
+      if (!(isLoggedIn || isOwnerLoggedIn)) return;
+      keepSessionActive();
+    };
+
+    const tickIdleState = () => {
+      if (logoutInProgressRef.current) return;
+
+      const now = Date.now();
+      if (!idleDeadlineRef.current) {
+        const idleMs = now - lastActivityRef.current;
+        const warningWindowMs = IDLE_WARNING_SECONDS * 1000;
+        const warningTriggerMs = Math.max(0, IDLE_TIMEOUT_MS - warningWindowMs);
+        if (idleMs >= warningTriggerMs) {
+          const remainingMsBeforeLogout = Math.max(0, IDLE_TIMEOUT_MS - idleMs);
+          idleDeadlineRef.current = now + remainingMsBeforeLogout;
+          setShowIdleWarningModal(true);
+          idleWarningOpenRef.current = true;
+        } else {
+          return;
+        }
+      }
+
+      const remainingSeconds = Math.max(0, Math.ceil((idleDeadlineRef.current - now) / 1000));
+      setIdleCountdownSeconds(remainingSeconds);
+
+      if (remainingSeconds <= 0) {
+        performLogout({ redirectPage: "signin" });
+      }
+    };
+
+    IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, markActivity, { passive: true });
+    });
+
+    tickIdleState();
+    const idleTimer = window.setInterval(tickIdleState, 1000);
+
+    return () => {
+      window.clearInterval(idleTimer);
+      IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, markActivity);
+      });
+    };
+  }, [isLoggedIn, isOwnerLoggedIn, keepSessionActive, performLogout]);
 
   // Build initials from the full name
   const buildUserData = (name, email, role) => {
@@ -319,13 +680,18 @@ const App = () => {
     setCurrentPage("booking-history");
   };
 
-  const goToRealtimeChat = () => {
+  const goToRealtimeChat = (context = null) => {
     if (!isLoggedIn) {
       setCurrentPage("signin");
       return;
     }
+    setChatNavigationContext(normalizeChatNavigationContext(context));
     setCurrentPage("realtime-chat");
   };
+
+  const clearChatNavigationContext = useCallback(() => {
+    setChatNavigationContext(null);
+  }, []);
 
   const goToNotifications = () => {
     if (!isLoggedIn) {
@@ -333,6 +699,23 @@ const App = () => {
       return;
     }
     setCurrentPage("notifications");
+  };
+
+  const openRenterNotificationsModal = () => {
+    if (!isLoggedIn || isOwnerLoggedIn) {
+      setCurrentPage("signin");
+      return;
+    }
+    setShowRenterNotificationsModal(true);
+  };
+
+  const closeRenterNotificationsModal = () => {
+    setShowRenterNotificationsModal(false);
+  };
+
+  const handleViewAllRenterNotifications = () => {
+    setShowRenterNotificationsModal(false);
+    goToNotifications();
   };
 
   const navigateToContacts = () => {
@@ -357,8 +740,29 @@ const App = () => {
       }
     }
 
+    if (currentPage === "about") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     setPendingScrollTarget("about");
     setCurrentPage("home");
+  };
+
+  const goToPrivacyPolicy = () => {
+    if (currentPage === "privacy-policy") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setCurrentPage("privacy-policy");
+  };
+
+  const goToTermsAndConditions = () => {
+    if (currentPage === "terms-and-conditions") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setCurrentPage("terms-and-conditions");
   };
 
   useEffect(() => {
@@ -375,11 +779,13 @@ const App = () => {
     return () => window.clearTimeout(timer);
   }, [currentPage, pendingScrollTarget]);
 
-  useEffect(() => {
-    if (currentPage !== "about") return;
-    setPendingScrollTarget("about");
-    setCurrentPage("home");
-  }, [currentPage]);
+  if (isSessionBootstrapping) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center text-slate-600 text-sm">
+        Restoring your session...
+      </div>
+    );
+  }
 
   return (
     <>
@@ -388,6 +794,21 @@ const App = () => {
         isOpen={showLogoutModal}
         onCancel={cancelLogout}
         onConfirm={confirmLogout}
+      />
+
+      <IdleWarningModal
+        isOpen={showIdleWarningModal}
+        countdownSeconds={idleCountdownSeconds}
+        idleMinutes={15}
+        onStaySignedIn={keepSessionActive}
+        onSignOut={() => performLogout({ redirectPage: "signin" })}
+      />
+
+      <RenterNotificationsModal
+        isOpen={showRenterNotificationsModal}
+        isLoggedIn={isLoggedIn && !isOwnerLoggedIn}
+        onClose={closeRenterNotificationsModal}
+        onViewAllNotifications={handleViewAllRenterNotifications}
       />
 
       {/* home */}
@@ -405,9 +826,12 @@ const App = () => {
           onNavigateToBookingHistory={goToBookingHistory}
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
+          onOpenNotificationsModal={openRenterNotificationsModal}
           onNavigateToRegister={() => setCurrentPage("register")}
           onNavigateToAbout={navigateToAbout}
           onNavigateToContacts={navigateToContacts}
+          onNavigateToPrivacyPolicy={goToPrivacyPolicy}
+          onNavigateToTermsAndConditions={goToTermsAndConditions}
           onSearch={(data) => {
             setBookingData(data);
             setCurrentPage("vehicles");
@@ -428,6 +852,13 @@ const App = () => {
           onNavigateToForgotPassword={() => setCurrentPage("forgot-email")}
           onLoginSuccess={(userData) => {
             setUser(userData);
+            setSessionUser(userData);
+            setRegisteredEmail("");
+            setRegisteredPhone("");
+            setRegisteredName("");
+            setRegisterRole("user");
+            setForgotEmail("");
+            setForgotResetToken("");
 
             if (userData?.role === "owner") {
               setIsOwnerLoggedIn(true);
@@ -497,6 +928,7 @@ const App = () => {
           onNavigateToBookingHistory={goToBookingHistory}
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
+          onOpenNotificationsModal={openRenterNotificationsModal}
           onNavigateToRegister={() => setCurrentPage("register")}
           onNavigateToAbout={navigateToAbout}
           onNavigateToContacts={navigateToContacts}
@@ -510,6 +942,12 @@ const App = () => {
       )}
 
       {/* vehicle details */}
+      {currentPage === "vehicle-details" && !selectedVehicle && (
+        <div className="min-h-screen bg-white flex items-center justify-center text-slate-600 text-sm">
+          Loading vehicle details...
+        </div>
+      )}
+
       {currentPage === "vehicle-details" && selectedVehicle && (
         <VehicleDetailsPage
           vehicle={selectedVehicle}
@@ -587,16 +1025,23 @@ const App = () => {
                 }
               : fallbackUser;
 
+            setRegisteredEmail("");
+            setRegisteredPhone("");
+            setRegisteredName("");
+            setRegisterRole("user");
+
             if (role === "owner") {
               setIsOwnerLoggedIn(true);
               setIsLoggedIn(false);
               localStorage.setItem("isNewOwner", "true");
               setUser(userData);
+              setSessionUser(userData);
               setCurrentPage("owner-dashboard");
             } else {
               setIsLoggedIn(true);
               setIsOwnerLoggedIn(false);
               setUser(userData);
+              setSessionUser(userData);
               setCurrentPage("home");
             }
           }}
@@ -621,6 +1066,64 @@ const App = () => {
         />
       )}
 
+      {currentPage === "about" && (
+        <AboutPage
+          isLoggedIn={isLoggedIn}
+          user={user}
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToSignIn={() => setCurrentPage("signin")}
+          onNavigateToRegister={() => setCurrentPage("register")}
+          onNavigateToVehicles={() => setCurrentPage("vehicles")}
+          onNavigateToBookingHistory={goToBookingHistory}
+          onNavigateToAbout={navigateToAbout}
+          onNavigateToContacts={navigateToContacts}
+          onNavigateToChat={goToRealtimeChat}
+          onNavigateToNotifications={goToNotifications}
+          onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToPrivacyPolicy={goToPrivacyPolicy}
+          onNavigateToTermsAndConditions={goToTermsAndConditions}
+          onLogout={requestLogout}
+        />
+      )}
+
+      {currentPage === "privacy-policy" && (
+        <PrivacyPolicyPage
+          isLoggedIn={isLoggedIn}
+          user={user}
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToSignIn={() => setCurrentPage("signin")}
+          onNavigateToRegister={() => setCurrentPage("register")}
+          onNavigateToVehicles={() => setCurrentPage("vehicles")}
+          onNavigateToBookingHistory={goToBookingHistory}
+          onNavigateToAbout={navigateToAbout}
+          onNavigateToContacts={navigateToContacts}
+          onNavigateToChat={goToRealtimeChat}
+          onNavigateToNotifications={goToNotifications}
+          onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToTermsAndConditions={goToTermsAndConditions}
+          onLogout={requestLogout}
+        />
+      )}
+
+      {currentPage === "terms-and-conditions" && (
+        <TermsAndConditionsPage
+          isLoggedIn={isLoggedIn}
+          user={user}
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToSignIn={() => setCurrentPage("signin")}
+          onNavigateToRegister={() => setCurrentPage("register")}
+          onNavigateToVehicles={() => setCurrentPage("vehicles")}
+          onNavigateToBookingHistory={goToBookingHistory}
+          onNavigateToAbout={navigateToAbout}
+          onNavigateToContacts={navigateToContacts}
+          onNavigateToChat={goToRealtimeChat}
+          onNavigateToNotifications={goToNotifications}
+          onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToPrivacyPolicy={goToPrivacyPolicy}
+          onLogout={requestLogout}
+        />
+      )}
+
       {currentPage === "booking-history" && (
         <BookingsPage
           isLoggedIn={isLoggedIn}
@@ -633,6 +1136,7 @@ const App = () => {
           onNavigateToContacts={navigateToContacts}
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
+          onOpenNotificationsModal={openRenterNotificationsModal}
           onNavigateToBookingHistory={goToBookingHistory}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
           onLogout={requestLogout}
@@ -643,6 +1147,8 @@ const App = () => {
         <RealtimeChatPage
           isLoggedIn={isLoggedIn}
           user={user}
+          initialChatContext={chatNavigationContext}
+          onChatContextHandled={clearChatNavigationContext}
           onNavigateToHome={() => setCurrentPage("home")}
           onNavigateToSignIn={() => setCurrentPage("signin")}
           onNavigateToRegister={() => setCurrentPage("register")}

@@ -1,12 +1,28 @@
 // Auth input validation
 import mongoose from "mongoose";
+import { normalizePhilippineMobile } from "../utils/phone.js";
 
 const EMOJI_REGEX = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-const PHONE_REGEX = /^[0-9]{11}$/;
+const PHONE_REGEX = /^9[0-9]{9}$/;
+const NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
+const ALLOWED_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "yahoo.com",
+  "outlook.com",
+  "hotmail.com",
+]);
 const ALLOWED_GENDERS = new Set(["Male", "Female", "Prefer not to say"]);
 const ALLOWED_RELATIONSHIPS = new Set(["Parent", "Sibling", "Spouse", "Partner", "Relative", "Friend", "Guardian", "Other"]);
+const ALLOWED_OWNER_TYPES = new Set(["individual", "business"]);
 const MIN_RENTER_AGE = 18;
+const MAX_EMAIL_LENGTH = 254;
+const MAX_PHONE_LENGTH = 10;
+const MAX_BUSINESS_NAME = 120;
+const MAX_LICENSE_NUMBER = 50;
+const MAX_PERMIT_NUMBER = 50;
+const MAX_ADDRESS_LENGTH = 255;
+const MAX_EMERGENCY_CONTACT_NAME_LENGTH = 50;
 
 const toText = (value) => (typeof value === "string" ? value.trim() : "");
 const parseDateOfBirth = (value) => {
@@ -49,7 +65,8 @@ export const validateRegister = (req, res, next) => {
   const { name, email, password } = req.body;
   const errors = {};
   const requestedRole = req.body.role === "owner" ? "owner" : "user";
-  const phone = toText(req.body.phone);
+  const rawPhone = toText(req.body.phone);
+  const phone = normalizePhilippineMobile(rawPhone);
   const dateOfBirth = toText(req.body.dateOfBirth);
   const gender = toText(req.body.gender);
   const address = toText(req.body.address);
@@ -58,8 +75,13 @@ export const validateRegister = (req, res, next) => {
   const city = toText(req.body.city);
   const barangay = toText(req.body.barangay);
   const emergencyContactName = toText(req.body.emergencyContactName);
-  const emergencyContactPhone = toText(req.body.emergencyContactPhone);
+  const rawEmergencyContactPhone = toText(req.body.emergencyContactPhone);
+  const emergencyContactPhone = normalizePhilippineMobile(rawEmergencyContactPhone);
   const emergencyContactRelationship = toText(req.body.emergencyContactRelationship);
+  const ownerType = toText(req.body.ownerType);
+  const businessName = toText(req.body.businessName);
+  const permitNumber = toText(req.body.permitNumber);
+  const licenseNumber = toText(req.body.licenseNumber);
 
   // Name rules
   if (!name || !name.trim()) errors.name = "Name is required.";
@@ -70,7 +92,16 @@ export const validateRegister = (req, res, next) => {
   if (!email || typeof email !== "string") errors.email = "Email is required.";
   else if (/\s/.test(email.trim())) errors.email = "Email must not contain spaces.";
   else if (EMOJI_REGEX.test(email)) errors.email = "Email must not contain emoji.";
+  else if (email.trim().length > MAX_EMAIL_LENGTH)
+    errors.email = `Email is too long (max ${MAX_EMAIL_LENGTH} characters).`;
   else if (!EMAIL_REGEX.test(email.trim())) errors.email = "Enter a valid email address.";
+
+  if (!errors.email) {
+    const emailDomain = String(email || "").trim().split("@")[1]?.toLowerCase() || "";
+    if (!ALLOWED_EMAIL_DOMAINS.has(emailDomain)) {
+      errors.email = "Please use a valid email address from a supported provider.";
+    }
+  }
 
   // Password rules
   if (!password) errors.password = "Password is required.";
@@ -84,8 +115,11 @@ export const validateRegister = (req, res, next) => {
   else if (!/[!@#$%^&*()_+\-=[\]{}|;':",.<>?/`~]/.test(password))
     errors.password = "Password needs a special character.";
 
-  if (phone) {
-    if (!PHONE_REGEX.test(phone)) errors.phone = "Phone number must be exactly 11 digits.";
+  if (rawPhone) {
+    if (phone.length > MAX_PHONE_LENGTH)
+      errors.phone = `Phone number is too long (max ${MAX_PHONE_LENGTH} digits).`;
+    else if (!PHONE_REGEX.test(phone))
+      errors.phone = "Phone number must be exactly 10 digits and start with 9.";
   }
 
   if (requestedRole === "user" && !dateOfBirth) {
@@ -114,7 +148,8 @@ export const validateRegister = (req, res, next) => {
     errors.gender = "Gender selection is invalid.";
   }
 
-  if (address && address.length > 255) errors.address = "Address is too long (max 255 characters).";
+  if (address && address.length > MAX_ADDRESS_LENGTH)
+    errors.address = `Address is too long (max ${MAX_ADDRESS_LENGTH} characters).`;
   if (region && region.length > 50) errors.region = "Region code is invalid.";
   if (province && province.length > 50) errors.province = "Province code is invalid.";
   if (city && city.length > 50) errors.city = "City code is invalid.";
@@ -123,13 +158,17 @@ export const validateRegister = (req, res, next) => {
   if (emergencyContactName) {
     if (EMOJI_REGEX.test(emergencyContactName)) {
       errors.emergencyContactName = "Emergency contact name must not contain emoji.";
-    } else if (emergencyContactName.length > 100) {
-      errors.emergencyContactName = "Emergency contact name is too long (max 100 characters).";
+    } else if (!NAME_REGEX.test(emergencyContactName)) {
+      errors.emergencyContactName =
+        "Emergency contact name can only contain letters and single spaces between names.";
+    } else if (emergencyContactName.length > MAX_EMERGENCY_CONTACT_NAME_LENGTH) {
+      errors.emergencyContactName = `Emergency contact name is too long (max ${MAX_EMERGENCY_CONTACT_NAME_LENGTH} characters).`;
     }
   }
 
-  if (emergencyContactPhone && !PHONE_REGEX.test(emergencyContactPhone)) {
-    errors.emergencyContactPhone = "Emergency contact phone must be exactly 11 digits.";
+  if (rawEmergencyContactPhone && !PHONE_REGEX.test(emergencyContactPhone)) {
+    errors.emergencyContactPhone =
+      "Emergency contact phone must be exactly 10 digits and start with 9.";
   }
 
   if (
@@ -137,6 +176,29 @@ export const validateRegister = (req, res, next) => {
     !ALLOWED_RELATIONSHIPS.has(emergencyContactRelationship)
   ) {
     errors.emergencyContactRelationship = "Emergency contact relationship is invalid.";
+  }
+
+  if (requestedRole === "owner" && !ownerType) {
+    errors.ownerType = "Owner type is required.";
+  } else if (ownerType && !ALLOWED_OWNER_TYPES.has(ownerType)) {
+    errors.ownerType = "Owner type is invalid.";
+  }
+
+  if (businessName && businessName.length > MAX_BUSINESS_NAME) {
+    errors.businessName = `Business name is too long (max ${MAX_BUSINESS_NAME} characters).`;
+  }
+
+  if (licenseNumber && licenseNumber.length > MAX_LICENSE_NUMBER) {
+    errors.licenseNumber = `License number is too long (max ${MAX_LICENSE_NUMBER} characters).`;
+  }
+
+  if (permitNumber && permitNumber.length > MAX_PERMIT_NUMBER) {
+    errors.permitNumber = `Permit number is too long (max ${MAX_PERMIT_NUMBER} characters).`;
+  }
+
+  if (requestedRole === "owner" && ownerType === "business") {
+    if (!businessName) errors.businessName = "Business name is required.";
+    if (!permitNumber) errors.permitNumber = "Permit number is required.";
   }
 
   if (Object.keys(errors).length > 0) {
@@ -158,6 +220,10 @@ export const validateRegister = (req, res, next) => {
   if (emergencyContactRelationship) {
     req.body.emergencyContactRelationship = emergencyContactRelationship;
   }
+  if (ownerType) req.body.ownerType = ownerType;
+  if (businessName) req.body.businessName = businessName;
+  if (licenseNumber) req.body.licenseNumber = licenseNumber;
+  if (permitNumber) req.body.permitNumber = permitNumber;
   next();
 };
 
@@ -197,7 +263,7 @@ export const validateObjectIdParam = (paramName = "id") => (req, _res, next) => 
 };
 
 const AVAILABILITY_STATUSES = new Set(["available", "unavailable"]);
-const BOOKING_STATUSES = new Set(["pending", "confirmed", "completed", "cancelled", "rejected"]);
+const BOOKING_STATUSES = new Set(["pending", "confirmed", "extended", "completed", "cancelled", "rejected"]);
 const PAYMENT_STATUSES = new Set(["unpaid", "partial", "paid", "refunded"]);
 
 const parseBoolean = (value, fallback = false) => {
@@ -251,6 +317,18 @@ const sanitizeVehicleBody = (req, { isUpdate = false } = {}) => {
     req.body.existingImages = [];
   }
 
+  if (hasOwn(req.body, "coverImagePath")) {
+    req.body.coverImagePath = toText(req.body.coverImagePath);
+  } else if (!isUpdate) {
+    req.body.coverImagePath = "";
+  }
+
+  if (hasOwn(req.body, "coverUploadIndex")) {
+    req.body.coverUploadIndex = toText(req.body.coverUploadIndex);
+  } else if (!isUpdate) {
+    req.body.coverUploadIndex = "";
+  }
+
   if (req.body.driverOptionEnabled !== undefined) {
     req.body.driverOptionEnabled = parseBoolean(req.body.driverOptionEnabled, false);
   } else if (!isUpdate) {
@@ -271,9 +349,9 @@ export const validateVehicleCreate = (req, res, next) => {
 
   const rate = Number(body.dailyRentalRate);
   if (body.dailyRentalRate === undefined || body.dailyRentalRate === null || body.dailyRentalRate === "") {
-    errors.dailyRentalRate = "Daily rental rate is required.";
+    errors.dailyRentalRate = "Hourly rental rate is required.";
   } else if (!Number.isFinite(rate) || rate < 0) {
-    errors.dailyRentalRate = "Daily rental rate must be a valid non-negative number.";
+    errors.dailyRentalRate = "Hourly rental rate must be a valid non-negative number.";
   } else {
     body.dailyRentalRate = rate;
   }
@@ -292,7 +370,7 @@ export const validateVehicleCreate = (req, res, next) => {
   const driverDailyRate = Number(body.driverDailyRate || 0);
   if (body.driverOptionEnabled) {
     if (!Number.isFinite(driverDailyRate) || driverDailyRate < 0) {
-      errors.driverDailyRate = "Driver daily rate must be zero or greater.";
+      errors.driverDailyRate = "Driver hourly rate must be zero or greater.";
     } else {
       body.driverDailyRate = driverDailyRate;
     }
@@ -304,6 +382,15 @@ export const validateVehicleCreate = (req, res, next) => {
   const linkedImages = body.imageUrls.length;
   if (uploadedImages + linkedImages === 0) {
     errors.images = "At least one image is required.";
+  }
+
+  if (body.coverUploadIndex) {
+    const coverUploadIndex = Number.parseInt(body.coverUploadIndex, 10);
+    if (!Number.isFinite(coverUploadIndex) || coverUploadIndex < 0) {
+      errors.coverUploadIndex = "Cover image selection is invalid.";
+    } else {
+      body.coverUploadIndex = coverUploadIndex;
+    }
   }
 
   if (Object.keys(errors).length) {
@@ -324,7 +411,7 @@ export const validateVehicleUpdate = (req, res, next) => {
   if (body.dailyRentalRate !== undefined) {
     const rate = Number(body.dailyRentalRate);
     if (!Number.isFinite(rate) || rate < 0) {
-      errors.dailyRentalRate = "Daily rental rate must be a valid non-negative number.";
+      errors.dailyRentalRate = "Hourly rental rate must be a valid non-negative number.";
     } else {
       body.dailyRentalRate = rate;
     }
@@ -353,9 +440,18 @@ export const validateVehicleUpdate = (req, res, next) => {
   if (body.driverDailyRate !== undefined) {
     const driverDailyRate = Number(body.driverDailyRate);
     if (!Number.isFinite(driverDailyRate) || driverDailyRate < 0) {
-      errors.driverDailyRate = "Driver daily rate must be zero or greater.";
+      errors.driverDailyRate = "Driver hourly rate must be zero or greater.";
     } else {
       body.driverDailyRate = driverDailyRate;
+    }
+  }
+
+  if (body.coverUploadIndex) {
+    const coverUploadIndex = Number.parseInt(body.coverUploadIndex, 10);
+    if (!Number.isFinite(coverUploadIndex) || coverUploadIndex < 0) {
+      errors.coverUploadIndex = "Cover image selection is invalid.";
+    } else {
+      body.coverUploadIndex = coverUploadIndex;
     }
   }
 

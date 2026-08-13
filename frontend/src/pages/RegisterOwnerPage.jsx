@@ -19,16 +19,24 @@ import {
 } from "lucide-react";
 
 import {
-  captureBase64FromStream,
+  captureFramesFromStream,
   fileToBase64,
+  getMimeFromDataUrl,
   startCamera,
   stopCamera,
   stripDataUrlPrefix,
 } from "../utils/cameraKyc";
-import { preRegisterIdFace, preSelfieChallenge, preSelfieVerify } from "../utils/kycApi";
+import {
+  preRegisterIdFace,
+  preSelfieChallenge,
+  preSelfieVerify,
+  preVerifySupportingDocument,
+} from "../utils/kycApi";
 import AuthShell from "../components/AuthShell";
+import LegalPolicyModal from "../components/LegalPolicyModal";
 import API from "../utils/api";
-import { persistOwnerProfile } from "../owner/utils/ownerProfile";
+import { ALLOWED_EMAIL_DOMAINS, NAME_REGEX } from "../data/registerValidation";
+import { ID_DOCUMENT_TYPES, SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
 const TOTAL_STEPS = 4;
 const STEP_LABELS = ["Personal Details", "Account & Documents", "Face Verification", "Review"];
@@ -38,6 +46,22 @@ const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const EMOJI_REGEX =
   /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
+const PH_LOCAL_MOBILE_REGEX = /^9\d{9}$/;
+
+const normalizeNameInput = (value = "") => {
+  let nextValue = String(value);
+  nextValue = nextValue.replace(/[^A-Za-z ]/g, "");
+  nextValue = nextValue.replace(/\s+/g, " ");
+  if (nextValue.startsWith(" ")) nextValue = nextValue.slice(1);
+  return nextValue;
+};
+
+const normalizePhMobileInput = (value = "") => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (!digits.startsWith("9")) return "";
+  return digits.slice(0, 10);
+};
 
 const initialForm = {
   firstName: "",
@@ -62,6 +86,7 @@ const initialFiles = {
 };
 
 const initialKyc = {
+  idType: "",
   idCardFile: null,
   idRegistered: false,
   challengeId: "",
@@ -87,6 +112,8 @@ function friendlyError(msg) {
   if (lower.includes("not running") || lower.includes("econnrefused")) return "Verification service is temporarily unavailable.";
   if (lower.includes("timeout") || lower.includes("etimedout")) return "Request timed out. Please try again.";
   if (lower.includes("too many")) return msg;
+  if (/^[A-Z]/.test(msg) && !lower.includes("error") && !lower.includes("exception") && !lower.includes("500"))
+    return msg;
   return "Something went wrong. Please try again.";
 }
 
@@ -99,12 +126,16 @@ export default function RegisterOwnerPage({
   const [form, setForm] = useState(initialForm);
   const [files, setFiles] = useState(initialFiles);
   const [kyc, setKyc] = useState(initialKyc);
+  const [supportingDocType, setSupportingDocType] = useState("");
+  const [supportingDocStatus, setSupportingDocStatus] = useState({ verified: false, message: "" });
 
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
+  const [touchedStep1, setTouchedStep1] = useState({});
   const [stepErrors, setStepErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [legalModalType, setLegalModalType] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [showCpw, setShowCpw] = useState(false);
   const [regions, setRegions] = useState([]);
@@ -124,7 +155,10 @@ export default function RegisterOwnerPage({
   const idInputRef = useRef(null);
   const lastActionRef = useRef(0);
 
-  const fullName = useMemo(() => `${form.firstName} ${form.lastName}`.trim(), [form.firstName, form.lastName]);
+  const fullName = useMemo(
+    () => `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
+    [form.firstName, form.lastName]
+  );
   const canShowBusinessFields = useMemo(() => form.ownerType === "business", [form.ownerType]);
 
   const canAct = useCallback(() => {
@@ -284,6 +318,90 @@ export default function RegisterOwnerPage({
     };
   }, [form.city]);
 
+  const validateStep1Field = useCallback(
+    (field, values = form) => {
+      const trimmedFirstName = values.firstName.trim();
+      const trimmedLastName = values.lastName.trim();
+
+      switch (field) {
+        case "firstName":
+          if (!trimmedFirstName) return "First name is required.";
+          if (!NAME_REGEX.test(trimmedFirstName)) return "First name can only contain letters and spaces between names.";
+          if (EMOJI_REGEX.test(values.firstName)) return "No emoji allowed.";
+          if (trimmedFirstName.length > 50) return "First name is too long (max 50 characters).";
+          return "";
+        case "lastName":
+          if (!trimmedLastName) return "Last name is required.";
+          if (!NAME_REGEX.test(trimmedLastName)) return "Last name can only contain letters and spaces between names.";
+          if (EMOJI_REGEX.test(values.lastName)) return "No emoji allowed.";
+          if (trimmedLastName.length > 50) return "Last name is too long (max 50 characters).";
+          return "";
+        case "businessEmail": {
+          if (!values.businessEmail.trim()) return "Email is required.";
+          if (/\s/.test(values.businessEmail)) return "Email must not contain spaces.";
+          if (EMOJI_REGEX.test(values.businessEmail)) return "Email must not contain emoji.";
+          if (values.businessEmail.length > 254) return "Email is too long (max 254 characters).";
+          if (!EMAIL_REGEX.test(values.businessEmail)) return "Enter a valid email.";
+          const domain = values.businessEmail.split("@")[1]?.toLowerCase() || "";
+          if (!ALLOWED_EMAIL_DOMAINS.includes(domain)) {
+            return "Please use a valid email address from a supported provider.";
+          }
+          return "";
+        }
+        case "phone":
+          if (!values.phone.trim()) return "Phone number is required.";
+          if (!PH_LOCAL_MOBILE_REGEX.test(values.phone)) {
+            return "Phone number must be exactly 10 digits and start with 9.";
+          }
+          if (values.phone.length > 10) return "Phone number is too long (max 10 digits).";
+          return "";
+        case "region":
+          return values.region ? "" : "Region is required.";
+        case "province":
+          if (provinces.length > 0 && !values.province) return "Province is required.";
+          return "";
+        case "city":
+          return values.city ? "" : "City / Municipality is required.";
+        case "barangay":
+          return values.barangay ? "" : "Barangay is required.";
+        case "address":
+          if (!values.address.trim()) return "Complete your address selection.";
+          if (values.address.length > 255) return "Address is too long (max 255 characters).";
+          return "";
+        case "businessName":
+          if (!values.businessName.trim()) return "Business name is required.";
+          if (values.businessName.length > 120) return "Business name is too long (max 120 characters).";
+          return "";
+        case "permitNumber":
+          if (!values.permitNumber.trim()) return "Permit number is required.";
+          if (values.permitNumber.length > 50) return "Permit number is too long (max 50 characters).";
+          return "";
+        case "password":
+          if (!values.password) return "Password is required.";
+          if (/\s/.test(values.password)) return "Password must not contain spaces.";
+          if (EMOJI_REGEX.test(values.password)) return "Password must not contain emoji.";
+          if (values.password.length < 8) return "Password must be at least 8 characters.";
+          if (!/[A-Z]/.test(values.password)) return "Password needs an uppercase letter.";
+          if (!/[a-z]/.test(values.password)) return "Password needs a lowercase letter.";
+          if (!/[0-9]/.test(values.password)) return "Password needs a number.";
+          if (!/[!@#$%^&*()_+\-=[\]{}|;':",.<>?/`~]/.test(values.password)) {
+            return "Password needs a special character.";
+          }
+          return "";
+        case "confirmPassword":
+          if (!values.confirmPassword) return "Please confirm password.";
+          if (/\s/.test(values.confirmPassword)) return "Password must not contain spaces.";
+          if (values.password !== values.confirmPassword) return "Passwords do not match.";
+          return "";
+        case "agree":
+          return values.agree ? "" : "You must agree to the terms.";
+        default:
+          return "";
+      }
+    },
+    [form, provinces.length]
+  );
+
   useEffect(() => {
     const regionName = regions.find((entry) => entry.code === form.region)?.name || "";
     const provinceName = provinces.find((entry) => entry.code === form.province)?.name || "";
@@ -291,129 +409,356 @@ export default function RegisterOwnerPage({
     const barangayName = barangays.find((entry) => entry.code === form.barangay)?.name || "";
     const composedAddress = [barangayName, cityName, provinceName, regionName].filter(Boolean).join(", ");
 
-    setForm((prev) => (prev.address === composedAddress ? prev : { ...prev, address: composedAddress }));
-  }, [form.region, form.province, form.city, form.barangay, regions, provinces, cities, barangays]);
+    const nextForm = { ...form, address: composedAddress };
+    setForm((prev) => (prev.address === composedAddress ? prev : nextForm));
+    if (step === 1 && touchedStep1.address) {
+      setErrors((prev) => ({ ...prev, address: validateStep1Field("address", nextForm) }));
+    }
+  }, [
+    form,
+    step,
+    touchedStep1.address,
+    regions,
+    provinces,
+    cities,
+    barangays,
+    validateStep1Field,
+  ]);
 
-  const handleChange = useCallback((e) => {
-    const { name, value, type, checked } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: name === "businessEmail" ? value.toLowerCase().trim() : type === "checkbox" ? checked : value,
-    }));
-    setErrors((prev) => ({ ...prev, [name]: "" }));
-  }, []);
+  const handleStep1Blur = useCallback(
+    (field, values = form) => {
+      if (step !== 1) return;
+      if (!touchedStep1[field]) return;
+      setErrors((prev) => {
+        const next = { ...prev, [field]: validateStep1Field(field, values) };
+        if (field === "password" && (touchedStep1.confirmPassword || values.confirmPassword)) {
+          next.confirmPassword = validateStep1Field("confirmPassword", values);
+        }
+        return next;
+      });
+    },
+    [form, step, touchedStep1, validateStep1Field]
+  );
+
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value, type, checked } = e.target;
+      const normalizedPhone = name === "phone" ? normalizePhMobileInput(value) : value;
+      const nextValue =
+        name === "businessEmail"
+          ? value.toLowerCase().trim()
+          : type === "checkbox"
+            ? checked
+            : normalizedPhone;
+      const nextForm = { ...form, [name]: nextValue };
+      setForm(nextForm);
+      if (step === 1) {
+        setTouchedStep1((prev) => ({ ...prev, [name]: true }));
+      }
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+      if (name === "password") {
+        setErrors((prev) => ({ ...prev, confirmPassword: "" }));
+      }
+      if (["businessEmail", "firstName", "lastName", "businessName", "permitNumber"].includes(name)) {
+        setSupportingDocStatus({ verified: false, message: "" });
+        setErrors((prev) => ({ ...prev, supportingDocument: "" }));
+      }
+      if (["businessEmail", "firstName", "lastName"].includes(name)) {
+        setKyc((prev) => ({
+          ...prev,
+          idRegistered: false,
+          challengeId: "",
+          selfieVerified: false,
+          selfieDataUrl: "",
+          selfieBase64Clean: "",
+        }));
+        setStepErrors((prev) => ({ ...prev, idRegistered: "", selfieVerified: "" }));
+        setKycUi((prev) => ({ ...prev, statusText: "" }));
+      }
+    },
+    [form, step]
+  );
 
   const handleRegionChange = useCallback((e) => {
     const region = e.target.value;
-    setForm((prev) => ({
-      ...prev,
+    const nextForm = {
+      ...form,
       region,
       province: "",
       city: "",
       barangay: "",
       address: "",
-    }));
-    setErrors((prev) => ({ ...prev, region: "", province: "", city: "", barangay: "", address: "" }));
-  }, []);
-
-  const handleProvinceChange = useCallback((e) => {
-    const province = e.target.value;
-    setForm((prev) => ({
+    };
+    setForm(nextForm);
+    setTouchedStep1((prev) => ({
       ...prev,
-      province,
+      region: true,
+      province: false,
+      city: false,
+      barangay: false,
+      address: false,
+    }));
+    setErrors((prev) => ({
+      ...prev,
+      region: "",
+      province: "",
       city: "",
       barangay: "",
       address: "",
     }));
-    setErrors((prev) => ({ ...prev, province: "", city: "", barangay: "", address: "" }));
-  }, []);
+  }, [form]);
 
-  const handleCityChange = useCallback((e) => {
-    const city = e.target.value;
-    setForm((prev) => ({
+  const handleProvinceChange = useCallback((e) => {
+    const province = e.target.value;
+    const nextForm = {
+      ...form,
+      province,
+      city: "",
+      barangay: "",
+      address: "",
+    };
+    setForm(nextForm);
+    setTouchedStep1((prev) => ({
       ...prev,
-      city,
+      province: true,
+      city: false,
+      barangay: false,
+      address: false,
+    }));
+    setErrors((prev) => ({
+      ...prev,
+      province: "",
+      city: "",
       barangay: "",
       address: "",
     }));
-    setErrors((prev) => ({ ...prev, city: "", barangay: "", address: "" }));
-  }, []);
+  }, [form]);
+
+  const handleCityChange = useCallback((e) => {
+    const city = e.target.value;
+    const nextForm = {
+      ...form,
+      city,
+      barangay: "",
+      address: "",
+    };
+    setForm(nextForm);
+    setTouchedStep1((prev) => ({
+      ...prev,
+      city: true,
+      barangay: false,
+      address: false,
+    }));
+    setErrors((prev) => ({
+      ...prev,
+      city: "",
+      barangay: "",
+      address: "",
+    }));
+  }, [form]);
 
   const handleBarangayChange = useCallback((e) => {
     const barangay = e.target.value;
-    setForm((prev) => ({
-      ...prev,
+    const nextForm = {
+      ...form,
       barangay,
       address: "",
+    };
+    setForm(nextForm);
+    setTouchedStep1((prev) => ({
+      ...prev,
+      barangay: true,
+      address: false,
     }));
-    setErrors((prev) => ({ ...prev, barangay: "", address: "" }));
-  }, []);
+    setErrors((prev) => ({
+      ...prev,
+      barangay: "",
+      address: "",
+    }));
+  }, [form]);
+
+  const handleOwnerTypeSelect = useCallback(
+    (type) => {
+      const nextForm = {
+        ...form,
+        ownerType: type,
+      };
+      setForm(nextForm);
+      setErrors((prev) => ({
+        ...prev,
+        businessName: "",
+        permitNumber: "",
+        supportingDocument: "",
+      }));
+      setSupportingDocStatus({ verified: false, message: "" });
+    },
+    [form]
+  );
 
   const handleFile = useCallback((e) => {
     const { name, files: picked } = e.target;
     setFiles((prev) => ({ ...prev, [name]: picked?.[0] || null }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
+    if (name === "supportingDocument") {
+      setSupportingDocStatus({ verified: false, message: "" });
+    }
   }, []);
 
+  const handleSupportingDocTypeChange = useCallback((e) => {
+    const value = String(e?.target?.value || "");
+    setSupportingDocType(value);
+    setSupportingDocStatus({ verified: false, message: "" });
+    setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "" }));
+  }, []);
+
+  const handleIdTypeChange = useCallback((e) => {
+    const value = String(e?.target?.value || "");
+    setKyc((prev) => ({
+      ...prev,
+      idType: value,
+      idRegistered: false,
+      challengeId: "",
+      selfieVerified: false,
+      selfieDataUrl: "",
+      selfieBase64Clean: "",
+    }));
+    setStepErrors((prev) => ({
+      ...prev,
+      idType: "",
+      idRegistered: "",
+      selfieVerified: "",
+    }));
+    setKycUi((prev) => ({ ...prev, statusText: "" }));
+    setCamError("");
+    setCamInfo("");
+    closeCamera();
+  }, [closeCamera]);
+
   const validateStep1 = useCallback(() => {
+    const fields = [
+      "firstName",
+      "lastName",
+      "businessEmail",
+      "phone",
+      "region",
+      "province",
+      "city",
+      "barangay",
+      "address",
+      "businessName",
+      "permitNumber",
+      "password",
+      "confirmPassword",
+      "agree",
+    ];
     const next = {};
-
-    if (!form.firstName.trim()) next.firstName = "First name is required.";
-    else if (!/^[A-Za-z]+$/.test(form.firstName)) next.firstName = "Letters only (A-Z).";
-    else if (EMOJI_REGEX.test(form.firstName)) next.firstName = "No emoji allowed.";
-
-    if (!form.lastName.trim()) next.lastName = "Last name is required.";
-    else if (!/^[A-Za-z]+$/.test(form.lastName)) next.lastName = "Letters only (A-Z).";
-    else if (EMOJI_REGEX.test(form.lastName)) next.lastName = "No emoji allowed.";
-
-    if (!form.businessEmail.trim()) next.businessEmail = "Email is required.";
-    else if (/\s/.test(form.businessEmail)) next.businessEmail = "Email must not contain spaces.";
-    else if (EMOJI_REGEX.test(form.businessEmail)) next.businessEmail = "Email must not contain emoji.";
-    else if (!EMAIL_REGEX.test(form.businessEmail)) next.businessEmail = "Enter a valid email.";
-
-    if (!form.phone.trim()) next.phone = "Phone number is required.";
-    else if (!/^[0-9]{11}$/.test(form.phone)) next.phone = "Phone number must be exactly 11 digits.";
-
-    if (!form.region) next.region = "Region is required.";
-    if (provinces.length > 0 && !form.province) next.province = "Province is required.";
-    if (!form.city) next.city = "City / Municipality is required.";
-    if (!form.barangay) next.barangay = "Barangay is required.";
-    if (!form.address.trim()) next.address = "Complete your address selection.";
-
-    if (canShowBusinessFields) {
-      if (!form.businessName.trim()) next.businessName = "Business name is required.";
-      if (!form.permitNumber.trim()) next.permitNumber = "Permit number is required.";
+    for (const field of fields) {
+      const message = validateStep1Field(field, form);
+      if (message) next[field] = message;
     }
-
-    if (!form.password) next.password = "Password is required.";
-    else if (/\s/.test(form.password)) next.password = "Password must not contain spaces.";
-    else if (EMOJI_REGEX.test(form.password)) next.password = "Password must not contain emoji.";
-    else if (form.password.length < 8) next.password = "Password must be at least 8 characters.";
-    else if (!/[A-Z]/.test(form.password)) next.password = "Password needs an uppercase letter.";
-    else if (!/[a-z]/.test(form.password)) next.password = "Password needs a lowercase letter.";
-    else if (!/[0-9]/.test(form.password)) next.password = "Password needs a number.";
-    else if (!/[!@#$%^&*()_+\-=[\]{}|;':",.<>?/`~]/.test(form.password)) {
-      next.password = "Password needs a special character.";
-    }
-
-    if (!form.confirmPassword) next.confirmPassword = "Please confirm password.";
-    else if (form.password !== form.confirmPassword) next.confirmPassword = "Passwords do not match.";
-
-    if (!form.agree) next.agree = "You must agree to the terms.";
-
-    setErrors(next);
+    setTouchedStep1({
+      firstName: true,
+      lastName: true,
+      businessEmail: true,
+      phone: true,
+      region: true,
+      province: true,
+      city: true,
+      barangay: true,
+      address: true,
+      businessName: true,
+      permitNumber: true,
+      password: true,
+      confirmPassword: true,
+      agree: true,
+    });
+    setErrors((prev) => {
+      const merged = { ...prev };
+      for (const field of fields) {
+        if (next[field]) merged[field] = next[field];
+        else delete merged[field];
+      }
+      return merged;
+    });
     return Object.keys(next).length === 0;
-  }, [form, canShowBusinessFields, provinces.length]);
+  }, [form, validateStep1Field]);
 
   const validateStep2 = useCallback(() => {
     const next = {};
+    if (!supportingDocType) next.supportingDocType = "Please select a document type.";
     if (!files.supportingDocument) next.supportingDocument = "Please upload a supporting document.";
-    setErrors((prev) => ({ ...prev, supportingDocument: next.supportingDocument || "" }));
+    setErrors((prev) => ({
+      ...prev,
+      supportingDocType: next.supportingDocType || "",
+      supportingDocument: next.supportingDocument || "",
+    }));
     return Object.keys(next).length === 0;
-  }, [files.supportingDocument]);
+  }, [files.supportingDocument, supportingDocType]);
+
+  const verifySupportingDoc = async () => {
+    if (supportingDocStatus.verified) return true;
+    if (!supportingDocType) {
+      setErrors((prev) => ({ ...prev, supportingDocType: "Please select a document type." }));
+      return false;
+    }
+    if (!files.supportingDocument) {
+      setErrors((prev) => ({ ...prev, supportingDocument: "Please upload a supporting document." }));
+      return false;
+    }
+    if (!form.businessEmail) {
+      setErrors((prev) => ({ ...prev, supportingDocument: "Please enter your email first." }));
+      return false;
+    }
+    const maxBytes = 4 * 1024 * 1024;
+    if (files.supportingDocument.size > maxBytes) {
+      setErrors((prev) => ({
+        ...prev,
+        supportingDocument: "Document file is too large. Please upload a smaller file.",
+      }));
+      return false;
+    }
+
+    setIsLoading(true);
+    setSuccessMessage("");
+    try {
+      const dataUrl = await fileToBase64(files.supportingDocument);
+      const clean = stripDataUrlPrefix(dataUrl);
+      const mime = getMimeFromDataUrl(dataUrl);
+      const result = await preVerifySupportingDocument(form.businessEmail, clean, mime, "owner", {
+        documentType: supportingDocType,
+        userProfile: {
+          full_name: fullName,
+          first_name: form.firstName.trim(),
+          last_name: form.lastName.trim(),
+          owner_type: form.ownerType,
+          business_name: form.businessName,
+          permit_number: form.permitNumber,
+          email: form.businessEmail,
+        },
+      });
+      if (!result.success) throw new Error(result.message || "Supporting document verification failed.");
+
+      setSupportingDocStatus({
+        verified: true,
+        message: result.message || "Supporting document verified.",
+      });
+      setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "" }));
+      return true;
+    } catch (error) {
+      setSupportingDocStatus({ verified: false, message: "" });
+      setErrors((prev) => ({
+        ...prev,
+        supportingDocument: error?.message || "Supporting document verification failed.",
+      }));
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const validateStep3 = useCallback(() => {
     const next = {};
+    if (!kyc.idType) next.idType = "Please select your ID type.";
     if (!kyc.idCardFile) next.idCardFile = "Please upload your government ID.";
     if (!kyc.idRegistered) next.idRegistered = "Please register your ID first.";
     if (!kyc.selfieVerified) next.selfieVerified = "Please verify your selfie matches the ID.";
@@ -421,11 +766,15 @@ export default function RegisterOwnerPage({
     return Object.keys(next).length === 0;
   }, [kyc]);
 
-  const goNext = () => {
+  const goNext = async () => {
     if (!canAct()) return;
     setSuccessMessage("");
     if (step === 1 && !validateStep1()) return;
-    if (step === 2 && !validateStep2()) return;
+    if (step === 2) {
+      if (!validateStep2()) return;
+      const verified = await verifySupportingDoc();
+      if (!verified) return;
+    }
     if (step === 3 && !validateStep3()) return;
     setStep((prev) => Math.min(TOTAL_STEPS, prev + 1));
   };
@@ -441,6 +790,10 @@ export default function RegisterOwnerPage({
 
   const registerId = async () => {
     if (!canAct()) return;
+    if (!kyc.idType) {
+      setStepErrors((prev) => ({ ...prev, idType: "Select your ID type first." }));
+      return;
+    }
     if (!kyc.idCardFile) {
       setStepErrors((prev) => ({ ...prev, idCardFile: "Upload your ID image first." }));
       return;
@@ -452,7 +805,19 @@ export default function RegisterOwnerPage({
     try {
       const dataUrl = await fileToBase64(kyc.idCardFile);
       const clean = stripDataUrlPrefix(dataUrl);
-      const result = await preRegisterIdFace(form.businessEmail, fullName, "owner", clean);
+      const mime = getMimeFromDataUrl(dataUrl);
+      const result = await preRegisterIdFace(form.businessEmail, fullName, "owner", clean, mime, {
+        idType: kyc.idType,
+        userProfile: {
+          full_name: fullName,
+          first_name: form.firstName.trim(),
+          last_name: form.lastName.trim(),
+          email: form.businessEmail,
+          owner_type: form.ownerType,
+          business_name: form.businessName,
+          permit_number: form.permitNumber,
+        },
+      });
       if (!result.success) throw new Error(result.message || "Failed to register ID.");
 
       setKyc((prev) => ({
@@ -463,7 +828,7 @@ export default function RegisterOwnerPage({
         selfieDataUrl: "",
         selfieBase64Clean: "",
       }));
-      setStepErrors((prev) => ({ ...prev, idRegistered: "" }));
+      setStepErrors((prev) => ({ ...prev, idType: "", idRegistered: "" }));
       setKycUi((prev) => ({ ...prev, statusText: "ID registered. Open camera to capture your selfie." }));
     } catch (error) {
       setStepErrors((prev) => ({ ...prev, idRegistered: friendlyError(error.message) }));
@@ -544,14 +909,16 @@ export default function RegisterOwnerPage({
     setKycUi((prev) => ({ ...prev, statusText: "Capturing selfie..." }));
 
     try {
-      const dataUrl = await captureBase64FromStream(cameraStream);
-      if (!dataUrl) throw new Error("Failed to capture selfie.");
-      const clean = stripDataUrlPrefix(dataUrl);
+      const frames = await captureFramesFromStream(cameraStream, { count: 3, intervalMs: 220 });
+      if (!frames.length) throw new Error("Failed to capture selfie.");
+      const cleanFrames = frames.map(stripDataUrlPrefix);
+      const lastDataUrl = frames[frames.length - 1];
+      const lastClean = cleanFrames[cleanFrames.length - 1];
 
-      setKyc((prev) => ({ ...prev, selfieDataUrl: dataUrl, selfieBase64Clean: clean }));
-      setKycUi((prev) => ({ ...prev, statusText: "Checking selfie quality..." }));
+      setKyc((prev) => ({ ...prev, selfieDataUrl: lastDataUrl, selfieBase64Clean: lastClean }));
+      setKycUi((prev) => ({ ...prev, statusText: "Checking selfie motion... please blink or move slightly." }));
 
-      const result = await preSelfieChallenge(form.businessEmail, [clean]);
+      const result = await preSelfieChallenge(form.businessEmail, cleanFrames);
       if (!result.passed) throw new Error(result.message || "Selfie challenge failed.");
 
       setKyc((prev) => ({ ...prev, challengeId: result.challenge_id }));
@@ -577,7 +944,7 @@ export default function RegisterOwnerPage({
     setKycUi((prev) => ({ ...prev, statusText: "Verifying face match..." }));
 
     try {
-      const result = await preSelfieVerify(form.businessEmail, kyc.challengeId, kyc.selfieBase64Clean);
+      const result = await preSelfieVerify(form.businessEmail, kyc.challengeId, kyc.selfieBase64Clean, "owner");
       if (!result.verified) throw new Error(result.message || "Face does not match ID.");
       setKyc((prev) => ({ ...prev, selfieVerified: true }));
       setStepErrors((prev) => ({ ...prev, selfieVerified: "" }));
@@ -624,40 +991,29 @@ export default function RegisterOwnerPage({
         city: form.city,
         barangay: form.barangay,
         ownerType: form.ownerType,
-        businessName: canShowBusinessFields ? form.businessName : "",
-        permitNumber: canShowBusinessFields ? form.permitNumber : "",
+        businessName: form.businessName,
+        permitNumber: form.permitNumber,
       });
 
-      const profile = {
-        firstName: form.firstName,
-        lastName: form.lastName,
-        name: fullName,
-        email: form.businessEmail,
-        phone: form.phone,
-        address: form.address,
-        region: form.region,
-        province: form.province,
-        city: form.city,
-        barangay: form.barangay,
-        ownerType: form.ownerType,
-        businessName: canShowBusinessFields ? form.businessName : "",
-        permitNumber: canShowBusinessFields ? form.permitNumber : "",
-      };
-
-      persistOwnerProfile(profile);
-      window.dispatchEvent(new Event("owner-profile-updated"));
-
+      const registeredEmail = String(response?.user?.email || form.businessEmail || "").trim().toLowerCase();
       setSuccessMessage(response?.message || "Registration successful. Redirecting to OTP verification...");
-      await API.sendOTP(form.businessEmail).catch(() => {});
-      setTimeout(() => onNavigateToRegisterOTP(form.businessEmail, form.phone, fullName), 1200);
+      await API.sendOTP(registeredEmail).catch(() => {});
+      setTimeout(() => onNavigateToRegisterOTP(registeredEmail, form.phone, fullName), 1200);
     } catch (error) {
       const lower = (error?.message || "").toLowerCase();
+      const raw = error?.message || "";
+      const phoneConflict = lower.includes("phone") && lower.includes("already");
       const msg = lower.includes("already")
-        ? "This email is already registered."
+        ? phoneConflict
+          ? "This phone number is already registered."
+          : "This email is already registered."
         : lower.includes("too many")
-        ? error.message
+        ? raw
+        : /^[A-Z]/.test(raw) && !/request failed/i.test(raw)
+        ? raw
         : "Registration failed. Please try again.";
       if (lower.includes("password")) setErrors({ password: msg });
+      else if (phoneConflict) setErrors({ phone: msg });
       else setErrors({ businessEmail: msg });
       setStep(1);
     } finally {
@@ -717,7 +1073,7 @@ export default function RegisterOwnerPage({
                     { type: "individual", label: "Individual", sub: "Personal lessor", icon: User },
                     { type: "business", label: "Business", sub: "Company lessor", icon: Building2 },
                   ].map(({ type, label, sub, icon: Icon }) => (
-                    <button key={type} type="button" onClick={() => setForm((prev) => ({ ...prev, ownerType: type }))} className={`flex items-center gap-3 p-3 rounded-xl border-2 transition ${form.ownerType === type ? "border-[#017FE6] bg-blue-50" : "border-gray-200 hover:border-[#017FE6]"}`}>
+                    <button key={type} type="button" onClick={() => handleOwnerTypeSelect(type)} className={`flex items-center gap-3 p-3 rounded-xl border-2 transition ${form.ownerType === type ? "border-[#017FE6] bg-blue-50" : "border-gray-200 hover:border-[#017FE6]"}`}>
                       <Icon size={18} className="text-gray-600" />
                       <div className="text-left">
                         <p className="text-sm font-semibold text-gray-800">{label}</p>
@@ -739,51 +1095,60 @@ export default function RegisterOwnerPage({
                   name="firstName"
                   value={form.firstName}
                   onChange={handleChange}
+                  onBlur={() => handleStep1Blur("firstName")}
                   error={errors.firstName}
                   disabled={isLoading}
                   onlyLetters
                   icon={User}
                   placeholder="Juan"
                   helper="Use your legal first name as shown on your government ID."
+                  maxLength={50}
                 />
                 <Field
                   label="Last Name"
                   name="lastName"
                   value={form.lastName}
                   onChange={handleChange}
+                  onBlur={() => handleStep1Blur("lastName")}
                   error={errors.lastName}
                   disabled={isLoading}
                   onlyLetters
                   icon={User}
                   placeholder="Dela Cruz"
                   helper="Use your legal last name for matching during verification."
+                  maxLength={50}
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field
-                  label="Email Address"
+                  label="Enter Email"
                   type="email"
                   name="businessEmail"
                   value={form.businessEmail}
                   onChange={handleChange}
+                  onBlur={() => handleStep1Blur("businessEmail")}
                   error={errors.businessEmail}
                   disabled={isLoading}
                   icon={Mail}
-                  placeholder="owner@email.com"
-                  helper="OTP and security updates will be sent to this email."
+                  placeholder="Enter Email"
+                  helper="Enter Email"
+                  maxLength={254}
                 />
                 <Field
                   label="Phone Number"
                   name="phone"
                   value={form.phone}
                   onChange={handleChange}
+                  onBlur={() => handleStep1Blur("phone")}
                   error={errors.phone}
                   disabled={isLoading}
                   onlyNumbers
                   icon={Phone}
-                  placeholder="09123456789"
-                  helper="Enter an active 11-digit mobile number."
+                  placeholder="9XXXXXXXXX"
+                  helper="Enter your 10-digit mobile number."
+                  maxLength={10}
+                  prefixText="+63"
                 />
               </div>
 
@@ -806,6 +1171,7 @@ export default function RegisterOwnerPage({
                     name="region"
                     value={form.region}
                     onChange={handleRegionChange}
+                    onBlur={() => handleStep1Blur("region", form)}
                     options={regions.map((region) => ({ value: region.code, label: region.name }))}
                     error={errors.region}
                     disabled={isLoading}
@@ -817,6 +1183,7 @@ export default function RegisterOwnerPage({
                     name="province"
                     value={form.province}
                     onChange={handleProvinceChange}
+                    onBlur={() => handleStep1Blur("province", form)}
                     options={provinces.map((province) => ({ value: province.code, label: province.name }))}
                     error={errors.province}
                     disabled={isLoading || !form.region || provinces.length === 0}
@@ -832,6 +1199,7 @@ export default function RegisterOwnerPage({
                     name="city"
                     value={form.city}
                     onChange={handleCityChange}
+                    onBlur={() => handleStep1Blur("city", form)}
                     options={cities.map((city) => ({ value: city.code, label: city.name }))}
                     error={errors.city}
                     disabled={isLoading || !form.region || (provinces.length > 0 && !form.province)}
@@ -843,6 +1211,7 @@ export default function RegisterOwnerPage({
                     name="barangay"
                     value={form.barangay}
                     onChange={handleBarangayChange}
+                    onBlur={() => handleStep1Blur("barangay", form)}
                     options={barangays.map((barangay) => ({ value: barangay.code, label: barangay.name }))}
                     error={errors.barangay}
                     disabled={isLoading || !form.city}
@@ -858,65 +1227,94 @@ export default function RegisterOwnerPage({
                 {addressLoadError && <p className="text-xs text-red-500">{addressLoadError}</p>}
               </div>
 
-              {canShowBusinessFields && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field
-                    label="Business Name"
-                    name="businessName"
-                    value={form.businessName}
-                    onChange={handleChange}
-                    error={errors.businessName}
-                    disabled={isLoading}
-                    icon={Building2}
-                    placeholder="Sample Transport Services Inc."
-                    helper="Use your registered business name."
-                  />
-                  <Field
-                    label="Permit Number"
-                    name="permitNumber"
-                    value={form.permitNumber}
-                    onChange={handleChange}
-                    error={errors.permitNumber}
-                    disabled={isLoading}
-                    icon={Building2}
-                    placeholder="DTI/SEC Permit No."
-                    helper="Enter your official permit or registration number."
-                  />
-                </div>
-              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field
+                  label={form.ownerType === "individual" ? "Business / Trade Name" : "Business Name"}
+                  name="businessName"
+                  value={form.businessName}
+                  onChange={handleChange}
+                  onBlur={() => handleStep1Blur("businessName")}
+                  error={errors.businessName}
+                  disabled={isLoading}
+                  icon={Building2}
+                  placeholder="Sample Transport Services Inc."
+                  helper="Use the business or trade name shown in your supporting document."
+                  maxLength={120}
+                />
+                <Field
+                  label="Permit / Registration No."
+                  name="permitNumber"
+                  value={form.permitNumber}
+                  onChange={handleChange}
+                  onBlur={() => handleStep1Blur("permitNumber")}
+                  error={errors.permitNumber}
+                  disabled={isLoading}
+                  icon={Building2}
+                  placeholder="DTI/SEC/Permit No."
+                  helper="Enter the permit or registration number shown on your uploaded document."
+                  maxLength={50}
+                />
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <PasswordField
-                  label="Password"
+                  label="Create Password"
                   name="password"
                   value={form.password}
                   onChange={handleChange}
+                  onBlur={() => handleStep1Blur("password")}
                   error={errors.password}
                   disabled={isLoading}
                   show={showPw}
                   toggle={() => setShowPw((prev) => !prev)}
-                  helper="Use at least 8 characters with upper/lowercase, number, and symbol."
-                  placeholder="Create a strong password"
+                  helper="Create Password"
+                  placeholder="Create Password"
+                  maxLength={128}
                 />
                 <PasswordField
                   label="Confirm Password"
                   name="confirmPassword"
                   value={form.confirmPassword}
                   onChange={handleChange}
+                  onBlur={() => handleStep1Blur("confirmPassword")}
                   error={errors.confirmPassword}
                   disabled={isLoading}
                   show={showCpw}
                   toggle={() => setShowCpw((prev) => !prev)}
-                  helper="Re-enter your password exactly."
-                  placeholder="Repeat your password"
+                  helper="Confirm Password"
+                  placeholder="Confirm Password"
+                  maxLength={128}
                 />
               </div>
 
               <div className="space-y-2">
                 <label className="flex items-center gap-3 cursor-pointer group">
-                  <input type="checkbox" name="agree" checked={form.agree} onChange={handleChange} disabled={isLoading} className="w-5 h-5 accent-[#017FE6] cursor-pointer flex-shrink-0 disabled:opacity-60" />
+                  <input type="checkbox" name="agree" checked={form.agree} onChange={handleChange} onBlur={() => handleStep1Blur("agree")} disabled={isLoading} className="w-5 h-5 accent-[#017FE6] cursor-pointer flex-shrink-0 disabled:opacity-60" />
                   <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
-                    I agree to the <span className="text-[#017FE6] font-semibold">Terms and Conditions</span> and <span className="text-[#017FE6] font-semibold">Privacy Policy</span>
+                    I agree to the{" "}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setLegalModalType("terms");
+                      }}
+                      className="text-[#017FE6] font-semibold hover:underline"
+                    >
+                      Terms and Conditions
+                    </button>{" "}
+                    and{" "}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setLegalModalType("privacy");
+                      }}
+                      className="text-[#017FE6] font-semibold hover:underline"
+                    >
+                      Privacy Policy
+                    </button>
                   </span>
                 </label>
                 {errors.agree && <p className="text-red-500 text-sm font-medium">{errors.agree}</p>}
@@ -936,15 +1334,30 @@ export default function RegisterOwnerPage({
                 </div>
               </div>
 
+              <SelectField
+                label="Supporting Document Type"
+                name="supportingDocType"
+                value={supportingDocType}
+                onChange={handleSupportingDocTypeChange}
+                options={SUPPORTING_DOCUMENT_TYPES.map((entry) => ({ value: entry, label: entry }))}
+                error={errors.supportingDocType}
+                disabled={isLoading}
+                required
+                placeholder="Select the document type you uploaded"
+              />
+
               <FileInput
-                label={canShowBusinessFields ? "Business Permit / DTI / SEC Registration" : "Supporting Document"}
-                helper={canShowBusinessFields ? "Upload a document proving your business is registered." : "Upload a document proving your legitimacy as a vehicle owner."}
+                label="Supporting Business Document"
+                helper="Upload a Philippines-issued document (DTI/SEC/Mayor's Permit/etc.) that matches your business name and permit/registration number."
                 name="supportingDocument"
                 onChange={handleFile}
                 error={errors.supportingDocument}
                 file={files.supportingDocument}
                 disabled={isLoading}
               />
+              {supportingDocStatus.verified && !errors.supportingDocument && (
+                <p className="text-xs text-emerald-600">{supportingDocStatus.message}</p>
+              )}
             </>
           )}
 
@@ -960,9 +1373,21 @@ export default function RegisterOwnerPage({
                 </div>
               </div>
 
+              <SelectField
+                label="ID Type"
+                name="idType"
+                value={kyc.idType}
+                onChange={handleIdTypeChange}
+                options={ID_DOCUMENT_TYPES.map((entry) => ({ value: entry, label: entry }))}
+                error={stepErrors.idType}
+                disabled={isLoading}
+                required
+                placeholder="Select the ID type you uploaded"
+              />
+
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <p className="font-semibold text-gray-900">Government ID (front side)</p>
-                <p className="text-sm text-gray-600 mt-1">Upload a clear photo of the entire ID card.</p>
+                <p className="text-sm text-gray-600 mt-1">Upload a clear photo of a Philippine government ID.</p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <input
                     ref={idInputRef}
@@ -1012,7 +1437,7 @@ export default function RegisterOwnerPage({
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <p className="font-semibold text-gray-900 mb-3">Verification Steps</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <button type="button" disabled={isLoading || !kyc.idCardFile} onClick={registerId} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.idRegistered ? "bg-green-500 text-white cursor-default" : "bg-gray-900 text-white hover:opacity-95"} disabled:opacity-50`}>
+                  <button type="button" disabled={isLoading || !kyc.idType || !kyc.idCardFile} onClick={registerId} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.idRegistered ? "bg-green-500 text-white cursor-default" : "bg-gray-900 text-white hover:opacity-95"} disabled:opacity-50`}>
                     {isLoading && !kyc.idRegistered ? <><Loader size={15} className="animate-spin" /> Processing...</> : kyc.idRegistered ? "ID Registered" : "1. Register ID"}
                   </button>
                   <button type="button" disabled={isLoading || !kyc.idRegistered} onClick={kycUi.showCamera ? closeCamera : openCamera} className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-[#017FE6] to-[#0165B8] hover:opacity-95 disabled:opacity-50 transition">
@@ -1074,8 +1499,11 @@ export default function RegisterOwnerPage({
                   { label: "City / Municipality", value: cities.find((entry) => entry.code === form.city)?.name || "-" },
                   { label: "Barangay", value: barangays.find((entry) => entry.code === form.barangay)?.name || "-" },
                   { label: "Owner Type", value: canShowBusinessFields ? "Business" : "Individual" },
-                  ...(canShowBusinessFields ? [{ label: "Business Name", value: form.businessName || "-" }, { label: "Permit Number", value: form.permitNumber || "-" }] : []),
+                  { label: "Business Name", value: form.businessName || "-" },
+                  { label: "Permit Number", value: form.permitNumber || "-" },
+                  { label: "Supporting Document Type", value: supportingDocType || "-" },
                   { label: "Supporting Document", value: files.supportingDocument ? "Uploaded" : "Missing" },
+                  { label: "ID Type", value: kyc.idType || "-" },
                   { label: "Face Verification", value: kyc.selfieVerified ? "Verified" : "Not verified", highlight: kyc.selfieVerified },
                 ].map(({ label, value, highlight }, i, arr) => (
                   <React.Fragment key={label}>
@@ -1115,6 +1543,13 @@ export default function RegisterOwnerPage({
           )}
         </form>
       </div>
+      <LegalPolicyModal
+        isOpen={Boolean(legalModalType)}
+        documentType={legalModalType === "privacy" ? "privacy" : "terms"}
+        onClose={() => setLegalModalType("")}
+        onSwitchToTerms={() => setLegalModalType("terms")}
+        onSwitchToPrivacy={() => setLegalModalType("privacy")}
+      />
     </AuthShell>
   );
 }
@@ -1132,11 +1567,35 @@ function Field({
   icon: Icon,
   placeholder = "",
   helper = "",
+  maxLength,
+  prefixText = "",
+  onBlur,
 }) {
   const handleInputChange = (e) => {
     let nextValue = e.target.value;
-    if (onlyLetters) nextValue = nextValue.replace(/[^A-Za-z]/g, "");
+    if (onlyLetters) nextValue = normalizeNameInput(nextValue);
     if (onlyNumbers) nextValue = nextValue.replace(/[^0-9]/g, "");
+    if (type === "email") nextValue = nextValue.replace(/\s/g, "");
+    onChange({ target: { name, value: nextValue, type } });
+  };
+
+  const handleInputKeyDown = (e) => {
+    if (type === "email" && e.key === " ") {
+      e.preventDefault();
+    }
+  };
+
+  const handleInputPaste = (e) => {
+    if (type !== "email") return;
+    const pastedText = String(e.clipboardData?.getData("text") || "");
+    if (!/\s/.test(pastedText)) return;
+    e.preventDefault();
+    const sanitizedText = pastedText.replace(/\s/g, "");
+    const input = e.currentTarget;
+    const currentValue = String(input?.value || "");
+    const start = Number.isInteger(input?.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input?.selectionEnd) ? input.selectionEnd : currentValue.length;
+    const nextValue = currentValue.slice(0, start) + sanitizedText + currentValue.slice(end);
     onChange({ target: { name, value: nextValue, type } });
   };
 
@@ -1147,14 +1606,23 @@ function Field({
       </label>
       {helper ? <p className="text-xs text-gray-500">{helper}</p> : null}
       <div className="relative">
+        {prefixText ? (
+          <span className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-sm font-medium text-gray-500">
+            {prefixText}
+          </span>
+        ) : null}
         <input
           type={type}
           name={name}
           value={value}
           onChange={handleInputChange}
+          onKeyDown={handleInputKeyDown}
+          onPaste={handleInputPaste}
+          onBlur={onBlur}
           disabled={disabled}
           placeholder={placeholder}
-          className={`w-full h-11 rounded-xl border px-4 text-[15px] placeholder:text-gray-400 outline-none shadow-sm transition ${Icon ? "pr-11" : ""} ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
+          maxLength={maxLength}
+          className={`relative z-0 w-full h-11 rounded-xl border px-4 text-[15px] placeholder:text-gray-400 outline-none shadow-sm transition ${Icon ? "pr-11" : ""} ${prefixText ? "pl-14" : ""} ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
         />
         {Icon && <Icon size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500" />}
       </div>
@@ -1174,6 +1642,7 @@ function SelectField({
   required = true,
   helper = "",
   placeholder = "",
+  onBlur,
 }) {
   const fallbackPlaceholder = placeholder || `Select ${label.toLowerCase()}`;
   return (
@@ -1187,6 +1656,7 @@ function SelectField({
           name={name}
           value={value}
           onChange={onChange}
+          onBlur={onBlur}
           disabled={disabled}
           className={`w-full h-11 appearance-none rounded-xl border px-4 pr-10 text-sm outline-none shadow-sm transition ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white text-gray-900"}`}
         >
@@ -1215,7 +1685,33 @@ function PasswordField({
   toggle,
   helper = "",
   placeholder = "",
+  maxLength,
+  onBlur,
 }) {
+  const sanitizePasswordValue = (rawValue = "") => String(rawValue).replace(/\s/g, "");
+
+  const handlePasswordChange = (event) => {
+    const sanitizedValue = sanitizePasswordValue(event?.target?.value || "");
+    onChange({ target: { name, value: sanitizedValue, type: "password" } });
+  };
+
+  const handlePasswordKeyDown = (event) => {
+    if (event.key === " ") event.preventDefault();
+  };
+
+  const handlePasswordPaste = (event) => {
+    const pastedText = String(event.clipboardData?.getData("text") || "");
+    if (!/\s/.test(pastedText)) return;
+    event.preventDefault();
+    const sanitizedText = sanitizePasswordValue(pastedText);
+    const input = event.currentTarget;
+    const currentValue = String(input?.value || "");
+    const start = Number.isInteger(input?.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input?.selectionEnd) ? input.selectionEnd : currentValue.length;
+    const nextValue = currentValue.slice(0, start) + sanitizedText + currentValue.slice(end);
+    onChange({ target: { name, value: nextValue, type: "password" } });
+  };
+
   return (
     <div className="space-y-1.5">
       <label className="block text-sm font-semibold text-gray-700">
@@ -1231,9 +1727,13 @@ function PasswordField({
           type={show ? "text" : "password"}
           name={name}
           value={value}
-          onChange={onChange}
+          onChange={handlePasswordChange}
+          onKeyDown={handlePasswordKeyDown}
+          onPaste={handlePasswordPaste}
+          onBlur={onBlur}
           disabled={disabled}
           placeholder={placeholder}
+          maxLength={maxLength}
           className={`w-full h-11 rounded-xl border px-4 pr-11 text-[15px] placeholder:text-gray-400 outline-none shadow-sm transition ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
         />
         <button type="button" onClick={toggle} disabled={disabled} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed">

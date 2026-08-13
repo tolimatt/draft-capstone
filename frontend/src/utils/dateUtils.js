@@ -22,38 +22,109 @@ export const getTomorrowDate = () => {
 
 export const getCurrentTime = () => formatTimeInput(new Date());
 
+export const getMinPickupDateTime = (minutes = 10) => {
+  const minDateTime = new Date();
+  minDateTime.setSeconds(0, 0);
+  minDateTime.setMinutes(minDateTime.getMinutes() + minutes);
+  return minDateTime;
+};
+
+export const getMinPickupDate = (minutes = 10) => formatDateInput(getMinPickupDateTime(minutes));
+
+export const getMinPickupTime = (minutes = 10) => formatTimeInput(getMinPickupDateTime(minutes));
+
+export const getMinReturnDateTime = (pickupDate, pickupTime, minutes = 60) => {
+  const pickup = getDateTime(pickupDate, pickupTime);
+  if (!pickup) return null;
+  const minReturn = new Date(pickup.getTime() + minutes * 60 * 1000);
+  minReturn.setSeconds(0, 0);
+  return minReturn;
+};
+
+export const getMinReturnDate = (pickupDate, pickupTime, minutes = 60) => {
+  const minReturn = getMinReturnDateTime(pickupDate, pickupTime, minutes);
+  return minReturn ? formatDateInput(minReturn) : "";
+};
+
+export const getMinReturnTime = (pickupDate, pickupTime, minutes = 60) => {
+  const minReturn = getMinReturnDateTime(pickupDate, pickupTime, minutes);
+  return minReturn ? formatTimeInput(minReturn) : "";
+};
 export const getDateTime = (date, time) => {
   if (!date || !time) return null;
   const value = new Date(`${date}T${time}`);
   return Number.isNaN(value.getTime()) ? null : value;
 };
 
-export const sanitizeBookingRange = (bookingData = {}) => {
-  const today = getTodayDate();
-  const nowTime = getCurrentTime();
+export const getDurationMinutesBetween = (start, end) => {
+  if (start === null || start === undefined || end === null || end === undefined) return 0;
+  const startDate = start instanceof Date ? start : new Date(start);
+  const endDate = end instanceof Date ? end : new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return 0;
+  const diffMs = endDate.getTime() - startDate.getTime();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return 0;
+  return Math.round(diffMs / (1000 * 60));
+};
 
-  let pickupDate = bookingData.pickupDate || today;
-  let pickupTime = bookingData.pickupTime || nowTime;
+export const getBookingDurationMinutes = (pickupDate, pickupTime, returnDate, returnTime) => {
+  const pickup = getDateTime(pickupDate, pickupTime);
+  const dropoff = getDateTime(returnDate, returnTime);
+  if (!pickup || !dropoff) return 0;
+  return getDurationMinutesBetween(pickup, dropoff);
+};
+
+export const getDurationHoursFromMinutes = (minutes) => {
+  const numeric = Number(minutes || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Math.round((numeric / 60) * 10000) / 10000;
+};
+
+export const formatDurationMinutes = (minutes) => {
+  const totalMinutes = Number(minutes || 0);
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return "0m";
+  const safeMinutes = Math.round(totalMinutes);
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+  if (hours <= 0) return `${remainingMinutes}m`;
+  if (remainingMinutes <= 0) return `${hours}h`;
+  return `${hours}h ${remainingMinutes}m`;
+};
+
+export const sanitizeBookingRange = (bookingData = {}) => {
+  const minPickupDateTime = getMinPickupDateTime();
+  const minPickupDate = formatDateInput(minPickupDateTime);
+  const minPickupTime = formatTimeInput(minPickupDateTime);
+
+  let pickupDate = bookingData.pickupDate || minPickupDate;
+  let pickupTime = bookingData.pickupTime || minPickupTime;
   let returnDate = bookingData.returnDate || pickupDate;
   let returnTime = bookingData.returnTime || pickupTime;
 
-  if (pickupDate < today) pickupDate = today;
-  if (pickupDate === today && pickupTime < nowTime) pickupTime = nowTime;
+  if (pickupDate < minPickupDate) pickupDate = minPickupDate;
+  if (pickupDate === minPickupDate && pickupTime < minPickupTime) pickupTime = minPickupTime;
 
   let pickupDateTime = getDateTime(pickupDate, pickupTime);
   if (!pickupDateTime) {
-    pickupDate = today;
-    pickupTime = nowTime;
+    pickupDate = minPickupDate;
+    pickupTime = minPickupTime;
     pickupDateTime = getDateTime(pickupDate, pickupTime);
   }
 
   if (returnDate < pickupDate) returnDate = pickupDate;
 
-  const returnDateTime = getDateTime(returnDate, returnTime);
-  if (!returnDateTime || returnDateTime <= pickupDateTime) {
-    const minimumReturn = new Date(pickupDateTime.getTime() + 60 * 60 * 1000);
-    returnDate = formatDateInput(minimumReturn);
-    returnTime = formatTimeInput(minimumReturn);
+  const minReturnDateTime = getMinReturnDateTime(pickupDate, pickupTime);
+  if (minReturnDateTime) {
+    const minReturnDate = formatDateInput(minReturnDateTime);
+    const minReturnTime = formatTimeInput(minReturnDateTime);
+
+    if (returnDate < minReturnDate) returnDate = minReturnDate;
+    if (returnDate === minReturnDate && returnTime < minReturnTime) returnTime = minReturnTime;
+
+    const returnDateTime = getDateTime(returnDate, returnTime);
+    if (!returnDateTime || returnDateTime < minReturnDateTime) {
+      returnDate = minReturnDate;
+      returnTime = minReturnTime;
+    }
   }
 
   return {

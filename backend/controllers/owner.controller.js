@@ -2,11 +2,37 @@ import bcrypt from "bcryptjs";
 import Otp from "../models/Otp.js";
 import User from "../models/User.js";
 import sendEmail from "../utils/sendEmail.js";
+import { getMissingPreKycDocs, clearPreKycDocs } from "../utils/preKycDocs.js";
+import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
+import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
 
 const OTP_TTL_MINUTES = 5;
 const RESEND_COOLDOWN_SECONDS = 45;
+const ALLOWED_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "yahoo.com",
+  "outlook.com",
+  "hotmail.com",
+]);
+const ALLOWED_OWNER_TYPES = new Set(["individual", "business"]);
+const MAX_NAME_LENGTH = 50;
+const MAX_EMAIL_LENGTH = 254;
+const MAX_PHONE_LENGTH = 10;
+const MAX_ADDRESS_LENGTH = 255;
+const MAX_REGION_LENGTH = 50;
+const MAX_BUSINESS_NAME = 120;
+const MAX_PERMIT_NUMBER = 50;
+const MAX_LICENSE_NUMBER = 50;
 
 const normalizeEmail = (email = "") => email.toLowerCase().trim();
+const normalizePhone = (phone = "") => normalizePhilippineMobile(phone);
+
+const buildDuplicateKeyMessage = (error) => {
+  const duplicateField = Object.keys(error?.keyPattern || error?.keyValue || {})[0];
+  if (duplicateField === "email") return "Email is already registered.";
+  if (duplicateField === "phone") return "This phone number is already registered.";
+  return "A unique field already exists.";
+};
 
 const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000)); // 6-digit OTP
 
@@ -35,18 +61,91 @@ export const requestOwnerOtp = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields." });
     }
 
+    if (firstName.trim().length > MAX_NAME_LENGTH || lastName.trim().length > MAX_NAME_LENGTH) {
+      return res.status(400).json({ message: `Name is too long (max ${MAX_NAME_LENGTH} characters).` });
+    }
+    if (email.length > MAX_EMAIL_LENGTH) {
+      return res.status(400).json({ message: `Email is too long (max ${MAX_EMAIL_LENGTH} characters).` });
+    }
+    const normalizedPhone = normalizePhone(phone);
+
+    if (normalizedPhone.length > MAX_PHONE_LENGTH) {
+      return res.status(400).json({ message: `Phone number is too long (max ${MAX_PHONE_LENGTH} digits).` });
+    }
+    if (!isValidPhilippineMobile(normalizedPhone)) {
+      return res
+        .status(400)
+        .json({ message: "Phone number must be exactly 10 digits and start with 9." });
+    }
+    if (address && address.length > MAX_ADDRESS_LENGTH) {
+      return res.status(400).json({ message: `Address is too long (max ${MAX_ADDRESS_LENGTH} characters).` });
+    }
+    if ((region && region.length > MAX_REGION_LENGTH) || (province && province.length > MAX_REGION_LENGTH) || (city && city.length > MAX_REGION_LENGTH) || (barangay && barangay.length > MAX_REGION_LENGTH)) {
+      return res.status(400).json({ message: `Address selection is too long (max ${MAX_REGION_LENGTH} characters).` });
+    }
+    if (businessName && businessName.length > MAX_BUSINESS_NAME) {
+      return res.status(400).json({ message: `Business name is too long (max ${MAX_BUSINESS_NAME} characters).` });
+    }
+    if (permitNumber && permitNumber.length > MAX_PERMIT_NUMBER) {
+      return res.status(400).json({ message: `Permit number is too long (max ${MAX_PERMIT_NUMBER} characters).` });
+    }
+    if (licenseNumber && licenseNumber.length > MAX_LICENSE_NUMBER) {
+      return res.status(400).json({ message: `License number is too long (max ${MAX_LICENSE_NUMBER} characters).` });
+    }
+    if (!ownerType || !ALLOWED_OWNER_TYPES.has(ownerType)) {
+      return res.status(400).json({ message: "Owner type is invalid." });
+    }
+    if (ownerType === "business") {
+      if (!businessName) {
+        return res.status(400).json({ message: "Business name is required." });
+      }
+      if (!permitNumber) {
+        return res.status(400).json({ message: "Permit number is required." });
+      }
+    }
+
     // Stop if the email is already used
     const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({ message: "Email is already registered." });
+    }
+    const existingPhone = await User.findOne({ phone: normalizedPhone }).select("_id");
+    if (existingPhone) {
+      return res.status(409).json({ message: "This phone number is already registered." });
     }
 
     // Basic validation
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       return res.status(400).json({ message: "Invalid email format." });
     }
+    const emailDomain = email.split("@")[1]?.toLowerCase() || "";
+    if (!ALLOWED_EMAIL_DOMAINS.has(emailDomain)) {
+      return res.status(400).json({
+        message: "Please use a valid email address from a supported provider.",
+      });
+    }
     if (String(password).length < 8) {
       return res.status(400).json({ message: "Password must be at least 8 characters." });
+    }
+
+    const missingDocs = await getMissingPreKycDocs(email, ["id", "supporting"]);
+    if (missingDocs.length) {
+      const needsId = missingDocs.includes("id");
+      const needsSupporting = missingDocs.includes("supporting");
+      let message = "Please verify your ID before registering.";
+      if (needsId && needsSupporting) {
+        message = "Please verify your ID and supporting document before registering.";
+      } else if (needsSupporting) {
+        message = "Please verify your supporting document before registering.";
+      }
+      return res.status(400).json({ message });
+    }
+
+    const faceVerified = await isPreKycFaceVerified(email);
+    if (!faceVerified) {
+      return res.status(400).json({
+        message: "Please verify your selfie matches your ID before registering.",
+      });
     }
 
     // Limit resend requests
@@ -69,7 +168,7 @@ export const requestOwnerOtp = async (req, res) => {
     const pendingPayload = {
       firstName,
       lastName,
-      phone,
+      phone: normalizedPhone,
       address,
       region,
       province,
@@ -99,7 +198,7 @@ export const requestOwnerOtp = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    await sendEmail(email, otp);
+    await sendEmail(email, otp, "owner_register");
 
     return res.status(200).json({
       message: "OTP sent to email.",
@@ -140,7 +239,7 @@ export const resendOwnerOtp = async (req, res) => {
     otpDoc.lastSentAt = new Date();
     await otpDoc.save();
 
-    await sendEmail(email, otp);
+    await sendEmail(email, otp, "owner_register");
 
     return res.status(200).json({
       message: "OTP resent.",
@@ -198,13 +297,22 @@ export const verifyOwnerOtp = async (req, res) => {
       return res.status(409).json({ message: "Email is already registered." });
     }
 
+    const normalizedPhone = normalizePhone(payload.phone);
+    if (normalizedPhone) {
+      const existingPhone = await User.findOne({ phone: normalizedPhone }).select("_id");
+      if (existingPhone) {
+        await Otp.deleteOne({ _id: otpDoc._id });
+        return res.status(409).json({ message: "This phone number is already registered." });
+      }
+    }
+
     const owner = await User.create({
       email,
       password: payload.passwordHash, // Already hashed
       role: "owner",
       firstName: payload.firstName,
       lastName: payload.lastName,
-      phone: payload.phone,
+      phone: normalizedPhone || undefined,
 
       // Optional owner fields
       ownerType: payload.ownerType,
@@ -221,6 +329,8 @@ export const verifyOwnerOtp = async (req, res) => {
 
     // Clean up the OTP record
     await Otp.deleteOne({ _id: otpDoc._id });
+    await clearPreKycDocs(email);
+    await clearPreKycFace(email);
 
     return res.status(201).json({
       message: "Owner registration verified and account created.",
@@ -232,6 +342,9 @@ export const verifyOwnerOtp = async (req, res) => {
       },
     });
   } catch (err) {
+    if (err?.code === 11000) {
+      return res.status(409).json({ message: buildDuplicateKeyMessage(err) });
+    }
     console.error("verifyOwnerOtp error:", err);
     return res.status(500).json({ message: "Failed to verify OTP." });
   }

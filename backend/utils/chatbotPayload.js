@@ -1,17 +1,19 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { getVehicleHourlyRate, roundCurrency } from "./pricing.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../..");
 const chatbotServiceDir = path.resolve(repoRoot, "chatbot-service");
 
-const SUPPORTED_LANGUAGES = new Set(["english", "filipino"]);
+const SUPPORTED_LANGUAGES = new Set(["english", "filipino", "taglish"]);
 const DEFAULT_LANGUAGE = "english";
 const LANGUAGE_CODE_BY_NAME = {
   english: "en",
   filipino: "fil",
+  taglish: "tag",
 };
 const RECOMMENDATION_INTENTS = new Set([
   "available_vehicles",
@@ -30,7 +32,60 @@ const FALLBACK_REPLIES = {
     "Sorry, I'm not sure I understood. Please try asking about booking, rates, requirements, deposit, payment, insurance, or available vehicles.",
   filipino:
     "Paumanhin, hindi ko natukoy nang maayos ang tanong mo. Subukan mong magtanong tungkol sa booking, presyo, requirements, deposito, bayad, insurance, o available na sasakyan.",
+  taglish:
+    "Sorry, hindi ko masyadong nakuha ang tanong mo. Try asking about booking, rates, requirements, deposit, payment, insurance, or available vehicles.",
 };
+const CHATBOT_MAX_INPUT_LENGTH = 500;
+const ALLOWED_CHATBOT_MESSAGE_PATTERN = /^[A-Za-z?,. ]+$/;
+const BLOCKED_WORDS = [
+  "fuck",
+  "fucking",
+  "shit",
+  "bitch",
+  "asshole",
+  "puta",
+  "putangina",
+  "gago",
+  "tanga",
+  "ulol",
+  "tarantado",
+  "pakyu",
+  "bwisit",
+];
+const REJECT_REPLIES = {
+  english: {
+    empty: "Please type a message so I can help you.",
+    too_long: `Please keep your message within ${CHATBOT_MAX_INPUT_LENGTH} characters.`,
+    invalid_characters:
+      "Please use letters, spaces, commas, periods, and question marks only.",
+    profanity:
+      "Please avoid offensive words. Rephrase your question politely, and I'll gladly help.",
+  },
+  filipino: {
+    empty: "Pakilagay ang iyong mensahe para matulungan kita.",
+    too_long: `Pakiikli ang mensahe sa loob ng ${CHATBOT_MAX_INPUT_LENGTH} na characters.`,
+    invalid_characters:
+      "Mga letra, espasyo, kuwit, tuldok, at tandang pananong lamang ang puwedeng gamitin.",
+    profanity:
+      "Iwasan muna natin ang masasamang salita. I-type ulit nang maayos ang tanong at tutulungan kita.",
+  },
+  taglish: {
+    empty: "Please type your message para matulungan kita.",
+    too_long: `Please keep your message within ${CHATBOT_MAX_INPUT_LENGTH} characters.`,
+    invalid_characters:
+      "Please use letters, spaces, commas, periods, and question marks only.",
+    profanity:
+      "Please avoid offensive words. Rephrase mo nang maayos and I'll gladly help.",
+  },
+};
+
+const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const BLOCKED_WORD_PATTERN = new RegExp(
+  `\\b(${BLOCKED_WORDS.map((word) => escapeRegex(word)).join("|")})\\b`,
+  "i"
+);
 const GREETING_PATTERNS = [
   /\bhello\b/i,
   /\bhi\b/i,
@@ -117,6 +172,42 @@ const FILIPINO_MARKER_PATTERNS = [
   /\bhanap\b/i,
   /\bmeron\b/i,
   /\bmay\b/i,
+];
+const FILIPINO_LANGUAGE_MARKER_PATTERNS = [
+  /\bano\b/i,
+  /\bmagkano\b/i,
+  /\banong\b/i,
+  /\bpaano\b/i,
+  /\bkailangan\b/i,
+  /\bpwede\b/i,
+  /\bngayon\b/i,
+  /\bpasahero\b/i,
+  /\bsasakyan\b/i,
+  /\brenta\b/i,
+  /\bpresyo\b/i,
+  /\bbayad\b/i,
+  /\bdeposito\b/i,
+  /\bberipikasyon\b/i,
+  /\bhanap\b/i,
+  /\bmeron\b/i,
+  /\bkamusta\b/i,
+];
+const ENGLISH_LANGUAGE_MARKER_PATTERNS = [
+  /\bwhat\b/i,
+  /\bhow\b/i,
+  /\bwhere\b/i,
+  /\bwhen\b/i,
+  /\bwhich\b/i,
+  /\bcan\b/i,
+  /\bcar\b/i,
+  /\bcars\b/i,
+  /\bbooking\b/i,
+  /\bbook\b/i,
+  /\bprice\b/i,
+  /\brate\b/i,
+  /\bpayment\b/i,
+  /\binsurance\b/i,
+  /\brequirements?\b/i,
 ];
 
 const INTENT_PATTERNS = {
@@ -208,9 +299,18 @@ const INTENT_PATTERNS = {
     /\bneeded to rent\b/i,
     /\bneed(?:ed)? .*rent\b/i,
     /\brent a car\b/i,
+    /\brequirements?\s+na\s+kulang\b/i,
+    /\bano\b.*\brequirements?\b/i,
+    /\bkailangan\b.*\bmag[-\s]?book\b/i,
+    /\bkailangan\b.*\bmakapag[-\s]?book\b/i,
+    /\bano\b.*\bmga\b.*\bkailangan\b.*\b(?:mag[-\s]?book|makapag[-\s]?book)\b/i,
+    /\bkailangan\b.*\bbook\b/i,
+    /\brequirements?\b.*\bmag[-\s]?book\b/i,
+    /\brequirements?\b.*\bmakapag[-\s]?book\b/i,
     /\bkinakailangan\b/i,
     /\bkailangan .*rent\b/i,
     /\bkailangan para makapag-renta\b/i,
+    /\bkailangan para makapag[-\s]?book\b/i,
   ],
   minimum_age: [
     /\bminimum age\b/i,
@@ -234,6 +334,14 @@ const INTENT_PATTERNS = {
     /\bavailable vehicles?\b/i,
     /\bwhat vehicles are available\b/i,
     /\bwhat cars are available\b/i,
+    /\bwhat (vehicle|car) options (are )?available\b/i,
+    /\bcars?\s+ang\s+available\b/i,
+    /\banong?\s+(mga\s+)?cars?\s+ang\s+available\b/i,
+    /\banong?\s+(mga\s+)?kotse\s+ang\s+available\b/i,
+    /\bano\s+ang\s+mga\s+available\s+na\s+(sasakyan|vehicles?|cars?)\b/i,
+    /\bano\s+ang\s+mga\s+available\s+na\s+kotse\b/i,
+    /\banong?\s+available\s+na\s+(sasakyan|vehicles?|cars?)\b/i,
+    /\banong?\s+available\s+na\s+kotse\b/i,
     /\brecommend (a )?(vehicle|car|van|suv|pickup)\b/i,
     /\blooking for\b.*\b(vehicle|car|van|suv|pickup)\b/i,
     /\bneed\b.*\b(car|van|suv|pickup|vehicle)\b/i,
@@ -241,7 +349,12 @@ const INTENT_PATTERNS = {
     /\bmeron bang\b.*\b(car|van|suv|pickup|sedan|kotse)\b/i,
     /\bhanap\b.*\b(sasakyan|kotse|van|suv|pickup)\b/i,
     /\banong mga sasakyan ang available\b/i,
+    /\banong mga kotse ang available\b/i,
     /\banong sasakyan\b/i,
+    /\banong kotse\b/i,
+    /\bavailable na (sasakyan|kotse|vehicles?|cars?)\b/i,
+    /\b(?:sasakyan|kotse|vehicles?|cars?)\s+na\s+available\b/i,
+    /\b(?:meron|may)\s+available\s+na\s+(sasakyan|kotse|vehicles?|cars?)\b/i,
     /\bavailable ba\b/i,
   ],
   available_transmission: [
@@ -281,6 +394,12 @@ const INTENT_PATTERNS = {
   how_to_book: [
     /\bhow do i book\b/i,
     /\bhow to book\b/i,
+    /\bhow\s+mag[-\s]?book\b/i,
+    /\bhow\b.*\bmakapag[-\s]?book\b/i,
+    /\bpaano\s+mag[-\s]?book\b/i,
+    /\bpano\s+mag[-\s]?book\b/i,
+    /\bpaano\b.*\bmakapag[-\s]?book\b/i,
+    /\bpano\b.*\bmakapag[-\s]?book\b/i,
     /\bhow .*reserve\b/i,
     /\bbook(?:ing)? process\b/i,
     /\bbooking process\b/i,
@@ -288,6 +407,8 @@ const INTENT_PATTERNS = {
     /\bpaano mag-book\b/i,
     /\bpaano mag book\b/i,
     /\bpaano mag reserve\b/i,
+    /\bmag[-\s]?book\b/i,
+    /\bmakapag[-\s]?book\b/i,
     /\bmag-book\b/i,
   ],
   same_day_rental: [
@@ -341,6 +462,35 @@ function normalizeLanguage(language) {
   return SUPPORTED_LANGUAGES.has(normalized) ? normalized : DEFAULT_LANGUAGE;
 }
 
+function detectMessageLanguage(message = "") {
+  const normalizedMessage = normalizeText(message);
+  if (!normalizedMessage) return DEFAULT_LANGUAGE;
+
+  const hasFilipinoTerms = FILIPINO_LANGUAGE_MARKER_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
+  const hasEnglishTerms = ENGLISH_LANGUAGE_MARKER_PATTERNS.some((pattern) => pattern.test(normalizedMessage));
+
+  if (hasFilipinoTerms && hasEnglishTerms) {
+    return "taglish";
+  }
+  if (hasFilipinoTerms) {
+    return "filipino";
+  }
+  if (hasEnglishTerms) {
+    return "english";
+  }
+
+  return hasFilipinoMarkers(normalizedMessage) ? "filipino" : DEFAULT_LANGUAGE;
+}
+
+function resolveSelectedLanguage(requestedLanguage = "", message = "") {
+  const normalizedRequested = normalizeText(requestedLanguage);
+  if (normalizedRequested && normalizedRequested !== "auto" && SUPPORTED_LANGUAGES.has(normalizedRequested)) {
+    return normalizedRequested;
+  }
+
+  return detectMessageLanguage(message);
+}
+
 function getLanguageCode(language) {
   return LANGUAGE_CODE_BY_NAME[normalizeLanguage(language)] || LANGUAGE_CODE_BY_NAME[DEFAULT_LANGUAGE];
 }
@@ -390,6 +540,13 @@ function hashString(value = "") {
   return hash;
 }
 
+function pickDeterministicText(options = [], key = "") {
+  const values = Array.isArray(options) ? options.filter(Boolean) : [];
+  if (values.length === 0) return "";
+  const index = hashString(key) % values.length;
+  return cleanText(values[index]);
+}
+
 function getDatasetPath() {
   const configured = String(process.env.CHATBOT_DATASET_PATH || "").trim();
   if (configured) {
@@ -399,6 +556,7 @@ function getDatasetPath() {
   }
 
   const candidates = [
+    path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset_v5.json"),
     path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset_v4.json"),
     path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset.json"),
   ];
@@ -427,23 +585,56 @@ function loadDataset() {
   const raw = JSON.parse(fs.readFileSync(datasetPath, "utf-8"));
   const items = Array.isArray(raw?.items) ? raw.items : [];
   const intentsById = {};
+  const normalizeAnswerList = (values = []) => {
+    const source = Array.isArray(values) ? values : [values];
+    const deduped = [];
+    const seen = new Set();
+    for (const value of source) {
+      const text = cleanText(value);
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(text);
+    }
+    return deduped;
+  };
 
   for (const item of items) {
     const intentId = cleanText(item?.id);
     if (!intentId) continue;
 
+    const examples = Array.isArray(item?.examples) ? item.examples.map((example) => cleanText(example)).filter(Boolean) : [];
+    const firstExample = examples[0] || "";
+
+    const responses = item?.responses && typeof item.responses === "object" ? item.responses : {};
+    const responseEn = cleanText(responses?.en || item?.answer_en);
+    const responseFil = cleanText(responses?.fil || item?.answer_fil);
+    const responseTaglish = cleanText(responses?.taglish || item?.answer_taglish);
+
+    const englishLegacyAnswers = Array.isArray(item?.english?.answers) ? item.english.answers : [];
+    const filipinoLegacyAnswers = Array.isArray(item?.filipino?.answers) ? item.filipino.answers : [];
+
+    const englishAnswers = normalizeAnswerList(
+      englishLegacyAnswers.length > 0 ? englishLegacyAnswers : responseEn ? [responseEn] : []
+    );
+    const filipinoAnswers = normalizeAnswerList(
+      filipinoLegacyAnswers.length > 0 ? filipinoLegacyAnswers : responseFil ? [responseFil] : []
+    );
+    const taglishAnswers = normalizeAnswerList(responseTaglish ? [responseTaglish] : []);
+
     intentsById[intentId] = {
       english: {
-        question: cleanText(item?.english?.question),
-        answers: Array.isArray(item?.english?.answers)
-          ? item.english.answers.map((answer) => cleanText(answer)).filter(Boolean)
-          : [],
+        question: cleanText(item?.english?.question) || firstExample,
+        answers: englishAnswers,
       },
       filipino: {
-        question: cleanText(item?.filipino?.question),
-        answers: Array.isArray(item?.filipino?.answers)
-          ? item.filipino.answers.map((answer) => cleanText(answer)).filter(Boolean)
-          : [],
+        question: cleanText(item?.filipino?.question) || firstExample,
+        answers: filipinoAnswers,
+      },
+      taglish: {
+        question: firstExample,
+        answers: taglishAnswers,
       },
     };
   }
@@ -458,11 +649,17 @@ function getCanonicalQuestion(intentId, language) {
   if (!record) return "";
 
   const preferredLanguage = normalizeLanguage(language);
-  const question = cleanText(record[preferredLanguage]?.question);
-  if (question) return question;
+  const languageOrder =
+    preferredLanguage === "taglish"
+      ? ["taglish", "english", "filipino"]
+      : [preferredLanguage, preferredLanguage === "english" ? "filipino" : "english", "taglish"];
 
-  const fallbackLanguage = preferredLanguage === "english" ? "filipino" : "english";
-  return cleanText(record[fallbackLanguage]?.question);
+  for (const candidateLanguage of languageOrder) {
+    const question = cleanText(record[candidateLanguage]?.question);
+    if (question) return question;
+  }
+
+  return "";
 }
 
 function getIntentAnswers(intentId, language) {
@@ -471,23 +668,51 @@ function getIntentAnswers(intentId, language) {
   if (!record) return [];
 
   const preferredLanguage = normalizeLanguage(language);
-  const primaryAnswers = Array.isArray(record[preferredLanguage]?.answers) ? record[preferredLanguage].answers : [];
-  if (primaryAnswers.length > 0) {
-    return primaryAnswers;
+  const languageOrder =
+    preferredLanguage === "taglish"
+      ? ["taglish", "english", "filipino"]
+      : [preferredLanguage, preferredLanguage === "english" ? "filipino" : "english", "taglish"];
+
+  for (const candidateLanguage of languageOrder) {
+    const answers = Array.isArray(record[candidateLanguage]?.answers) ? record[candidateLanguage].answers : [];
+    if (answers.length > 0) {
+      return answers;
+    }
   }
 
-  const fallbackLanguage = preferredLanguage === "english" ? "filipino" : "english";
-  return Array.isArray(record[fallbackLanguage]?.answers) ? record[fallbackLanguage].answers : [];
+  return [];
 }
 
 function pickDatasetAnswer(intentId, language, seed = "") {
-  const answers = getIntentAnswers(intentId, language);
-  if (answers.length === 0) {
-    return FALLBACK_REPLIES[normalizeLanguage(language)];
+  const selectedLanguage = normalizeLanguage(language);
+  if (selectedLanguage === "taglish") {
+    const taglishAnswers = getIntentAnswers(intentId, "taglish");
+    if (taglishAnswers.length > 0) {
+      return pickDeterministicText(taglishAnswers, `${intentId}:taglish:${seed}`);
+    }
+    const englishAnswers = getIntentAnswers(intentId, "english");
+    const filipinoAnswers = getIntentAnswers(intentId, "filipino");
+    const englishReply = pickDeterministicText(englishAnswers, `${intentId}:english:${seed}`);
+    const filipinoReply = pickDeterministicText(filipinoAnswers, `${intentId}:filipino:${seed}`);
+    if (englishReply && filipinoReply) {
+      const useEnglishPrimary = hashString(`${intentId}:${seed}:taglish-primary`) % 2 === 0;
+      return useEnglishPrimary
+        ? cleanText(`Narito ang info: ${englishReply}`)
+        : cleanText(`Here's what you need to know: ${filipinoReply}`);
+    }
+    if (englishReply || filipinoReply) {
+      const onlyReply = cleanText(englishReply || filipinoReply);
+      return cleanText(`Narito ang info: ${onlyReply}`);
+    }
+    return FALLBACK_REPLIES.taglish;
   }
 
-  const index = hashString(`${intentId}:${normalizeLanguage(language)}:${seed}`) % answers.length;
-  return cleanText(answers[index]);
+  const answers = getIntentAnswers(intentId, selectedLanguage);
+  if (answers.length === 0) {
+    return FALLBACK_REPLIES[selectedLanguage] || FALLBACK_REPLIES[DEFAULT_LANGUAGE];
+  }
+
+  return pickDeterministicText(answers, `${intentId}:${selectedLanguage}:${seed}`);
 }
 
 function scoreIntentPatterns(message) {
@@ -543,7 +768,7 @@ function extractSlots(message) {
   }
 
   let type = "";
-  if (/\bsedan\b|\bcar\b|\bcars\b|\bkotse\b/.test(text)) {
+  if (/\bsedan\b/.test(text)) {
     type = "sedan";
   } else if (/\bsuv\b/.test(text)) {
     type = "suv";
@@ -551,6 +776,8 @@ function extractSlots(message) {
     type = "van";
   } else if (/\bpick[\s-]?up\b|\btruck\b/.test(text)) {
     type = "pickup";
+  } else if (/\bmotor(?:cycle|bike)?\b|\bmotor\b/.test(text)) {
+    type = "motorcycle";
   }
 
   let budget = null;
@@ -609,10 +836,49 @@ function normalizeTransmission(value = "") {
   return normalized;
 }
 
+function toNonNegativeNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return numeric;
+}
+
+function resolveVehicleHourlyRate(vehicle = {}) {
+  const explicitHourlyRate = toNonNegativeNumber(vehicle?.hourlyRate);
+  if (explicitHourlyRate !== null) {
+    return roundCurrency(explicitHourlyRate);
+  }
+
+  const normalizedDailyRate = toNonNegativeNumber(vehicle?.dailyRate);
+  const hasNativeDailyRate =
+    vehicle?.dailyRentalRate !== undefined && vehicle?.dailyRentalRate !== null;
+
+  if (hasNativeDailyRate) {
+    const computedHourlyRate = getVehicleHourlyRate(vehicle, {
+      rateField: "dailyRentalRate",
+      unitField: "pricingUnit",
+    });
+    if (computedHourlyRate > 0 || normalizedDailyRate === null) {
+      return computedHourlyRate;
+    }
+  }
+
+  if (normalizedDailyRate !== null) {
+    return roundCurrency(normalizedDailyRate);
+  }
+
+  const legacyPrice = toNonNegativeNumber(vehicle?.price);
+  if (legacyPrice !== null) {
+    return roundCurrency(legacyPrice);
+  }
+
+  return 0;
+}
+
 function normalizeVehicleForChatbot(vehicle) {
   const specs = vehicle?.specs || {};
   const images = Array.isArray(vehicle?.images) ? vehicle.images : [];
   const imageUrl = cleanText(vehicle?.imageUrl || images[0] || "");
+  const hourlyRate = resolveVehicleHourlyRate(vehicle);
 
   return {
     _id: String(vehicle?._id || ""),
@@ -620,7 +886,8 @@ function normalizeVehicleForChatbot(vehicle) {
     type: normalizeVehicleType(vehicle?.type || specs?.type || specs?.subType || ""),
     transmission: normalizeTransmission(vehicle?.transmission || specs?.transmission || ""),
     seats: Number(vehicle?.seats || specs?.seats || 0) || 0,
-    dailyRate: Number(vehicle?.dailyRate || vehicle?.dailyRentalRate || 0) || 0,
+    dailyRate: hourlyRate,
+    hourlyRate,
     isAvailable: vehicle?.isAvailable ?? vehicle?.availabilityStatus === "available",
     location: cleanText(vehicle?.location || ""),
     imageUrl,
@@ -682,21 +949,104 @@ function filterVehiclesForChatbot(vehicles, slots) {
   });
 }
 
+export function validateChatbotInput(message = "") {
+  const rawMessage = String(message || "");
+  const trimmedMessage = rawMessage.trim();
+
+  if (!trimmedMessage) {
+    return {
+      isValid: false,
+      reason: "empty",
+      message: "",
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  if (rawMessage.length > CHATBOT_MAX_INPUT_LENGTH) {
+    return {
+      isValid: false,
+      reason: "too_long",
+      message: trimmedMessage,
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  if (!ALLOWED_CHATBOT_MESSAGE_PATTERN.test(rawMessage)) {
+    return {
+      isValid: false,
+      reason: "invalid_characters",
+      message: trimmedMessage,
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  if (BLOCKED_WORD_PATTERN.test(trimmedMessage)) {
+    return {
+      isValid: false,
+      reason: "profanity",
+      message: trimmedMessage,
+      maxLength: CHATBOT_MAX_INPUT_LENGTH,
+    };
+  }
+
+  return {
+    isValid: true,
+    reason: "",
+    message: trimmedMessage,
+    maxLength: CHATBOT_MAX_INPUT_LENGTH,
+  };
+}
+
 export function buildChatbotPayload(message, language, vehicles = []) {
   const originalMessage = cleanText(message);
-  const selectedLanguage = normalizeLanguage(language);
+  const selectedLanguage = resolveSelectedLanguage(language, originalMessage);
   const normalizedMessage = normalizeText(originalMessage);
   const slots = extractSlots(originalMessage);
   const patternHint = detectIntentHint(originalMessage);
 
   let hintIntentId = patternHint.intentId;
   let hintConfidence = patternHint.confidence;
+  const normalizedOriginalMessage = normalizeText(originalMessage);
+  const hasVehicleTerm =
+    /\b(vehicle|vehicles|car|cars|kotse|sasakyan|sedan|suv|van|pickup|truck)\b/i.test(normalizedOriginalMessage);
+  const hasAvailabilityTerm =
+    /\b(available|availability|right now|currently|ngayon|meron bang|may available)\b/i.test(normalizedOriginalMessage);
+  const hasVehicleListQuestion = /\banong?\s+(mga\s+)?(sasakyan|kotse|vehicles?|cars?)\b/i.test(normalizedOriginalMessage);
+  const hasCapacitySignal = /\b(passengers?|pax|capacity|kasya|kayang isakay|pasahero)\b/i.test(normalizedOriginalMessage);
+  const hasVehicleAvailabilitySignal =
+    hasVehicleTerm && (hasAvailabilityTerm || hasVehicleListQuestion) && (!hasCapacitySignal || hasAvailabilityTerm);
 
   const hasVehicleRecommendationFilters = Boolean(
-    slots.type || slots.pax || slots.budget || (slots.transmission && /\b(available|recommend|suggest|need|want|hanap)\b/i.test(originalMessage))
+    hasVehicleAvailabilitySignal ||
+      slots.type ||
+      slots.pax ||
+      slots.budget ||
+      (slots.transmission && /\b(available|recommend|suggest|need|want|hanap)\b/i.test(originalMessage))
   );
+  const hasHowToBookSignal =
+    /\b(how|paano|pano)\b.*\bmag[-\s]?book\b/i.test(normalizedOriginalMessage) ||
+    /\b(how|paano|pano)\b.*\bmakapag[-\s]?book\b/i.test(normalizedOriginalMessage) ||
+    /\b(how|paano|pano)\b.*\bbook\b/i.test(normalizedOriginalMessage) ||
+    /\bmag[-\s]?book\b/i.test(normalizedOriginalMessage) ||
+    /\bmakapag[-\s]?book\b/i.test(normalizedOriginalMessage);
+  const hasRequirementsSignal =
+    /\brequirements?\s+na\s+kulang\b/i.test(normalizedOriginalMessage) ||
+    (/\brequirements?\b/i.test(normalizedOriginalMessage) &&
+      /\b(kailangan|kulang|need|needed)\b/i.test(normalizedOriginalMessage)) ||
+    /\bkailangan\b.*\bmag[-\s]?book\b/i.test(normalizedOriginalMessage) ||
+    /\bkailangan\b.*\bmakapag[-\s]?book\b/i.test(normalizedOriginalMessage) ||
+    /\bano\b.*\bmga\b.*\bkailangan\b.*\b(?:mag[-\s]?book|makapag[-\s]?book)\b/i.test(
+      normalizedOriginalMessage
+    ) ||
+    /\bkailangan\b.*\bbook\b/i.test(normalizedOriginalMessage);
 
-  if (hasVehicleRecommendationFilters) {
+  if (hasRequirementsSignal) {
+    hintIntentId = "rental_requirements";
+    hintConfidence = Math.max(hintConfidence, 2);
+  } else if (hasHowToBookSignal) {
+    hintIntentId = "how_to_book";
+    hintConfidence = Math.max(hintConfidence, 2);
+  } else if (hasVehicleRecommendationFilters) {
     hintIntentId = "available_vehicles";
     hintConfidence = Math.max(hintConfidence, 2);
   } else if (!hintIntentId && slots.transmission) {
@@ -737,6 +1087,9 @@ export function buildChatbotPayload(message, language, vehicles = []) {
   if (selectedLanguage === "english" && shouldSuppressOriginalForEnglish) {
     filteredMessage = `Please answer in English.\n${filteredMessage}`;
   }
+  if (selectedLanguage === "taglish" && !/\b(taglish|mix(?:ed)? english and filipino)\b/i.test(filteredMessage)) {
+    filteredMessage = `Please answer in Taglish (mixed English and Filipino).\n${filteredMessage}`;
+  }
 
   const filteredVehicles = filterVehiclesForChatbot(vehicles, slots);
 
@@ -767,7 +1120,8 @@ export function shouldRetryChatbotResponse(response, payload) {
   const weakScore = score < 0.62;
   const rejected = intent === "REJECT";
   const desiredReplyLang = getLanguageCode(payload.selectedLanguage);
-  const replyLangMismatch = Boolean(response.reply_lang) && response.reply_lang !== desiredReplyLang;
+  const replyLangMismatch =
+    desiredReplyLang !== "tag" && Boolean(response.reply_lang) && response.reply_lang !== desiredReplyLang;
 
   return hasHint && (rejected || mismatch || weakScore || replyLangMismatch);
 }
@@ -816,9 +1170,11 @@ export function normalizeChatbotResponse(response) {
 }
 
 export function buildRejectedChatbotResponse(language, reason = "fallback") {
-  const selectedLanguage = normalizeLanguage(language);
+  const selectedLanguage = resolveSelectedLanguage(language, language);
+  const customReply = REJECT_REPLIES[selectedLanguage]?.[reason];
+
   return {
-    reply: FALLBACK_REPLIES[selectedLanguage],
+    reply: customReply || FALLBACK_REPLIES[selectedLanguage],
     intent: "REJECT",
     intent_id: "REJECT",
     reply_lang: getLanguageCode(selectedLanguage),
@@ -863,10 +1219,19 @@ function shouldOverrideIntentWithHint(response, payload) {
   const score = Number(response.score || 0);
   const hasVehicleFilters = payload.hintIntentId === "available_vehicles" && hasSignalSlots(payload.slots);
   const isConversationalHint = CONVERSATIONAL_INTENTS.has(payload.hintIntentId);
+  const isBookingFlowHint =
+    payload.hintIntentId === "how_to_book" || payload.hintIntentId === "rental_requirements";
   if (intent === "REJECT") {
     return payload.hintConfidence >= 1;
   }
   if (isConversationalHint && intent !== payload.hintIntentId) {
+    return true;
+  }
+  if (
+    isBookingFlowHint &&
+    intent !== payload.hintIntentId &&
+    /\b(?:mag[-\s]?book|makapag[-\s]?book|book)\b/i.test(payload.originalMessage || "")
+  ) {
     return true;
   }
   if (hasVehicleFilters && RECOMMENDATION_INTENTS.has(intent) && intent !== "available_vehicles") {
@@ -878,16 +1243,134 @@ function shouldOverrideIntentWithHint(response, payload) {
   return score < 0.35 && intent !== payload.hintIntentId;
 }
 
-function buildRecommendationReply(intentId, language, payload, recommendations) {
-  const baseAnswer = pickDatasetAnswer(intentId, language, payload.originalMessage);
+function joinNaturalList(values = [], language = "english") {
+  const items = values.filter(Boolean);
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+
+  const conjunction = normalizeLanguage(language) === "filipino" ? "at" : "and";
+  if (items.length === 2) {
+    return `${items[0]} ${conjunction} ${items[1]}`;
+  }
+
+  return `${items.slice(0, -1).join(", ")}, ${conjunction} ${items[items.length - 1]}`;
+}
+
+function mapVehicleTypeLabel(type, language) {
+  const selectedLanguage = normalizeLanguage(language);
+  const normalizedType = normalizeVehicleType(type);
+  const labels = {
+    english: {
+      sedan: "Sedans",
+      suv: "SUVs",
+      van: "Vans",
+      pickup: "Pickup Trucks",
+      motorcycle: "Motorcycles",
+    },
+    filipino: {
+      sedan: "Sedan",
+      suv: "SUV",
+      van: "Van",
+      pickup: "Pickup Truck",
+      motorcycle: "Motorcycle",
+    },
+    taglish: {
+      sedan: "Sedans",
+      suv: "SUVs",
+      van: "Vans",
+      pickup: "Pickup Trucks",
+      motorcycle: "Motorcycles",
+    },
+  };
+
+  const mapped = labels[selectedLanguage]?.[normalizedType];
+  if (mapped) return mapped;
+
+  const fallback = cleanText(type);
+  if (!fallback) {
+    return selectedLanguage === "filipino" ? "Iba pang sasakyan" : "Other vehicle types";
+  }
+  return fallback;
+}
+
+function summarizeAvailableTypes(recommendations = [], language = "english") {
+  const orderedTypes = [];
+  const seen = new Set();
+
+  for (const vehicle of recommendations) {
+    const normalizedType = normalizeVehicleType(vehicle?.type || "");
+    if (!normalizedType || seen.has(normalizedType)) continue;
+    seen.add(normalizedType);
+    orderedTypes.push(mapVehicleTypeLabel(normalizedType, language));
+  }
+
+  return joinNaturalList(orderedTypes, language);
+}
+
+function pickRandomRecommendations(recommendations = [], limit = 3) {
+  const list = Array.isArray(recommendations) ? [...recommendations] : [];
+  if (list.length <= limit) return list;
+
+  for (let index = list.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [list[index], list[randomIndex]] = [list[randomIndex], list[index]];
+  }
+
+  return list.slice(0, limit);
+}
+
+function buildRecommendationReply(intentId, language, payload, recommendations, options = {}) {
+  const selectedLanguage = normalizeLanguage(language);
   if (recommendations.length === 0) {
-    return normalizeLanguage(language) === "filipino"
+    if (selectedLanguage === "taglish") {
+      return "Wala akong mahanap na available na sasakyan na match sa request mo ngayon. Try natin i-adjust yung passengers, budget, transmission, or vehicle type.";
+    }
+    return selectedLanguage === "filipino"
       ? "Wala akong mahanap na available na sasakyan na tugma sa request mo. Subukang baguhin ang passengers, budget, transmission, o uri ng sasakyan."
       : "I couldn't find an available vehicle that matches your request. Try adjusting the passengers, budget, transmission, or vehicle type.";
   }
 
+  if (intentId === "available_vehicles") {
+    const totalAvailable = Number(options.totalAvailableCount || recommendations.length) || recommendations.length;
+    const previewCount = recommendations.length;
+    const typeSummary = summarizeAvailableTypes(
+      Array.isArray(options.typeSummarySource) ? options.typeSummarySource : recommendations,
+      selectedLanguage
+    );
+    const hasFilters = hasSignalSlots(payload?.slots || {});
+    const showingPreview = totalAvailable > previewCount;
+
+    if (selectedLanguage === "taglish") {
+      const countText = hasFilters
+        ? `May ${totalAvailable} available vehicle${totalAvailable === 1 ? "" : "s"} na match sa request mo right now.`
+        : `May ${totalAvailable} available vehicle${totalAvailable === 1 ? "" : "s"} right now.`;
+      const typesText = typeSummary ? ` Available ngayon: ${typeSummary}.` : "";
+      const previewText = showingPreview ? ` Showing ${previewCount} random vehicles below.` : "";
+      return `${countText}${typesText}${previewText}`.trim();
+    }
+
+    if (selectedLanguage === "filipino") {
+      const countText = hasFilters
+        ? `May ${totalAvailable} available na sasakyang tugma sa request mo ngayon.`
+        : `May ${totalAvailable} available na sasakyan ngayon.`;
+      const typesText = typeSummary ? ` Mga uri na available: ${typeSummary}.` : "";
+      const previewText = showingPreview ? ` Ipinapakita ko ang ${previewCount} random na sasakyan sa ibaba.` : "";
+      return `${countText}${typesText}${previewText}`.trim();
+    }
+
+    const countText = hasFilters
+      ? `I found ${totalAvailable} available vehicle${totalAvailable === 1 ? "" : "s"} matching your request right now.`
+      : `There are ${totalAvailable} available vehicle${totalAvailable === 1 ? "" : "s"} right now.`;
+    const typesText = typeSummary ? ` Currently available types: ${typeSummary}.` : "";
+    const previewText = showingPreview ? ` Showing ${previewCount} random vehicles below.` : "";
+    return `${countText}${typesText}${previewText}`.trim();
+  }
+
+  const baseAnswer = pickDatasetAnswer(intentId, language, payload.originalMessage);
   const suffix =
-    normalizeLanguage(language) === "filipino"
+    selectedLanguage === "taglish"
+      ? "Narito ang ilang vehicles na pwede mong i-consider based sa request mo."
+      : selectedLanguage === "filipino"
       ? "Narito ang ilang sasakyang maaaring piliin batay sa request mo."
       : "Here are a few vehicles you can consider based on your request.";
   return `${baseAnswer} ${suffix}`.trim();
@@ -912,18 +1395,31 @@ export function applyChatbotGuardrails(response, payload) {
     score = Math.max(score, payload.hintConfidence >= 2 ? 0.72 : 0.58);
   }
 
-  const replyLangMismatch = Boolean(normalized.reply_lang) && normalized.reply_lang !== desiredReplyLang;
+  const replyLangMismatch =
+    desiredReplyLang !== "tag" && Boolean(normalized.reply_lang) && normalized.reply_lang !== desiredReplyLang;
   const hasDatasetIntent = Boolean(getCanonicalQuestion(intent, selectedLanguage));
   const shouldUseDatasetReply =
-    intent !== "REJECT" && hasDatasetIntent && (replyLangMismatch || !reply || score < 0.55 || intent !== normalized.intent);
+    intent !== "REJECT" &&
+    hasDatasetIntent &&
+    (selectedLanguage === "taglish" || replyLangMismatch || !reply || score < 0.55 || intent !== normalized.intent);
 
   if (shouldUseDatasetReply) {
     reply = pickDatasetAnswer(intent, selectedLanguage, payload.originalMessage);
   }
 
   if (RECOMMENDATION_INTENTS.has(intent)) {
-    recommendations = recommendations.length > 0 ? recommendations.slice(0, 3) : payload.vehicles.slice(0, 3);
-    reply = buildRecommendationReply(intent, selectedLanguage, payload, recommendations);
+    const liveRecommendations = normalizeRecommendationList(payload.vehicles);
+    if (intent === "available_vehicles") {
+      const totalAvailableCount = liveRecommendations.length;
+      recommendations = pickRandomRecommendations(liveRecommendations, 3);
+      reply = buildRecommendationReply(intent, selectedLanguage, payload, recommendations, {
+        totalAvailableCount,
+        typeSummarySource: liveRecommendations,
+      });
+    } else {
+      recommendations = recommendations.length > 0 ? recommendations.slice(0, 3) : liveRecommendations.slice(0, 3);
+      reply = buildRecommendationReply(intent, selectedLanguage, payload, recommendations);
+    }
   } else {
     recommendations = [];
   }

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { getSepoliaEtherscanTxUrl } from "../../blockchain/config";
+import { getTransactionFee } from "../../utils/fees";
+import { getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
 
 const money = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
@@ -15,15 +17,44 @@ const toTitleCase = (value = "") =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 const normalizeBookingStatus = (booking) =>
   booking?.status === "rejected" ? { ...booking, status: "cancelled" } : booking;
-const getPayableAmount = (record) => {
-  const payable = Number(record?.amountPayable);
-  if (Number.isFinite(payable) && payable >= 0) {
-    return payable;
+const getRentalTotal = (record) => {
+  const total = Number(record?.totalAmount);
+  if (Number.isFinite(total) && total >= 0) return total;
+
+  const baseAmount = Number(record?.baseAmount);
+  const driverAmount = Number(record?.driverAmount);
+  if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount >= 0) {
+    return baseAmount + driverAmount;
   }
-  const total = Number(record?.totalAmount || 0);
-  const gasFee = Number(record?.blockchainGasFee || 0);
-  return total + (Number.isFinite(gasFee) && gasFee >= 0 ? gasFee : 0);
+
+  const directMinutes = Number(record?.bookingDurationMinutes);
+  const durationMinutes =
+    Number.isFinite(directMinutes) && directMinutes > 0
+      ? Math.round(directMinutes)
+      : record?.pickupAt && record?.returnAt
+        ? getDurationMinutesBetween(record.pickupAt, record.returnAt)
+        : Number.isFinite(Number(record?.bookingDays))
+          ? Math.round(Number(record.bookingDays) * 24 * 60)
+          : 0;
+  const durationHours = getDurationHoursFromMinutes(durationMinutes);
+  const hourlyRate = Number((record?.vehicleHourlyRate ?? record?.vehicleDailyRate) || 0);
+  if (Number.isFinite(hourlyRate) && hourlyRate >= 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = Number((record?.driverHourlyRate ?? record?.driverDailyRate) || 0);
+    const driverSelected = Boolean(record?.driverSelected);
+    const computedDriverAmount =
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
+        : 0;
+    return hourlyRate * durationHours + computedDriverAmount;
+  }
+
+  const payable = Number(record?.amountPayable);
+  if (Number.isFinite(payable) && payable >= 0) return payable;
+
+  return 0;
 };
+
+const getPayableAmount = (record) => getRentalTotal(record) + getTransactionFee();
 
 const shortenHash = (value = "") => {
   const hash = String(value || "").trim();

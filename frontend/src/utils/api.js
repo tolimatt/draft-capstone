@@ -1,8 +1,6 @@
-export const API_BASE_URL = "http://localhost:5000/api";
-
-function getToken() {
-  return localStorage.getItem("token");
-}
+import { clearSessionOwnerProfile, clearSessionUser } from "./sessionStore";
+import { API_BASE_URL } from "./runtimeConfig";
+export { API_BASE_URL } from "./runtimeConfig";
 
 function buildQueryString(params = {}) {
   const searchParams = new URLSearchParams();
@@ -14,6 +12,22 @@ function buildQueryString(params = {}) {
 
   const query = searchParams.toString();
   return query ? `?${query}` : "";
+}
+
+function normalizeChatContext(context = "") {
+  if (typeof context === "string") {
+    const bookingId = String(context || "").trim();
+    return bookingId ? { bookingId } : {};
+  }
+
+  if (!context || typeof context !== "object") return {};
+
+  const bookingId = String(context.bookingId || "").trim();
+  const vehicleId = String(context.vehicleId || "").trim();
+  return {
+    ...(bookingId ? { bookingId } : {}),
+    ...(vehicleId ? { vehicleId } : {}),
+  };
 }
 
 async function request(endpoint, options = {}) {
@@ -30,26 +44,36 @@ async function request(endpoint, options = {}) {
     config.headers["Content-Type"] = "application/json";
   }
 
-  const token = getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-
   const response = await fetch(url, config);
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     const msg = data.message || data.errors?.email || `Request failed (${response.status})`;
+    const error = new Error(msg);
+    error.status = response.status;
+
+    if (data && typeof data === "object") {
+      error.details = data;
+      const retryAfterSeconds = Number(data.retryAfterSeconds);
+      if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+        error.retryAfterSeconds = retryAfterSeconds;
+      }
+      if (data.retryAfterAt) {
+        error.retryAfterAt = data.retryAfterAt;
+      }
+    }
 
     if (
       response.status === 401 ||
       (response.status === 403 && /verify your email|verification is required/i.test(msg))
     ) {
       localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      sessionStorage.removeItem("token");
+      clearSessionOwnerProfile();
+      clearSessionUser();
     }
 
-    throw new Error(msg);
+    throw error;
   }
 
   return data;
@@ -57,9 +81,18 @@ async function request(endpoint, options = {}) {
 
 const API = {
   register: (body) => request("/auth/register", { method: "POST", body: JSON.stringify(body) }),
+  getLoginChallenge: () => request("/auth/login-challenge", { method: "GET" }),
   login: (body) => request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   getProfile: () => request("/auth/me"),
   updateProfile: (body) => request("/auth/profile", { method: "PUT", body: JSON.stringify(body) }),
+  changePassword: (body) =>
+    request("/auth/change-password", { method: "PATCH", body: JSON.stringify(body) }),
+  getNotificationSettings: () => request("/auth/notification-settings"),
+  updateNotificationSettings: (body) =>
+    request("/auth/notification-settings", { method: "PUT", body: JSON.stringify(body) }),
+  getLoginActivity: (params = {}) => request(`/auth/login-activity${buildQueryString(params)}`),
+  upgradeToOwner: (body = {}) =>
+    request("/auth/upgrade-to-owner", { method: "POST", body: JSON.stringify(body) }),
 
   logout: async () => {
     try {
@@ -68,7 +101,9 @@ const API = {
       // Clear local data even if logout fails.
     }
     localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    sessionStorage.removeItem("token");
+    clearSessionOwnerProfile();
+    clearSessionUser();
   },
 
   sendOTP: (email) => request("/auth/send-otp", { method: "POST", body: JSON.stringify({ email }) }),
@@ -105,6 +140,16 @@ const API = {
   getOwnerBookings: (status = "all") => request(`/owner/bookings?status=${encodeURIComponent(status)}`),
   payBooking: (id, body = {}) =>
     request(`/bookings/${id}/pay`, { method: "POST", body: JSON.stringify(body || {}) }),
+  setBookingBalancePaymentMethod: (id, body = {}) =>
+    request(`/bookings/${id}/pay/balance-method`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
+  requestWalkInPayment: (id, body = {}) =>
+    request(`/bookings/${id}/pay/walk-in-request`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
   verifyBookingPayment: (id, checkoutId = "") =>
     request(`/bookings/${id}/pay/verify`, {
       method: "POST",
@@ -113,6 +158,16 @@ const API = {
   recordBookingOnBlockchain: (id) =>
     request(`/bookings/${id}/blockchain-record`, {
       method: "POST",
+    }),
+  requestBookingExtension: (id, body = {}) =>
+    request(`/bookings/${id}/extension-request`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
+  proceedLateReturn: (id, body = {}) =>
+    request(`/bookings/${id}/late-return/proceed`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
     }),
   cancelBooking: (id) => request(`/bookings/${id}/cancel`, { method: "PATCH" }),
   reviewBooking: (id, body) => request(`/bookings/${id}/review`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -127,27 +182,71 @@ const API = {
       method: "PATCH",
       body: JSON.stringify({ paymentStatus }),
     }),
+  reviewOwnerBookingExtensionRequest: (id, action, body = {}) =>
+    request(`/owner/bookings/${id}/extension-request`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...body }),
+    }),
+  reviewOwnerBookingCancellationRequest: (id, action, body = {}) =>
+    request(`/owner/bookings/${id}/cancellation-request`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...body }),
+    }),
+  reviewOwnerWalkInPaymentRequest: (id, action, body = {}) =>
+    request(`/owner/bookings/${id}/walk-in-request`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...body }),
+    }),
+  confirmOwnerWalkInPayment: (id, body = {}) =>
+    request(`/owner/bookings/${id}/walk-in-confirm`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
 
   getOwnerReviews: () => request("/owner/reviews"),
   getOwnerEarnings: () => request("/owner/earnings"),
   getOwnerAnalytics: () => request("/owner/analytics"),
 
   getConversations: () => request("/chat/conversations"),
+  getOwnerRenterThreads: () => request("/chat/owner/renters"),
+  openOwnerRenterThread: (renterId) =>
+    request(`/chat/owner/renters/${renterId}/open`, { method: "POST" }),
+  setOwnerRenterThreadPin: (renterId, pinned) =>
+    request(`/chat/owner/renters/${renterId}/pin`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned }),
+    }),
   chatWithBot: (body) => request("/chat", { method: "POST", body: JSON.stringify(body) }),
-  getMessagesWithUser: (userId, bookingId = "") =>
-    request(
-      `/chat/messages/${userId}${bookingId ? `?bookingId=${encodeURIComponent(bookingId)}` : ""}`
-    ),
+  getMessagesWithUser: (userId, context = "") =>
+    request(`/chat/messages/${userId}${buildQueryString(normalizeChatContext(context))}`),
   sendMessageToUser: (userId, body) =>
     request(`/chat/messages/${userId}`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  markMessagesAsRead: (userId) => request(`/chat/messages/${userId}/read`, { method: "PATCH" }),
+  editChatMessage: (messageId, body) =>
+    request(`/chat/messages/${messageId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deleteChatMessage: (messageId) =>
+    request(`/chat/messages/${messageId}`, {
+      method: "DELETE",
+    }),
+  deleteConversation: (userId, context = "") =>
+    request(`/chat/conversations/${userId}${buildQueryString(normalizeChatContext(context))}`, {
+      method: "DELETE",
+    }),
+  markMessagesAsRead: (userId, context = "") =>
+    request(`/chat/messages/${userId}/read${buildQueryString(normalizeChatContext(context))}`, {
+      method: "PATCH",
+    }),
 
   getNotifications: () => request("/notifications"),
   markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: "PATCH" }),
   markAllNotificationsRead: () => request("/notifications/read-all", { method: "PATCH" }),
+  deleteAllReadNotifications: () => request("/notifications/read-all", { method: "DELETE" }),
+  archiveReadNotifications: () => request("/notifications/archive-read", { method: "PATCH" }),
 };
 
 export default API;

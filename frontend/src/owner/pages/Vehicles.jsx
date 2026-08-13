@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { CarFront, ImagePlus, Settings2, UploadCloud, X } from "lucide-react";
+import { CarFront, Fuel, ImagePlus, MapPin, Settings, Settings2, UploadCloud, Users, X } from "lucide-react";
 import API from "../../utils/api";
+import { isPhilippineLocation } from "../../utils/locationValidation";
+import VehicleCover from "../../components/VehicleCover";
 
-const initialForm = {
+const createInitialForm = () => ({
   name: "",
   description: "",
   dailyRentalRate: "",
@@ -19,15 +21,40 @@ const initialForm = {
   existingImages: [],
   existingImagePaths: [],
   newImageFiles: [],
-};
+  coverImagePath: "",
+  coverUploadIndex: "",
+});
 
 const formatCurrency = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
 
-function VehicleModal({ mode, form, setForm, loading, error, onClose, onSubmit }) {
+const getFallbackCoverState = ({ existingImagePaths = [], newImageFiles = [] } = {}) => {
+  if (existingImagePaths.length) {
+    return { coverImagePath: existingImagePaths[0], coverUploadIndex: "" };
+  }
+
+  if (newImageFiles.length) {
+    return { coverImagePath: "", coverUploadIndex: "0" };
+  }
+
+  return { coverImagePath: "", coverUploadIndex: "" };
+};
+
+function VehicleModal({
+  mode,
+  form,
+  setForm,
+  loading,
+  error,
+  locationError,
+  onLocationChange,
+  onClose,
+  onSubmit,
+}) {
   const newImagePreviews = useMemo(
     () =>
-      form.newImageFiles.map((file) => ({
+      form.newImageFiles.map((file, index) => ({
         key: `${file.name}-${file.lastModified}`,
+        index,
         name: file.name,
         url: URL.createObjectURL(file),
       })),
@@ -105,8 +132,11 @@ function VehicleModal({ mode, form, setForm, loading, error, onClose, onSubmit }
                     className={inputClass}
                     placeholder="Ex. Quezon City"
                     value={form.location}
-                    onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
+                    onChange={(e) => onLocationChange(e.target.value)}
                   />
+                  {locationError && (
+                    <p className="mt-2 text-xs font-semibold text-rose-600">{locationError}</p>
+                  )}
                 </div>
               </div>
 
@@ -123,7 +153,7 @@ function VehicleModal({ mode, form, setForm, loading, error, onClose, onSubmit }
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
-                  <label className={labelClass}>Daily Rate</label>
+                  <label className={labelClass}>Hourly Rate</label>
                   <input
                     type="number"
                     min="0"
@@ -278,6 +308,10 @@ function VehicleModal({ mode, form, setForm, loading, error, onClose, onSubmit }
                 </span>
               </div>
 
+              <p className="text-xs text-slate-500">
+                Choose one cover image for the renter and owner cards. The rest stay in the gallery.
+              </p>
+
               <label className="group flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 transition hover:border-[#017FE6] hover:bg-blue-50/40">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-[#017FE6] shadow-sm ring-1 ring-slate-200">
@@ -302,7 +336,14 @@ function VehicleModal({ mode, form, setForm, loading, error, onClose, onSubmit }
                     setForm((prev) => ({
                       ...prev,
                       newImageFiles: [...prev.newImageFiles, ...selected].slice(0, 8),
+                      ...(prev.coverImagePath || prev.coverUploadIndex !== ""
+                        ? {}
+                        : getFallbackCoverState({
+                            existingImagePaths: prev.existingImagePaths,
+                            newImageFiles: [...prev.newImageFiles, ...selected].slice(0, 8),
+                          })),
                     }));
+                    e.target.value = "";
                   }}
                 />
               </label>
@@ -316,40 +357,131 @@ function VehicleModal({ mode, form, setForm, loading, error, onClose, onSubmit }
               {(form.existingImages.length > 0 || newImagePreviews.length > 0) && (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {form.existingImages.map((image, index) => (
-                    <div key={`existing-${index}`} className="group relative overflow-hidden rounded-xl border border-slate-200">
-                      <img src={image} alt="vehicle" className="h-24 w-full object-cover" />
+                    <div key={`existing-${index}`} className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      {form.coverImagePath === form.existingImagePaths[index] && form.coverUploadIndex === "" && (
+                        <span className="absolute left-2 top-2 z-10 rounded-md bg-[#017FE6] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+                          Cover
+                        </span>
+                      )}
+                      <img src={image} alt="vehicle" className="h-24 w-full bg-slate-50 object-contain object-center p-1.5" />
                       <button
                         type="button"
                         className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-700 shadow transition hover:bg-red-500 hover:text-white"
                         onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            existingImages: prev.existingImages.filter((_, idx) => idx !== index),
-                            existingImagePaths: prev.existingImagePaths.filter((_, idx) => idx !== index),
-                          }))
+                          setForm((prev) => {
+                            const nextExistingImages = prev.existingImages.filter((_, idx) => idx !== index);
+                            const nextExistingImagePaths = prev.existingImagePaths.filter((_, idx) => idx !== index);
+                            const removedPath = prev.existingImagePaths[index];
+                            const shouldResetCover =
+                              prev.coverImagePath === removedPath || (
+                                prev.coverImagePath && !nextExistingImagePaths.includes(prev.coverImagePath)
+                              );
+
+                            return {
+                              ...prev,
+                              existingImages: nextExistingImages,
+                              existingImagePaths: nextExistingImagePaths,
+                              ...(shouldResetCover
+                                ? getFallbackCoverState({
+                                    existingImagePaths: nextExistingImagePaths,
+                                    newImageFiles: prev.newImageFiles,
+                                  })
+                                : {}),
+                            };
+                          })
                         }
                         aria-label="Remove existing image"
                       >
                         <X size={12} />
                       </button>
+                      <button
+                        type="button"
+                        className={`absolute bottom-2 left-2 rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                          form.coverImagePath === form.existingImagePaths[index] && form.coverUploadIndex === ""
+                            ? "bg-[#017FE6] text-white"
+                            : "bg-white/90 text-slate-700 hover:bg-slate-100"
+                        }`}
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            coverImagePath: prev.existingImagePaths[index],
+                            coverUploadIndex: "",
+                          }))
+                        }
+                      >
+                        {form.coverImagePath === form.existingImagePaths[index] && form.coverUploadIndex === ""
+                          ? "Selected cover"
+                          : "Set as cover"}
+                      </button>
                     </div>
                   ))}
 
                   {newImagePreviews.map((preview, index) => (
-                    <div key={preview.key} className="group relative overflow-hidden rounded-xl border border-slate-200">
-                      <img src={preview.url} alt={preview.name} className="h-24 w-full object-cover" />
+                    <div key={preview.key} className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      {form.coverImagePath === "" && String(form.coverUploadIndex) === String(index) && (
+                        <span className="absolute left-2 top-2 z-10 rounded-md bg-[#017FE6] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+                          Cover
+                        </span>
+                      )}
+                      <img src={preview.url} alt={preview.name} className="h-24 w-full bg-slate-50 object-contain object-center p-1.5" />
                       <button
                         type="button"
                         className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-700 shadow transition hover:bg-red-500 hover:text-white"
                         onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            newImageFiles: prev.newImageFiles.filter((_, idx) => idx !== index),
-                          }))
+                          setForm((prev) => {
+                            const nextNewImageFiles = prev.newImageFiles.filter((_, idx) => idx !== index);
+                            const currentCoverUploadIndex = Number.parseInt(String(prev.coverUploadIndex), 10);
+                            const isCurrentCover =
+                              prev.coverImagePath === "" &&
+                              Number.isFinite(currentCoverUploadIndex) &&
+                              currentCoverUploadIndex === index;
+
+                            let nextCoverImagePath = prev.coverImagePath;
+                            let nextCoverUploadIndex = prev.coverUploadIndex;
+
+                            if (prev.coverImagePath === "" && Number.isFinite(currentCoverUploadIndex)) {
+                              if (isCurrentCover) {
+                                const fallbackCover = getFallbackCoverState({
+                                  existingImagePaths: prev.existingImagePaths,
+                                  newImageFiles: nextNewImageFiles,
+                                });
+                                nextCoverImagePath = fallbackCover.coverImagePath;
+                                nextCoverUploadIndex = fallbackCover.coverUploadIndex;
+                              } else if (currentCoverUploadIndex > index) {
+                                nextCoverUploadIndex = String(currentCoverUploadIndex - 1);
+                              }
+                            }
+
+                            return {
+                              ...prev,
+                              newImageFiles: nextNewImageFiles,
+                              coverImagePath: nextCoverImagePath,
+                              coverUploadIndex: nextCoverUploadIndex,
+                            };
+                          })
                         }
                         aria-label="Remove new image"
                       >
                         <X size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`absolute bottom-2 left-2 rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                          form.coverImagePath === "" && String(form.coverUploadIndex) === String(index)
+                            ? "bg-[#017FE6] text-white"
+                            : "bg-white/90 text-slate-700 hover:bg-slate-100"
+                        }`}
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            coverImagePath: "",
+                            coverUploadIndex: String(index),
+                          }))
+                        }
+                      >
+                        {form.coverImagePath === "" && String(form.coverUploadIndex) === String(index)
+                          ? "Selected cover"
+                          : "Set as cover"}
                       </button>
                     </div>
                   ))}
@@ -379,7 +511,7 @@ function VehicleModal({ mode, form, setForm, loading, error, onClose, onSubmit }
   );
 }
 
-export default function Vehicles() {
+function Vehicles() {
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -390,8 +522,9 @@ export default function Vehicles() {
   const [modalMode, setModalMode] = useState("create");
   const [modalError, setModalError] = useState("");
   const [modalLoading, setModalLoading] = useState(false);
+  const [locationError, setLocationError] = useState("");
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(createInitialForm());
 
   const loadVehicles = async () => {
     setLoading(true);
@@ -414,7 +547,7 @@ export default function Vehicles() {
     const openAdd = () => {
       setModalMode("create");
       setEditingId(null);
-      setForm(initialForm);
+      setForm(createInitialForm());
       setModalError("");
       setModalOpen(true);
     };
@@ -439,8 +572,9 @@ export default function Vehicles() {
   const openCreateModal = () => {
     setModalMode("create");
     setEditingId(null);
-    setForm(initialForm);
+    setForm(createInitialForm());
     setModalError("");
+    setLocationError("");
     setModalOpen(true);
   };
 
@@ -464,9 +598,19 @@ export default function Vehicles() {
       existingImages: vehicle.images || [],
       existingImagePaths: vehicle.imagePaths || vehicle.images || [],
       newImageFiles: [],
+      coverImagePath: vehicle.coverImagePath || vehicle.imagePaths?.[0] || "",
+      coverUploadIndex: "",
     });
     setModalError("");
+    setLocationError("");
     setModalOpen(true);
+  };
+
+  const handleLocationChange = (value) => {
+    setForm((prev) => ({ ...prev, location: value }));
+    if (locationError && (!value.trim() || isPhilippineLocation(value))) {
+      setLocationError("");
+    }
   };
 
   const buildFormData = () => {
@@ -485,6 +629,8 @@ export default function Vehicles() {
     body.append("driverOptionEnabled", String(form.driverOptionEnabled));
     body.append("driverDailyRate", String(form.driverDailyRate || 0));
     body.append("existingImages", JSON.stringify(form.existingImagePaths || []));
+    if (form.coverImagePath) body.append("coverImagePath", form.coverImagePath);
+    if (form.coverUploadIndex !== "") body.append("coverUploadIndex", String(form.coverUploadIndex));
 
     form.newImageFiles.forEach((file) => body.append("images", file));
     return body;
@@ -493,13 +639,28 @@ export default function Vehicles() {
   const submitModal = async () => {
     setModalLoading(true);
     setModalError("");
+    setLocationError("");
     try {
+      const trimmedLocation = form.location.trim();
+      if (!trimmedLocation) {
+        setModalError("Please enter a vehicle location.");
+        setLocationError("Location is required.");
+        return;
+      }
+      if (!isPhilippineLocation(trimmedLocation)) {
+        const message = "Only vehicle locations within the Philippines are allowed.";
+        setModalError(message);
+        setLocationError(message);
+        return;
+      }
+
       if (modalMode === "create") {
         await API.createOwnerVehicle(buildFormData());
       } else {
         await API.updateOwnerVehicle(editingId, buildFormData());
       }
       setModalOpen(false);
+      setForm(createInitialForm());
       await loadVehicles();
     } catch (err) {
       setModalError(err.message || "Failed to save vehicle.");
@@ -539,9 +700,6 @@ export default function Vehicles() {
             Manage vehicle details, multiple images, availability, and driver options.
           </p>
         </div>
-        <button onClick={openCreateModal} className="px-4 py-2 rounded-lg bg-[#017FE6] text-white font-semibold">
-          Add Vehicle
-        </button>
       </div>
 
       <div className="bg-white border rounded-xl p-4 flex flex-col md:flex-row gap-3">
@@ -571,69 +729,82 @@ export default function Vehicles() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         {filteredVehicles.map((vehicle) => (
-          <div key={vehicle._id} className="bg-white border rounded-xl overflow-hidden">
-            <div className="h-44 bg-gray-100 flex items-center justify-center">
-              {vehicle.imageUrl ? (
-                <img src={vehicle.imageUrl} alt={vehicle.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-sm text-gray-500">No image</span>
-              )}
-            </div>
-            <div className="p-4 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="font-semibold text-gray-900">{vehicle.name}</h3>
+          <article key={vehicle._id} className="rp-surface rp-hover-lift flex h-full flex-col overflow-hidden">
+            <div className="px-4 pt-4">
+              <VehicleCover
+                vehicle={vehicle}
+                alt={vehicle.name}
+                contentClassName="p-4 sm:p-5"
+              >
                 <span
-                  className={`text-xs px-2 py-1 rounded-full ${
+                  className={`absolute top-3 left-3 z-10 rp-chip ${
                     vehicle.availabilityStatus === "available"
-                      ? "bg-green-100 text-green-700"
-                      : "bg-gray-200 text-gray-700"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-slate-200 text-slate-700"
                   }`}
                 >
-                  {vehicle.availabilityStatus}
+                  {vehicle.availabilityStatus === "available" ? "Available" : "Unavailable"}
+                </span>
+                <span className="absolute top-3 right-3 z-10 rp-chip bg-slate-900 text-white">
+                  {(vehicle.images || []).length} photo(s)
+                </span>
+              </VehicleCover>
+            </div>
+
+            <div className="flex flex-1 flex-col p-5">
+              <h3 className="text-lg font-bold">{vehicle.name}</h3>
+              <p className="mt-2 text-sm text-slate-600 line-clamp-2">{vehicle.description}</p>
+
+              <div className="mt-2 flex items-center gap-1 text-sm text-slate-500">
+                <MapPin size={14} className="text-[#0B75E7]" />
+                <span>{vehicle.location}</span>
+              </div>
+
+              <div className="mt-2 flex gap-4 text-sm text-slate-600">
+                <span className="flex items-center gap-1">
+                  <Users size={14} className="text-[#0B75E7]" />
+                  {vehicle.specs?.seats || "-"}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Settings size={14} className="text-[#0B75E7]" />
+                  {vehicle.specs?.transmission || "-"}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Fuel size={14} className="text-[#0B75E7]" />
+                  {vehicle.specs?.fuel || "-"}
                 </span>
               </div>
 
-              <p className="text-sm text-gray-600 line-clamp-2">{vehicle.description}</p>
-              <p className="text-sm text-gray-700">{vehicle.location}</p>
-              <p className="text-sm text-gray-600">
-                {vehicle.specs?.type || "vehicle"} {vehicle.specs?.subType ? `• ${vehicle.specs.subType}` : ""}
-              </p>
-              <p className="text-sm text-gray-600">
-                Seats: {vehicle.specs?.seats || "-"} • {vehicle.specs?.transmission || "-"} • {vehicle.specs?.fuel || "-"}
-              </p>
-              <p className="text-sm text-gray-600">Plate: {vehicle.specs?.plateNumber || "-"}</p>
+              {vehicle.driverOptionEnabled && <p className="mt-2 text-sm text-blue-700">Driver available</p>}
 
-              <p className="font-bold text-[#017FE6]">{formatCurrency(vehicle.dailyRentalRate)} / day</p>
-              <p className="text-sm text-blue-700">
-                Driver option: {vehicle.driverOptionEnabled ? "With driver" : "Without driver"}
-              </p>
+              <div className="mt-3 text-xl font-bold text-[#0B75E7]">
+                {formatCurrency(vehicle.dailyRentalRate)}
+                <span className="text-sm text-slate-500 font-medium"> / hour</span>
+              </div>
 
-              <p className="text-xs text-gray-500">{(vehicle.images || []).length} image(s)</p>
-
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                <button onClick={() => openEditModal(vehicle)} className="px-2 py-2 rounded-lg border text-sm">
+              <div className="mt-auto grid grid-cols-3 gap-2 pt-4">
+                <button onClick={() => openEditModal(vehicle)} className="rp-btn-secondary py-2 text-sm">
                   Edit
                 </button>
                 <button
                   onClick={() => toggleAvailability(vehicle)}
-                  className="px-2 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm"
+                  className="py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-semibold transition hover:bg-blue-100"
                 >
                   Toggle
                 </button>
                 <button
                   onClick={() => deleteVehicle(vehicle._id)}
-                  className="px-2 py-2 rounded-lg bg-red-50 text-red-700 text-sm"
+                  className="py-2 rounded-xl bg-rose-50 text-rose-700 text-sm font-semibold transition hover:bg-rose-100"
                 >
                   Delete
                 </button>
               </div>
             </div>
-          </div>
+          </article>
         ))}
       </div>
-
       {modalOpen && (
         <VehicleModal
           mode={modalMode}
@@ -641,6 +812,8 @@ export default function Vehicles() {
           setForm={setForm}
           loading={modalLoading}
           error={modalError}
+          locationError={locationError}
+          onLocationChange={handleLocationChange}
           onClose={() => setModalOpen(false)}
           onSubmit={submitModal}
         />
@@ -648,3 +821,5 @@ export default function Vehicles() {
     </div>
   );
 }
+
+export default Vehicles;

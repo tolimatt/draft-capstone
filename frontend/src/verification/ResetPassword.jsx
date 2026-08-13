@@ -20,8 +20,11 @@ export default function ResetPassword({ onSuccess, onBack, email, token: resetTo
 
     // Basic client-side checks
     if (!password) { setError("Password is required."); return; }
+    if (/\s/.test(password)) { setError("Password must not contain spaces."); return; }
     if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    if (password.length > 128) { setError("Password is too long (max 128 characters)."); return; }
     if (!/[A-Z]/.test(password)) { setError("Password needs an uppercase letter."); return; }
+    if (!/[a-z]/.test(password)) { setError("Password needs a lowercase letter."); return; }
     if (!/[0-9]/.test(password)) { setError("Password needs a number."); return; }
     if (!/[!@#$%^&*()_+\-=[\]{}|;':",.<>?/`~]/.test(password)) {
       setError("Password needs a special character.");

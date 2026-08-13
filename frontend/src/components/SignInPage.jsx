@@ -1,15 +1,45 @@
-import React, { useState, useRef } from "react";
-import { Mail, Loader } from "lucide-react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { Mail, Loader, RefreshCcw } from "lucide-react";
 import FormInput from "./FormInput";
 import PasswordInput from "./PasswordInput";
 import AuthShell from "./AuthShell";
 import { SIGN_IN_VALIDATION_RULES } from "../data/signInValidation";
 import API from "../utils/api";
+import { setSessionUser } from "../utils/sessionStore";
 import { normalizeOwnerProfile, persistOwnerProfile } from "../owner/utils/ownerProfile";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_USER } from "../data/adminAccount";
 
 // Delay between submit attempts
 const SUBMIT_COOLDOWN_MS = 2000;
+const RATE_LIMIT_FALLBACK_SECONDS = 5 * 60;
+const SIGN_IN_RATE_LIMIT_STORAGE_KEY = "rentifypro.signinRateLimitUntil";
+
+const formatCountdown = (seconds) => {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
+
+const getRemainingRateLimitSeconds = (untilMs) => {
+  const safeUntilMs = Number(untilMs) || 0;
+  if (safeUntilMs <= 0) return 0;
+  return Math.max(0, Math.ceil((safeUntilMs - Date.now()) / 1000));
+};
+
+const readStoredRateLimitUntil = () => {
+  if (typeof window === "undefined") return 0;
+  try {
+    const stored = Number(window.localStorage.getItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY) || 0);
+    if (!Number.isFinite(stored) || stored <= Date.now()) {
+      window.localStorage.removeItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY);
+      return 0;
+    }
+    return stored;
+  } catch {
+    return 0;
+  }
+};
 
 export default function SignInPage({
   onNavigateToHome,
@@ -17,28 +47,146 @@ export default function SignInPage({
   onNavigateToForgotPassword,
   onLoginSuccess,
 }) {
-  const [form, setForm] = useState({ email: "", password: "" });
+  const [form, setForm] = useState({ email: "", password: "", captchaAnswer: "" });
   const [errors, setErrors] = useState({});
+  const [dirtyFields, setDirtyFields] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [captcha, setCaptcha] = useState({ id: "", question: "" });
+  const [captchaLoading, setCaptchaLoading] = useState(false);
+  const [rateLimitUntil, setRateLimitUntil] = useState(() => readStoredRateLimitUntil());
+  const [rateLimitSeconds, setRateLimitSeconds] = useState(() =>
+    getRemainingRateLimitSeconds(readStoredRateLimitUntil())
+  );
   const lastSubmitRef = useRef(0);
+  const isRateLimited = rateLimitSeconds > 0;
+  const isFormLocked = isLoading || isRateLimited;
+
+  const clearRateLimit = useCallback(() => {
+    setRateLimitUntil(0);
+    setRateLimitSeconds(0);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.removeItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY);
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, []);
+
+  const activateRateLimit = useCallback((seconds, retryAfterAt = "") => {
+    const fallbackSeconds = Math.max(1, Math.floor(Number(seconds) || RATE_LIMIT_FALLBACK_SECONDS));
+    const parsedRetryAfterAt = Date.parse(String(retryAfterAt || "").trim());
+    const untilMs =
+      Number.isFinite(parsedRetryAfterAt) && parsedRetryAfterAt > Date.now()
+        ? parsedRetryAfterAt
+        : Date.now() + fallbackSeconds * 1000;
+
+    setRateLimitUntil(untilMs);
+    setRateLimitSeconds(getRemainingRateLimitSeconds(untilMs));
+
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(SIGN_IN_RATE_LIMIT_STORAGE_KEY, String(untilMs));
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, []);
+
+  const validateField = useCallback((field, nextForm) => {
+    if (field === "email") return SIGN_IN_VALIDATION_RULES.email(nextForm.email);
+    if (field === "password") return SIGN_IN_VALIDATION_RULES.password(nextForm.password);
+    if (field === "captchaAnswer") return SIGN_IN_VALIDATION_RULES.captcha(nextForm.captchaAnswer);
+    return "";
+  }, []);
 
   const handleChange = (field, value) => {
-    setForm({ ...form, [field]: value });
-    if (errors[field]) setErrors({ ...errors, [field]: "" });
+    const nextForm = { ...form, [field]: value };
+    setForm(nextForm);
+    setDirtyFields((prev) => ({ ...prev, [field]: true }));
+    if (field === "email" && rateLimitSeconds > 0) return;
+    setErrors((prev) => ({ ...prev, [field]: "" }));
   };
+
+  const handleFieldBlur = (field) => {
+    if (!dirtyFields[field]) return;
+    const nextForm = { ...form };
+    if (rateLimitSeconds > 0 && field === "email") return;
+    setErrors((prev) => ({ ...prev, [field]: validateField(field, nextForm) }));
+  };
+
+  const loadCaptcha = async () => {
+    setCaptchaLoading(true);
+    try {
+      const data = await API.getLoginChallenge();
+      const challengeId = String(data?.challengeId || "").trim();
+      const question = String(data?.question || "").trim();
+      if (!challengeId || !question) {
+        throw new Error("Security check is unavailable right now. Please try again.");
+      }
+      setCaptcha({
+        id: challengeId,
+        question,
+      });
+      setForm((prev) => ({ ...prev, captchaAnswer: "" }));
+      setDirtyFields((prev) => ({ ...prev, captchaAnswer: false }));
+      setErrors((prev) => ({ ...prev, captchaAnswer: "" }));
+    } catch (error) {
+      const message = String(error?.message || "").trim();
+      setCaptcha({ id: "", question: "" });
+      setErrors((prev) => ({
+        ...prev,
+        captchaAnswer: message || "Unable to load security check. Please refresh.",
+      }));
+    } finally {
+      setCaptchaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCaptcha();
+  }, []);
+
+  useEffect(() => {
+    if (rateLimitUntil <= 0) {
+      setRateLimitSeconds(0);
+      return undefined;
+    }
+
+    const syncCountdown = () => {
+      const remaining = getRemainingRateLimitSeconds(rateLimitUntil);
+      setRateLimitSeconds(remaining);
+      if (remaining <= 0) {
+        clearRateLimit();
+      }
+    };
+
+    syncCountdown();
+    const timer = setInterval(syncCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [rateLimitUntil, clearRateLimit]);
+
+  useEffect(() => {
+    setErrors((prev) => {
+      if (!prev.email || !/too many/i.test(prev.email)) return prev;
+      return { ...prev, email: "" };
+    });
+  }, [rateLimitSeconds]);
 
   const validateForm = () => {
     const newErrors = {};
     const emailErr = SIGN_IN_VALIDATION_RULES.email(form.email);
     const pwErr = SIGN_IN_VALIDATION_RULES.password(form.password);
+    const captchaErr = SIGN_IN_VALIDATION_RULES.captcha(form.captchaAnswer);
     if (emailErr) newErrors.email = emailErr;
     if (pwErr) newErrors.password = pwErr;
+    if (captchaErr) newErrors.captchaAnswer = captchaErr;
     return newErrors;
   };
 
   const handleSignIn = async (e) => {
     e.preventDefault();
+
+    if (rateLimitSeconds > 0) return;
 
     // Ignore very fast repeat clicks
     const now = Date.now();
@@ -48,6 +196,14 @@ export default function SignInPage({
     const newErrors = validateForm();
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
+    if (!captcha.id) {
+      setErrors((prev) => ({
+        ...prev,
+        captchaAnswer: "Security check is unavailable. Please refresh.",
+      }));
+      await loadCaptcha();
+      return;
+    }
 
     setIsLoading(true);
     setSuccessMessage("");
@@ -70,10 +226,13 @@ export default function SignInPage({
       const response = await API.login({
         email: form.email,
         password: form.password,
+        captchaId: captcha.id,
+        captchaAnswer: form.captchaAnswer,
       });
 
-      if (response.token) localStorage.setItem("token", response.token);
-      if (response.user) localStorage.setItem("user", JSON.stringify(response.user));
+      localStorage.removeItem("token");
+      sessionStorage.removeItem("token");
+      if (response.user) setSessionUser(response.user);
 
       const isOwner = response.user?.role === "owner";
 
@@ -116,20 +275,31 @@ export default function SignInPage({
           kycStatus: response.user.kycStatus,
         });
       }, 1500);
+      clearRateLimit();
     } catch (error) {
       const msg = error.message || "";
+      const retryAfterSeconds = Number(error?.retryAfterSeconds || error?.details?.retryAfterSeconds || 0);
+      const retryAfterAt = error?.retryAfterAt || error?.details?.retryAfterAt || "";
+      const isRateLimitError = Number(error?.status) === 429 || msg.includes("Too many");
 
-      if (msg.includes("Invalid email or password")) {
+      if (isRateLimitError) {
+        const waitSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : RATE_LIMIT_FALLBACK_SECONDS;
+        activateRateLimit(waitSeconds, retryAfterAt);
+        setErrors({});
+      } else if (msg.includes("Invalid email or password")) {
         setErrors({
           email: "Invalid email or password.",
           password: "Invalid email or password.",
         });
+      } else if (/captcha/i.test(msg)) {
+        setErrors({ captchaAnswer: msg });
       } else if (msg.includes("verify your email")) {
         setErrors({ email: "Please verify your email before logging in." });
-      } else if (msg.includes("Too many")) {
-        setErrors({ email: msg });
       } else {
         setErrors({ email: "Login failed. Please try again." });
+      }
+      if (!isRateLimitError) {
+        await loadCaptcha();
       }
     } finally {
       setIsLoading(false);
@@ -139,6 +309,7 @@ export default function SignInPage({
   return (
     <AuthShell
       onNavigateToHome={onNavigateToHome}
+      disableNavigation={isRateLimited}
       badge="Fast and secure access"
       panelTitle="Welcome back to RentifyPro."
       panelDescription="Sign in to continue managing bookings, realtime chats, and your upcoming trips."
@@ -168,32 +339,84 @@ export default function SignInPage({
 
         <form onSubmit={handleSignIn} className="space-y-4" noValidate>
           <FormInput
-            label="Email Address"
+            label="Enter Email"
             type="email"
             value={form.email}
             onChange={(e) => handleChange("email", e.target.value.toLowerCase().trim())}
             error={errors.email}
-            disabled={isLoading}
-            placeholder="john@gmail.com"
+            disabled={isFormLocked}
+            placeholder="Enter Email"
             required
             icon={Mail}
+            iconPosition="left"
             showEmailHint
+            maxLength={254}
+            onBlur={() => handleFieldBlur("email")}
           />
 
           <PasswordInput
-            label="Password"
+            label="Enter Password"
             value={form.password}
             onChange={(e) => handleChange("password", e.target.value)}
             error={errors.password}
-            disabled={isLoading}
+            disabled={isFormLocked}
+            placeholder="Enter Password"
             required
+            maxLength={128}
+            onBlur={() => handleFieldBlur("password")}
           />
+
+          <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+            {(() => {
+              const match = captcha.question?.match(/(\d+)\s*([+-])\s*(\d+)/);
+              const left = match?.[1] || "-";
+              const op = match?.[2] || "+";
+              const right = match?.[3] || "-";
+              return (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-[56px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-lg font-semibold text-slate-700 shadow-sm">
+                      {captchaLoading ? "..." : left}
+                    </div>
+                    <span className="text-lg font-semibold text-slate-500">{op}</span>
+                    <div className="min-w-[56px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-lg font-semibold text-slate-700 shadow-sm">
+                      {captchaLoading ? "..." : right}
+                    </div>
+                    <span className="text-lg font-semibold text-slate-500">=</span>
+                    <input
+                      type="text"
+                      value={form.captchaAnswer}
+                      onChange={(e) => handleChange("captchaAnswer", e.target.value.replace(/[^0-9]/g, ""))}
+                      onBlur={() => handleFieldBlur("captchaAnswer")}
+                      disabled={isFormLocked || captchaLoading}
+                      placeholder="?"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={3}
+                      className="w-[72px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-lg font-semibold text-slate-800 shadow-sm outline-none transition focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadCaptcha}
+                    disabled={captchaLoading || isFormLocked}
+                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50"
+                    aria-label="Refresh security check"
+                  >
+                    <RefreshCcw size={16} />
+                  </button>
+                </div>
+              );
+            })()}
+
+            {errors.captchaAnswer && <p className="mt-2 text-xs font-semibold text-rose-600">{errors.captchaAnswer}</p>}
+          </div>
 
           <div className="text-right">
             <button
               type="button"
               onClick={onNavigateToForgotPassword}
-              disabled={isLoading}
+              disabled={isFormLocked}
               className="text-sm font-medium text-slate-600 transition-colors hover:text-[#017FE6] disabled:opacity-50"
             >
               Forgot password?
@@ -202,7 +425,7 @@ export default function SignInPage({
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isFormLocked}
             className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3.5 text-sm disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isLoading ? (
@@ -210,17 +433,25 @@ export default function SignInPage({
                 <Loader size={18} className="animate-spin" />
                 Signing In...
               </>
+            ) : rateLimitSeconds > 0 ? (
+              `Try again in ${formatCountdown(rateLimitSeconds)}`
             ) : (
               "Sign In"
             )}
           </button>
+
+          {rateLimitSeconds > 0 && (
+            <p className="text-center text-xs font-semibold text-amber-600">
+              Too many attempts. You can sign in again in {formatCountdown(rateLimitSeconds)}.
+            </p>
+          )}
 
           <p className="mt-2 text-center text-sm text-slate-500">
             Don't have an account?{" "}
             <button
               type="button"
               onClick={onNavigateToRegister}
-              disabled={isLoading}
+              disabled={isFormLocked}
               className="font-semibold text-[#017FE6] transition-colors hover:text-[#0165B8] disabled:opacity-50"
             >
               Register

@@ -1,6 +1,7 @@
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
-import { createNotification } from "../utils/notification.js";
+import eventBus from "../events/eventBus.js";
+import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import { emitToUser } from "../socket/index.js";
 import {
   createPayMongoCheckoutSession,
@@ -13,6 +14,7 @@ import {
   getPayMongoPaymentIntentId,
   isPayMongoCheckoutPaid,
 } from "../utils/paymongo.js";
+import { getTransactionFee } from "../utils/fees.js";
 import { syncVehicleAvailabilityByBookingState } from "../utils/vehicleAvailability.js";
 import {
   applyLedgerRecordToBooking,
@@ -20,15 +22,23 @@ import {
   getSepoliaTxUrl,
   recordBookingTransactionOnChain as recordBookingTransactionOnLedger,
 } from "../utils/blockchainBooking.js";
+import { normalizePhilippineMobile } from "../utils/phone.js";
+import {
+  HOURLY_RATE_UNIT,
+  getBookingDriverHourlyRate,
+  getBookingDurationHours,
+  getBookingDurationMinutes,
+  getBookingVehicleHourlyRate,
+  getDurationHoursFromMinutes,
+  getDurationMinutes,
+  getLegacyBookingDays,
+  getVehicleHourlyRate,
+  roundCurrency,
+} from "../utils/pricing.js";
 
 const toDate = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const calculateDays = (pickupAt, returnAt) => {
-  const ms = returnAt.getTime() - pickupAt.getTime();
-  return Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)));
 };
 
 const boolFromValue = (value) => {
@@ -43,11 +53,43 @@ const getImageUrl = (req, pathValue) => {
   return `${req.protocol}://${req.get("host")}/${String(pathValue).replace(/\\/g, "/")}`;
 };
 
-const frontendBaseUrl = () =>
-  (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
+const normalizeOriginText = (value) => String(value || "").trim().replace(/\/+$/, "");
 
-const buildPaymentRedirectUrls = (bookingId) => {
-  const base = frontendBaseUrl();
+const getConfiguredFrontendBaseUrl = () => {
+  const configuredOrigins = String(process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((origin) => normalizeOriginText(origin))
+    .filter((origin) => /^https?:\/\//i.test(origin))
+    .filter((origin) => !origin.includes("*"));
+
+  return configuredOrigins[0] || "";
+};
+
+const getOriginFromReferer = (refererValue) => {
+  const referer = String(refererValue || "").trim();
+  if (!referer) return "";
+  try {
+    return normalizeOriginText(new URL(referer).origin);
+  } catch {
+    return "";
+  }
+};
+
+const frontendBaseUrl = (req) => {
+  const originHeader = normalizeOriginText(req?.get?.("origin"));
+  if (/^https?:\/\//i.test(originHeader)) return originHeader;
+
+  const refererOrigin = getOriginFromReferer(req?.get?.("referer"));
+  if (/^https?:\/\//i.test(refererOrigin)) return refererOrigin;
+
+  const configured = getConfiguredFrontendBaseUrl();
+  if (configured) return configured;
+
+  return "http://localhost:5173";
+};
+
+const buildPaymentRedirectUrls = (bookingId, req) => {
+  const base = frontendBaseUrl(req);
   const id = encodeURIComponent(String(bookingId));
   return {
     successUrl: `${base}/bookings?payment=success&bookingId=${id}`,
@@ -61,25 +103,50 @@ const buildReferenceNumber = (bookingId) => {
   return `BOOK-${shortId}-${suffix}`;
 };
 
-const getBlockchainRecordingFee = () => {
-  const configured = Number(process.env.BOOKING_BLOCKCHAIN_RECORDING_FEE || 0);
-  if (!Number.isFinite(configured) || configured < 0) return 0;
-  return Math.round(configured * 100) / 100;
-};
+const getBlockchainRecordingFee = () => getTransactionFee();
 
 const DOWNPAYMENT_RATE = 0.3;
+const MIN_SAME_DAY_RENTAL_MS = 60 * 60 * 1000;
+const PAYMENT_AMOUNT_EPSILON = 0.01;
 const PAYMENT_SCOPES = new Set(["downpayment", "full"]);
 const PAYMENT_CHANNELS = new Set(["ewallet", "card"]);
 const PAYMENT_CHANNEL_METHOD_TYPES = {
   ewallet: ["gcash", "paymaya"],
   card: ["card"],
 };
+const WALK_IN_PAYMENT_STATUSES = new Set(["none", "requested", "approved", "rejected", "completed"]);
+const ACTIVE_BOOKING_STATUSES = new Set(["confirmed", "extended"]);
+const ACTIVE_OVERLAP_STATUSES = ["pending", "confirmed", "extended"];
+const PAYMENT_ALLOWED_STATUSES = new Set(["confirmed", "extended", "completed"]);
+const EXTENSION_STATUSES = new Set(["none", "requested", "approved", "rejected"]);
+const CANCELLATION_STATUSES = new Set(["none", "requested", "approved", "rejected"]);
+const LATE_RETURN_ACTIONS = new Set(["none", "extend_requested", "proceed_late_return"]);
+const LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT = 0.25;
+const BOOKING_AUTO_COMPLETE_GRACE_MINUTES_DEFAULT = 0;
+const BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT = 0;
 
-const roundCurrency = (value) => {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * 100) / 100;
+const getLateReturnPenaltyMultiplier = () => {
+  const raw = Number(process.env.LATE_RETURN_PENALTY_MULTIPLIER);
+  if (!Number.isFinite(raw) || raw < 0) return LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT;
+  return raw;
 };
+
+const parseGraceMinutes = (value, fallback = 0) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  return Math.floor(numeric);
+};
+
+const getBookingLifecycleGracePolicy = () => ({
+  autoCompleteMinutes: parseGraceMinutes(
+    process.env.BOOKING_AUTO_COMPLETE_GRACE_MINUTES,
+    BOOKING_AUTO_COMPLETE_GRACE_MINUTES_DEFAULT
+  ),
+  overdueMinutes: parseGraceMinutes(
+    process.env.BOOKING_OVERDUE_GRACE_MINUTES,
+    BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT
+  ),
+});
 
 const resolvePaymentScope = (value, fallback = "downpayment") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -93,47 +160,91 @@ const resolvePaymentChannel = (value, fallback = "ewallet") => {
   return fallback;
 };
 
+const buildRenterName = (user = {}, renterProfile = {}) => {
+  const directName = String(user?.name || renterProfile?.name || "").trim();
+  if (directName) return directName;
+  const firstName = String(user?.firstName || renterProfile?.firstName || "").trim();
+  const lastName = String(user?.lastName || renterProfile?.lastName || "").trim();
+  const combined = `${firstName} ${lastName}`.trim();
+  return combined || "Renter";
+};
+
+const normalizePayMongoPhone = (phoneValue) => {
+  return normalizePhilippineMobile(phoneValue);
+};
+
+const logPayMongoError = (context, error) => {
+  console.error(`[PayMongo] ${context}`, {
+    message: error?.message,
+    code: error?.code,
+    statusCode: error?.statusCode,
+    stack: error?.stack,
+  });
+};
+
 const shouldApplyConfiguredFeeFallback = (booking) => {
   const paymentStatus = String(booking?.paymentStatus || "unpaid").toLowerCase();
   return paymentStatus === "unpaid" || paymentStatus === "partial";
 };
 
 const getEffectiveBlockchainGasFee = (booking) => {
+  const configured = getBlockchainRecordingFee();
   const persisted = Number(booking?.blockchainGasFee);
   if (Number.isFinite(persisted) && persisted > 0) {
-    return Math.round(persisted * 100) / 100;
+    const roundedPersisted = Math.round(persisted * 100) / 100;
+    if (!shouldApplyConfiguredFeeFallback(booking)) {
+      return roundedPersisted;
+    }
+    return Math.round(Math.max(roundedPersisted, configured) * 100) / 100;
   }
   if (!shouldApplyConfiguredFeeFallback(booking)) {
     return 0;
   }
-  return getBlockchainRecordingFee();
+  return configured;
+};
+
+const getBookingLatePenaltyRatePerHour = (booking) => {
+  const persisted = Number(booking?.lateReturnPenaltyRatePerHour || 0);
+  if (Number.isFinite(persisted) && persisted > 0) {
+    return roundCurrency(persisted);
+  }
+  const vehicleRate = getBookingVehicleHourlyRate(booking);
+  const driverRate = Boolean(booking?.driverSelected) ? getBookingDriverHourlyRate(booking) : 0;
+  const baseRate = Math.max(0, Number(vehicleRate || 0)) + Math.max(0, Number(driverRate || 0));
+  return roundCurrency(baseRate * getLateReturnPenaltyMultiplier());
+};
+
+const getBookingLatePenaltyFee = (booking) => {
+  const persisted = Number(booking?.lateReturnPenaltyFee || 0);
+  if (Number.isFinite(persisted) && persisted > 0) return roundCurrency(persisted);
+  return 0;
 };
 
 const getBookingRentalAmountForPayment = (booking) => {
   const directTotal = Number(booking?.totalAmount);
   if (Number.isFinite(directTotal) && directTotal > 0) {
-    return directTotal;
+    return roundCurrency(directTotal + getBookingLatePenaltyFee(booking));
   }
 
   const baseAmount = Number(booking?.baseAmount);
   const driverAmount = Number(booking?.driverAmount);
   if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount > 0) {
-    return baseAmount + driverAmount;
+    return roundCurrency(baseAmount + driverAmount + getBookingLatePenaltyFee(booking));
   }
 
-  const vehicleDailyRate = Number(booking?.vehicleDailyRate);
-  const bookingDays = Number(booking?.bookingDays || 1);
-  if (Number.isFinite(vehicleDailyRate) && vehicleDailyRate > 0 && Number.isFinite(bookingDays) && bookingDays > 0) {
-    const driverDailyRate = Number(booking?.driverDailyRate || 0);
+  const durationHours = getBookingDurationHours(booking);
+  const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
+  if (Number.isFinite(vehicleHourlyRate) && vehicleHourlyRate > 0 && Number.isFinite(durationHours) && durationHours > 0) {
+    const driverHourlyRate = getBookingDriverHourlyRate(booking);
     const driverSelected = Boolean(booking?.driverSelected);
     const driverAmountFromRate =
-      driverSelected && Number.isFinite(driverDailyRate) && driverDailyRate > 0
-        ? driverDailyRate * bookingDays
+      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
+        ? driverHourlyRate * durationHours
         : 0;
-    return vehicleDailyRate * bookingDays + driverAmountFromRate;
+    return roundCurrency(vehicleHourlyRate * durationHours + driverAmountFromRate + getBookingLatePenaltyFee(booking));
   }
 
-  return 0;
+  return roundCurrency(getBookingLatePenaltyFee(booking));
 };
 
 const getBookingPayableAmount = (booking) => {
@@ -161,6 +272,221 @@ const getBookingRemainingAmount = (booking) => {
   const paidAmount = getBookingPaidAmount(booking);
   return roundCurrency(Math.max(totalPayable - paidAmount, 0));
 };
+
+const getBookingReturnBoundaryWithGrace = (booking, graceMinutes = 0) => {
+  const returnAt = toDate(booking?.returnAt);
+  if (!returnAt) return null;
+  const grace = Math.max(0, Math.floor(Number(graceMinutes || 0)));
+  if (grace <= 0) return returnAt;
+  return new Date(returnAt.getTime() + grace * 60 * 1000);
+};
+
+const getBookingOverdueMinutes = (booking, now = new Date(), graceMinutes = 0) => {
+  const boundaryAt = getBookingReturnBoundaryWithGrace(booking, graceMinutes);
+  const current = toDate(now);
+  if (!boundaryAt || !current) return 0;
+  if (current.getTime() <= boundaryAt.getTime()) return 0;
+  return Math.max(0, getDurationMinutes(boundaryAt, current));
+};
+
+const hasSettledBookingPayment = (booking) => {
+  const paymentStatus = String(booking?.paymentStatus || "").trim().toLowerCase();
+  const walkInStatus = normalizeWalkInStatus(booking?.walkInPaymentStatus, "none");
+  return paymentStatus === "paid" || walkInStatus === "completed";
+};
+
+const recalculateBookingAmountsForRange = (booking, nextReturnAt) => {
+  const pickupAt = toDate(booking?.pickupAt);
+  const returnAt = toDate(nextReturnAt);
+  if (!pickupAt || !returnAt || returnAt.getTime() <= pickupAt.getTime()) {
+    return null;
+  }
+
+  const bookingDurationMinutes = getDurationMinutes(pickupAt, returnAt);
+  const bookingDurationHours = getDurationHoursFromMinutes(bookingDurationMinutes);
+  const bookingDays = getLegacyBookingDays(bookingDurationMinutes);
+  if (bookingDurationMinutes <= 0 || bookingDurationHours <= 0) {
+    return null;
+  }
+
+  const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
+  const driverHourlyRate = Boolean(booking?.driverSelected) ? getBookingDriverHourlyRate(booking) : 0;
+  const baseAmount = roundCurrency(vehicleHourlyRate * bookingDurationHours);
+  const driverAmount = roundCurrency(driverHourlyRate * bookingDurationHours);
+  const totalAmount = roundCurrency(baseAmount + driverAmount);
+
+  booking.returnAt = returnAt;
+  booking.bookingDays = bookingDays;
+  booking.bookingDurationMinutes = bookingDurationMinutes;
+  booking.bookingDurationHours = bookingDurationHours;
+  booking.baseAmount = baseAmount;
+  booking.driverAmount = driverAmount;
+  booking.totalAmount = totalAmount;
+  booking.rentalRateUnit = HOURLY_RATE_UNIT;
+  return {
+    bookingDurationMinutes,
+    bookingDurationHours,
+    bookingDays,
+    baseAmount,
+    driverAmount,
+    totalAmount,
+  };
+};
+
+const syncBookingPaymentSnapshot = (booking) => {
+  const totalPayable = getBookingPayableAmount(booking);
+  const existingPaidAmount = Number(booking?.paymentAmountPaid || 0);
+  const normalizedPaidAmount = Number.isFinite(existingPaidAmount) && existingPaidAmount > 0
+    ? Math.min(roundCurrency(existingPaidAmount), totalPayable)
+    : 0;
+  const remainingAmount = roundCurrency(Math.max(totalPayable - normalizedPaidAmount, 0));
+
+  booking.paymentAmountPaid = normalizedPaidAmount;
+  booking.paymentAmountDue = remainingAmount;
+  if (remainingAmount <= 0) {
+    booking.paymentStatus = "paid";
+    booking.paidAt = booking.paidAt || new Date();
+    booking.paymentCheckoutAmount = 0;
+    booking.paymentScope = "full";
+  } else if (normalizedPaidAmount > 0) {
+    booking.paymentStatus = "partial";
+    booking.paidAt = null;
+  } else {
+    booking.paymentStatus = "unpaid";
+    booking.paidAt = null;
+  }
+};
+
+const normalizeWalkInStatus = (value, fallback = "none") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (WALK_IN_PAYMENT_STATUSES.has(normalized)) return normalized;
+  return fallback;
+};
+
+const normalizeExtensionStatus = (value, fallback = "none") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (EXTENSION_STATUSES.has(normalized)) return normalized;
+  return fallback;
+};
+
+const normalizeCancellationStatus = (value, fallback = "none") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (CANCELLATION_STATUSES.has(normalized)) return normalized;
+  return fallback;
+};
+
+const normalizeLateReturnAction = (value, fallback = "none") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (LATE_RETURN_ACTIONS.has(normalized)) return normalized;
+  return fallback;
+};
+
+const toOptionalText = (value, maxLength = 500) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return trimmed.slice(0, maxLength);
+};
+
+const toIdString = (value) => {
+  const raw = value?._id || value;
+  const normalized = String(raw || "").trim();
+  return normalized || null;
+};
+
+const normalizeIdText = (value) => String(value || "").trim();
+
+const getVerifiedCheckoutIds = (booking) => {
+  const ids = Array.isArray(booking?.paymongoVerifiedCheckoutIds)
+    ? booking.paymongoVerifiedCheckoutIds
+    : [];
+  return [...new Set(ids.map((id) => normalizeIdText(id)).filter(Boolean))];
+};
+
+const hasVerifiedCheckoutId = (booking, checkoutId) => {
+  const normalizedId = normalizeIdText(checkoutId);
+  if (!normalizedId) return false;
+  return getVerifiedCheckoutIds(booking).includes(normalizedId);
+};
+
+const appendVerifiedCheckoutId = (booking, checkoutId) => {
+  const normalizedId = normalizeIdText(checkoutId);
+  if (!normalizedId) return;
+  const existing = getVerifiedCheckoutIds(booking);
+  if (existing.includes(normalizedId)) {
+    booking.paymongoVerifiedCheckoutIds = existing;
+    return;
+  }
+  booking.paymongoVerifiedCheckoutIds = [...existing, normalizedId];
+};
+
+const resetWalkInPaymentState = (booking, { clearBalancePaymentMethod = true } = {}) => {
+  if (!booking) return;
+  if (clearBalancePaymentMethod) {
+    booking.balancePaymentMethod = null;
+  }
+  booking.walkInPaymentStatus = "none";
+  booking.walkInRequestedAt = null;
+  booking.walkInRequestedBy = null;
+  booking.walkInRequestNote = "";
+  booking.walkInReviewedAt = null;
+  booking.walkInReviewedBy = null;
+  booking.walkInReviewNote = "";
+  booking.walkInConfirmedAt = null;
+  booking.walkInConfirmedBy = null;
+  booking.walkInConfirmationNote = "";
+};
+
+const serializeWalkInPayment = (booking) => ({
+  status: normalizeWalkInStatus(booking?.walkInPaymentStatus, "none"),
+  requestedAt: booking?.walkInRequestedAt || null,
+  requestedBy: toIdString(booking?.walkInRequestedBy),
+  requestNote: toOptionalText(booking?.walkInRequestNote),
+  reviewedAt: booking?.walkInReviewedAt || null,
+  reviewedBy: toIdString(booking?.walkInReviewedBy),
+  reviewNote: toOptionalText(booking?.walkInReviewNote),
+  confirmedAt: booking?.walkInConfirmedAt || null,
+  confirmedBy: toIdString(booking?.walkInConfirmedBy),
+  confirmationNote: toOptionalText(booking?.walkInConfirmationNote),
+});
+
+const serializeLateReturn = (booking) => {
+  const overdueMinutes = Math.max(0, Math.round(Number(booking?.lateReturnOverdueMinutes || 0)));
+  return {
+    isOverdue: Boolean(booking?.lateReturnIsOverdue),
+    overdueMinutes,
+    detectedAt: booking?.lateReturnDetectedAt || null,
+    notifiedAt: booking?.lateReturnNotifiedAt || null,
+    penaltyRatePerHour: roundCurrency(Number(booking?.lateReturnPenaltyRatePerHour || 0)),
+    penaltyFee: roundCurrency(Number(booking?.lateReturnPenaltyFee || 0)),
+    action: normalizeLateReturnAction(booking?.lateReturnAction, "none"),
+    resolvedAt: booking?.lateReturnResolvedAt || null,
+    resolvedBy: toIdString(booking?.lateReturnResolvedBy),
+  };
+};
+
+const serializeExtensionRequest = (booking) => ({
+  status: normalizeExtensionStatus(booking?.extensionStatus, "none"),
+  requestedAt: booking?.extensionRequestedAt || null,
+  requestedBy: toIdString(booking?.extensionRequestedBy),
+  currentReturnAt: booking?.extensionCurrentReturnAt || null,
+  requestedReturnAt: booking?.extensionRequestedReturnAt || null,
+  requestNote: toOptionalText(booking?.extensionRequestNote),
+  reviewedAt: booking?.extensionReviewedAt || null,
+  reviewedBy: toIdString(booking?.extensionReviewedBy),
+  reviewAction: String(booking?.extensionReviewAction || "").trim().toLowerCase() || null,
+  reviewNote: toOptionalText(booking?.extensionReviewNote),
+});
+
+const serializeCancellationRequest = (booking) => ({
+  status: normalizeCancellationStatus(booking?.cancellationStatus, "none"),
+  requestedAt: booking?.cancellationRequestedAt || null,
+  requestedBy: toIdString(booking?.cancellationRequestedBy),
+  requestNote: toOptionalText(booking?.cancellationRequestNote),
+  reviewedAt: booking?.cancellationReviewedAt || null,
+  reviewedBy: toIdString(booking?.cancellationReviewedBy),
+  reviewAction: String(booking?.cancellationReviewAction || "").trim().toLowerCase() || null,
+  reviewNote: toOptionalText(booking?.cancellationReviewNote),
+});
 
 const getBookingParties = (booking) => {
   const ownerId = String(booking?.owner?._id || booking?.owner || "");
@@ -234,18 +560,29 @@ const serializeBooking = (req, booking) => {
   const vehicle = booking.vehicle || {};
   const rawImages = Array.isArray(vehicle.images) ? vehicle.images : [];
   const images = rawImages.map((pathValue) => getImageUrl(req, pathValue));
+  const bookingDurationMinutes = getBookingDurationMinutes(booking);
+  const bookingDurationHours = getBookingDurationHours(booking);
+  const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
+  const driverHourlyRate = getBookingDriverHourlyRate(booking);
 
   return {
     _id: booking._id,
     pickupAt: booking.pickupAt,
     returnAt: booking.returnAt,
     bookingDays: booking.bookingDays,
-    vehicleDailyRate: booking.vehicleDailyRate,
+    bookingDurationMinutes,
+    bookingDurationHours,
+    rentalRateUnit: HOURLY_RATE_UNIT,
+    vehicleDailyRate: vehicleHourlyRate,
+    vehicleHourlyRate,
     driverSelected: booking.driverSelected,
-    driverDailyRate: booking.driverDailyRate,
+    driverDailyRate: driverHourlyRate,
+    driverHourlyRate,
     baseAmount: booking.baseAmount,
     driverAmount: booking.driverAmount,
     totalAmount: booking.totalAmount,
+    lateReturnPenaltyRatePerHour: getBookingLatePenaltyRatePerHour(booking),
+    lateReturnPenaltyFee: getBookingLatePenaltyFee(booking),
     blockchainGasFee: getEffectiveBlockchainGasFee(booking),
     amountPayable: getBookingPayableAmount(booking),
     paymentAmountPaid: getBookingPaidAmount(booking),
@@ -259,6 +596,18 @@ const serializeBooking = (req, booking) => {
     payment_status: booking.paymentStatus,
     paymentMethod: booking.paymentMethod || null,
     payment_method: booking.paymentMethod || null,
+    balancePaymentMethod: booking.balancePaymentMethod || null,
+    balance_payment_method: booking.balancePaymentMethod || null,
+    autoCompletedAt: booking.autoCompletedAt || null,
+    actualReturnAt: booking.actualReturnAt || null,
+    lateReturn: serializeLateReturn(booking),
+    late_return: serializeLateReturn(booking),
+    extensionRequest: serializeExtensionRequest(booking),
+    extension_request: serializeExtensionRequest(booking),
+    cancellationRequest: serializeCancellationRequest(booking),
+    cancellation_request: serializeCancellationRequest(booking),
+    walkInPayment: serializeWalkInPayment(booking),
+    walk_in_payment: serializeWalkInPayment(booking),
     paymongoReference: booking.paymongoReference || null,
     paymongo_reference: booking.paymongoReference || null,
     paymongoCheckoutId: booking.paymongoCheckoutId || null,
@@ -302,9 +651,24 @@ const serializeBooking = (req, booking) => {
           name: vehicle.name,
           description: vehicle.description,
           location: vehicle.location,
-          dailyRentalRate: vehicle.dailyRentalRate,
+          dailyRentalRate: getVehicleHourlyRate(vehicle, {
+            rateField: "dailyRentalRate",
+            unitField: "pricingUnit",
+          }),
+          hourlyRentalRate: getVehicleHourlyRate(vehicle, {
+            rateField: "dailyRentalRate",
+            unitField: "pricingUnit",
+          }),
+          pricingUnit: HOURLY_RATE_UNIT,
           driverOptionEnabled: Boolean(vehicle.driverOptionEnabled),
-          driverDailyRate: vehicle.driverDailyRate || 0,
+          driverDailyRate: getVehicleHourlyRate(vehicle, {
+            rateField: "driverDailyRate",
+            unitField: "pricingUnit",
+          }),
+          driverHourlyRate: getVehicleHourlyRate(vehicle, {
+            rateField: "driverDailyRate",
+            unitField: "pricingUnit",
+          }),
           specs: vehicle.specs || {},
           images,
           imageUrl: images[0] || getImageUrl(req, vehicle.imageUrl),
@@ -319,7 +683,7 @@ const bookingPopulate = [
   {
     path: "vehicle",
     select:
-      "name description location images imageUrl dailyRentalRate driverOptionEnabled driverDailyRate specs owner",
+      "name description location images imageUrl dailyRentalRate pricingUnit driverOptionEnabled driverDailyRate specs owner",
   },
   { path: "owner", select: "name email avatar role walletAddress" },
   { path: "renter", select: "name email avatar role walletAddress" },
@@ -363,6 +727,17 @@ export const createBooking = async (req, res) => {
       });
     }
 
+    const isSameDayRental =
+      pickupAt.getFullYear() === returnAt.getFullYear() &&
+      pickupAt.getMonth() === returnAt.getMonth() &&
+      pickupAt.getDate() === returnAt.getDate();
+    if (isSameDayRental && returnAt.getTime() - pickupAt.getTime() < MIN_SAME_DAY_RENTAL_MS) {
+      return res.status(400).json({
+        success: false,
+        message: "For same-day rentals, return must be at least 1 hour after pickup.",
+      });
+    }
+
     const vehicle = await Vehicle.findById(vehicleId);
     if (!vehicle) {
       return res.status(404).json({ success: false, message: "Vehicle not found." });
@@ -386,7 +761,7 @@ export const createBooking = async (req, res) => {
 
     const overlappingBooking = await Booking.findOne({
       vehicle: vehicle._id,
-      status: { $in: ["pending", "confirmed"] },
+      status: { $in: ACTIVE_OVERLAP_STATUSES },
       pickupAt: { $lt: returnAt },
       returnAt: { $gt: pickupAt },
     });
@@ -399,10 +774,24 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    const bookingDays = calculateDays(pickupAt, returnAt);
+    const bookingDurationMinutes = getDurationMinutes(pickupAt, returnAt);
+    const bookingDurationHours = getDurationHoursFromMinutes(bookingDurationMinutes);
+    const bookingDays = getLegacyBookingDays(bookingDurationMinutes);
+    if (bookingDurationMinutes <= 0 || bookingDurationHours <= 0) {
+      await releaseVehicleLock();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking duration.",
+      });
+    }
     const driverSelected = boolFromValue(driverSelectedRaw);
     const driverDailyRate =
-      driverSelected && lockedVehicle.driverOptionEnabled ? Number(lockedVehicle.driverDailyRate || 0) : 0;
+      driverSelected && lockedVehicle.driverOptionEnabled
+        ? getVehicleHourlyRate(lockedVehicle, {
+            rateField: "driverDailyRate",
+            unitField: "pricingUnit",
+          })
+        : 0;
 
     if (driverSelected && !lockedVehicle.driverOptionEnabled) {
       await releaseVehicleLock();
@@ -412,10 +801,13 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    const vehicleDailyRate = Number(lockedVehicle.dailyRentalRate || 0);
-    const baseAmount = vehicleDailyRate * bookingDays;
-    const driverAmount = driverDailyRate * bookingDays;
-    const totalAmount = baseAmount + driverAmount;
+    const vehicleDailyRate = getVehicleHourlyRate(lockedVehicle, {
+      rateField: "dailyRentalRate",
+      unitField: "pricingUnit",
+    });
+    const baseAmount = roundCurrency(vehicleDailyRate * bookingDurationHours);
+    const driverAmount = roundCurrency(driverDailyRate * bookingDurationHours);
+    const totalAmount = roundCurrency(baseAmount + driverAmount);
     const blockchainGasFee = getBlockchainRecordingFee();
     const paymentAmountDue = roundCurrency(totalAmount + blockchainGasFee);
 
@@ -427,6 +819,9 @@ export const createBooking = async (req, res) => {
       pickupAt,
       returnAt,
       bookingDays,
+      bookingDurationMinutes,
+      bookingDurationHours,
+      rentalRateUnit: HOURLY_RATE_UNIT,
       vehicleDailyRate,
       driverSelected,
       driverDailyRate,
@@ -441,15 +836,34 @@ export const createBooking = async (req, res) => {
       paymentCheckoutAmount: 0,
       paymentScope: null,
       paymentChannel: null,
+      lateReturnPenaltyRatePerHour: 0,
+      lateReturnPenaltyFee: 0,
+      lateReturnIsOverdue: false,
+      lateReturnDetectedAt: null,
+      lateReturnNotifiedAt: null,
+      lateReturnOverdueMinutes: 0,
+      lateReturnAction: "none",
+      lateReturnResolvedAt: null,
+      lateReturnResolvedBy: null,
+      extensionStatus: "none",
+      extensionRequestedAt: null,
+      extensionRequestedBy: null,
+      extensionCurrentReturnAt: null,
+      extensionRequestedReturnAt: null,
+      extensionRequestNote: "",
+      extensionReviewedAt: null,
+      extensionReviewedBy: null,
+      extensionReviewAction: "",
+      extensionReviewNote: "",
+      autoCompletedAt: null,
+      actualReturnAt: null,
     });
     await releaseVehicleLock();
 
-    await createNotification({
-      user: vehicle.owner,
-      type: "booking_status",
-      title: "New booking request",
-      message: `${req.user.name || "A renter"} requested to book ${vehicle.name}.`,
-      data: { bookingId: booking._id, vehicleId: vehicle._id, status: "pending" },
+    eventBus.emit(NOTIFICATION_EVENTS.BOOKING_CREATED, {
+      booking,
+      actor: req.user,
+      vehicle,
     });
 
     const populated = await Booking.findById(booking._id).populate(bookingPopulate);
@@ -484,6 +898,11 @@ export const getMyBookings = async (req, res) => {
     }
 
     const bookings = await Booking.find(query).populate(bookingPopulate).sort({ createdAt: -1 });
+    await autoSyncBookingLifecycles(req, bookings);
+    const autoSynced = await autoSyncBookingPayments(bookings);
+    for (const booking of autoSynced) {
+      emitBookingUpdateToParties(req, booking);
+    }
     res.json({ success: true, bookings: bookings.map((booking) => serializeBooking(req, booking)) });
   } catch {
     res.status(500).json({ success: false, message: "Failed to fetch bookings." });
@@ -501,6 +920,11 @@ export const getOwnerBookings = async (req, res) => {
     }
 
     const bookings = await Booking.find(query).populate(bookingPopulate).sort({ createdAt: -1 });
+    await autoSyncBookingLifecycles(req, bookings);
+    const autoSynced = await autoSyncBookingPayments(bookings);
+    for (const booking of autoSynced) {
+      emitBookingUpdateToParties(req, booking);
+    }
     res.json({ success: true, bookings: bookings.map((booking) => serializeBooking(req, booking)) });
   } catch {
     res.status(500).json({ success: false, message: "Failed to fetch owner bookings." });
@@ -517,6 +941,12 @@ export const getBookingById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
 
+    const lifecycleSync = await syncBookingLifecycleState(req, booking, { emitUpdate: false });
+    const autoSync = await autoSyncBookingPaymentFromPayMongo(booking);
+    if (lifecycleSync.updated || autoSync.updated) {
+      emitBookingUpdateToParties(req, booking);
+    }
+
     return res.json({
       success: true,
       booking: serializeBooking(req, booking),
@@ -528,34 +958,274 @@ export const getBookingById = async (req, res) => {
 
 export const cancelMyBooking = async (req, res) => {
   try {
-    const booking = await Booking.findOne({ _id: req.params.id, renter: req.user._id });
+    const booking = await Booking.findOne({ _id: req.params.id, renter: req.user._id }).populate(bookingPopulate);
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
-    if (!["pending", "confirmed"].includes(booking.status)) {
+
+    await syncBookingLifecycleState(req, booking, { emitUpdate: false });
+
+    const normalizedStatus = String(booking.status || "").trim().toLowerCase();
+    if (!["pending", "confirmed", "extended"].includes(normalizedStatus)) {
       return res.status(400).json({ success: false, message: "Booking can no longer be cancelled." });
     }
 
-    booking.status = "cancelled";
-    await booking.save();
-    await syncVehicleAvailabilityByBookingState(booking.vehicle);
+    if (normalizedStatus !== "pending") {
+      const cancellationStatus = normalizeCancellationStatus(booking.cancellationStatus, "none");
+      if (cancellationStatus === "requested") {
+        return res.status(409).json({
+          success: false,
+          message: "A cancellation request is already waiting for owner approval.",
+        });
+      }
 
-    await createNotification({
-      user: booking.owner,
-      type: "booking_status",
-      title: "Booking cancelled",
-      message: "A renter cancelled a booking.",
-      data: { bookingId: booking._id, status: "cancelled" },
+      const now = new Date();
+      booking.cancellationStatus = "requested";
+      booking.cancellationRequestedAt = now;
+      booking.cancellationRequestedBy = req.user._id;
+      booking.cancellationRequestNote = toOptionalText(req.body?.note, 500);
+      booking.cancellationReviewedAt = null;
+      booking.cancellationReviewedBy = null;
+      booking.cancellationReviewAction = "";
+      booking.cancellationReviewNote = "";
+      await booking.save();
+
+      eventBus.emit(NOTIFICATION_EVENTS.CANCELLATION_REQUESTED, {
+        booking,
+        actor: req.user,
+        status: normalizedStatus,
+      });
+
+      const refreshed = await Booking.findById(booking._id).populate(bookingPopulate);
+      const payload = serializeBooking(req, refreshed);
+      const { ownerId, renterId } = getBookingParties(refreshed);
+      emitToUser(ownerId, "booking:updated", payload);
+      emitToUser(renterId, "booking:updated", payload);
+
+      return res.json({
+        success: true,
+        message: "Cancellation request submitted. Waiting for owner approval.",
+        booking: payload,
+      });
+    }
+
+    booking.status = "cancelled";
+    booking.cancellationStatus = "none";
+    booking.cancellationRequestedAt = null;
+    booking.cancellationRequestedBy = null;
+    booking.cancellationRequestNote = "";
+    booking.cancellationReviewedAt = null;
+    booking.cancellationReviewedBy = null;
+    booking.cancellationReviewAction = "";
+    booking.cancellationReviewNote = "";
+    await booking.save();
+    await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
+
+    eventBus.emit(NOTIFICATION_EVENTS.BOOKING_CANCELLED, {
+      booking,
+      actor: req.user,
+      cancelledBy: "renter",
     });
 
     const populated = await Booking.findById(booking._id).populate(bookingPopulate);
     const payload = serializeBooking(req, populated);
-    emitToUser(String(booking.owner), "booking:updated", payload);
-    emitToUser(String(booking.renter), "booking:updated", payload);
+    const { ownerId, renterId } = getBookingParties(populated);
+    emitToUser(ownerId, "booking:updated", payload);
+    emitToUser(renterId, "booking:updated", payload);
 
-    res.json({ success: true, booking: payload });
+    res.json({ success: true, message: "Booking cancelled.", booking: payload });
   } catch {
     res.status(500).json({ success: false, message: "Failed to cancel booking." });
+  }
+};
+
+export const requestBookingExtension = async (req, res) => {
+  try {
+    const booking = await Booking.findOne({ _id: req.params.id, renter: req.user._id }).populate(bookingPopulate);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+
+    await syncBookingLifecycleState(req, booking, { emitUpdate: false });
+
+    const normalizedStatus = String(booking.status || "").trim().toLowerCase();
+    if (["cancelled", "rejected", "completed"].includes(normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "This booking can no longer be extended.",
+      });
+    }
+    if (!ACTIVE_BOOKING_STATUSES.has(normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Only active approved bookings can be extended.",
+      });
+    }
+
+    const extensionStatus = normalizeExtensionStatus(booking.extensionStatus, "none");
+    if (extensionStatus === "requested") {
+      return res.status(409).json({
+        success: false,
+        message: "An extension request is already pending owner approval.",
+      });
+    }
+
+    const requestedReturnAt = toDate(req.body?.newReturnAt);
+    if (!requestedReturnAt) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid new return date and time.",
+      });
+    }
+
+    const currentReturnAt = toDate(booking.returnAt);
+    if (!currentReturnAt || requestedReturnAt.getTime() <= currentReturnAt.getTime()) {
+      return res.status(400).json({
+        success: false,
+        message: "New return date/time must be later than the current return schedule.",
+      });
+    }
+
+    const vehicleId = booking.vehicle?._id || booking.vehicle;
+    const conflictingBooking = await Booking.findOne({
+      _id: { $ne: booking._id },
+      vehicle: vehicleId,
+      status: { $in: ACTIVE_OVERLAP_STATUSES },
+      pickupAt: { $lt: requestedReturnAt },
+      returnAt: { $gt: booking.pickupAt },
+    }).select("_id");
+
+    if (conflictingBooking) {
+      return res.status(409).json({
+        success: false,
+        message: "Cannot request extension because the selected schedule overlaps another booking.",
+      });
+    }
+
+    const requestNote = toOptionalText(req.body?.note, 500);
+    const now = new Date();
+    booking.extensionStatus = "requested";
+    booking.extensionRequestedAt = now;
+    booking.extensionRequestedBy = req.user._id;
+    booking.extensionCurrentReturnAt = currentReturnAt;
+    booking.extensionRequestedReturnAt = requestedReturnAt;
+    booking.extensionRequestNote = requestNote;
+    booking.extensionReviewedAt = null;
+    booking.extensionReviewedBy = null;
+    booking.extensionReviewAction = "";
+    booking.extensionReviewNote = "";
+    booking.lateReturnAction = "extend_requested";
+    booking.paymentUpdatedAt = now;
+    await booking.save();
+
+    eventBus.emit(NOTIFICATION_EVENTS.EXTENSION_REQUESTED, {
+      booking,
+      actor: req.user,
+      requestedReturnAt,
+    });
+
+    const refreshed = await Booking.findById(booking._id).populate(bookingPopulate);
+    const payload = serializeBooking(req, refreshed);
+    const { ownerId, renterId } = getBookingParties(refreshed);
+    emitToUser(ownerId, "booking:updated", payload);
+    emitToUser(renterId, "booking:updated", payload);
+
+    return res.json({
+      success: true,
+      message: "Extension request submitted. Waiting for owner approval.",
+      booking: payload,
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "Failed to request extension." });
+  }
+};
+
+export const proceedBookingLateReturn = async (req, res) => {
+  try {
+    const booking = await Booking.findOne({ _id: req.params.id, renter: req.user._id }).populate(bookingPopulate);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+
+    await syncBookingLifecycleState(req, booking, { emitUpdate: false });
+
+    const normalizedStatus = String(booking.status || "").trim().toLowerCase();
+    if (["cancelled", "rejected"].includes(normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "This booking cannot be settled as a late return.",
+      });
+    }
+    if (!ACTIVE_BOOKING_STATUSES.has(normalizedStatus) && normalizedStatus !== "completed") {
+      return res.status(400).json({
+        success: false,
+        message: "Only active or recently completed bookings can proceed with late return.",
+      });
+    }
+    if (normalizedStatus === "completed" && normalizeLateReturnAction(booking.lateReturnAction, "none") === "proceed_late_return") {
+      return res.json({
+        success: true,
+        message: "Late return has already been processed for this booking.",
+        booking: serializeBooking(req, booking),
+      });
+    }
+
+    if (normalizeExtensionStatus(booking.extensionStatus, "none") === "requested") {
+      return res.status(409).json({
+        success: false,
+        message: "An extension request is pending. Please wait for owner review first.",
+      });
+    }
+
+    const now = new Date();
+    const gracePolicy = getBookingLifecycleGracePolicy();
+    const overdueMinutes = getBookingOverdueMinutes(booking, now, gracePolicy.overdueMinutes);
+    const penaltyRatePerHour = getBookingLatePenaltyRatePerHour(booking);
+    const overdueHours = getDurationHoursFromMinutes(overdueMinutes);
+    const computedPenalty = roundCurrency(penaltyRatePerHour * overdueHours);
+
+    booking.lateReturnIsOverdue = overdueMinutes > 0;
+    booking.lateReturnDetectedAt = overdueMinutes > 0 ? booking.lateReturnDetectedAt || now : null;
+    booking.lateReturnNotifiedAt = overdueMinutes > 0 ? booking.lateReturnNotifiedAt || now : booking.lateReturnNotifiedAt;
+    booking.lateReturnOverdueMinutes = overdueMinutes;
+    booking.lateReturnPenaltyRatePerHour = penaltyRatePerHour;
+    booking.lateReturnPenaltyFee = computedPenalty;
+    booking.lateReturnAction = "proceed_late_return";
+    booking.lateReturnResolvedAt = now;
+    booking.lateReturnResolvedBy = req.user._id;
+    booking.actualReturnAt = now;
+    booking.status = "completed";
+    booking.paymentUpdatedAt = now;
+    booking.autoCompletedAt = booking.autoCompletedAt || now;
+
+    syncBookingPaymentSnapshot(booking);
+
+    await booking.save();
+    await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
+
+    eventBus.emit(NOTIFICATION_EVENTS.LATE_RETURN_PROCESSED, {
+      booking,
+      actor: req.user,
+      overdueMinutes,
+      lateReturnPenaltyFee: computedPenalty,
+    });
+
+    const refreshed = await Booking.findById(booking._id).populate(bookingPopulate);
+    const payload = serializeBooking(req, refreshed);
+    const { ownerId, renterId } = getBookingParties(refreshed);
+    emitToUser(ownerId, "booking:updated", payload);
+    emitToUser(renterId, "booking:updated", payload);
+
+    return res.json({
+      success: true,
+      message:
+        computedPenalty > 0
+          ? "Late return processed. Additional charges were applied."
+          : "Return processed successfully.",
+      booking: payload,
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: "Failed to process late return." });
   }
 };
 
@@ -567,6 +1237,7 @@ export const createBookingPayment = async (req, res) => {
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
+    await syncBookingLifecycleState(req, booking, { emitUpdate: false });
     const normalizedPaymentStatus = String(booking.paymentStatus || "").toLowerCase();
     if (!["unpaid", "partial"].includes(normalizedPaymentStatus)) {
       return res.status(400).json({
@@ -581,17 +1252,19 @@ export const createBookingPayment = async (req, res) => {
         message: "Cancelled bookings cannot be paid.",
       });
     }
-    if (booking.status !== "confirmed") {
+    const normalizedBookingStatus = String(booking.status || "").trim().toLowerCase();
+    if (!PAYMENT_ALLOWED_STATUSES.has(normalizedBookingStatus)) {
       return res.status(400).json({
         success: false,
-        message: "Booking payment is only available after owner approval.",
+        message: "Booking payment is only available for approved, extended, or completed bookings.",
         booking: serializeBooking(req, booking),
       });
     }
 
     const effectiveBlockchainGasFee = getEffectiveBlockchainGasFee(booking);
+    const persistedGasFee = Number(booking.blockchainGasFee);
     if (
-      (!Number.isFinite(Number(booking.blockchainGasFee)) || Number(booking.blockchainGasFee) <= 0) &&
+      (!Number.isFinite(persistedGasFee) || persistedGasFee < effectiveBlockchainGasFee) &&
       effectiveBlockchainGasFee > 0
     ) {
       booking.blockchainGasFee = effectiveBlockchainGasFee;
@@ -648,19 +1321,44 @@ export const createBookingPayment = async (req, res) => {
 
     const referenceNumber = buildReferenceNumber(booking._id);
     const amountInCentavos = Math.round(amountToCharge * 100);
-    const { successUrl, cancelUrl } = buildPaymentRedirectUrls(booking._id);
+    const { successUrl, cancelUrl } = buildPaymentRedirectUrls(booking._id, req);
+    const renterProfile = booking?.renter || {};
+    const renterName = buildRenterName(req.user, renterProfile);
+    const vehicleName = booking.vehicle?.name || "vehicle rental";
+    const description = `Booking ${effectiveScope} payment for ${vehicleName} (Renter: ${renterName})`;
+    const lineItemBaseName = booking.vehicle?.name || "Vehicle Booking";
+    const itemName = renterName ? `${lineItemBaseName} - ${renterName}` : lineItemBaseName;
+    const renterEmail = String(req.user?.email || renterProfile.email || "").trim();
+    const renterPhone = normalizePayMongoPhone(
+      req.user?.phone || renterProfile.phone || renterProfile.mobile || renterProfile.phoneNumber
+    );
+    if (!renterPhone) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "A valid mobile number is required before checkout. Please update your profile with a 10-digit Philippine mobile number starting with 9.",
+      });
+    }
+    const billing = {
+      name: renterName,
+      email: renterEmail,
+      phone: renterPhone,
+    };
 
     const checkoutSession = await createPayMongoCheckoutSession({
       amountInCentavos,
-      itemName: booking.vehicle?.name || "Vehicle Booking",
-      description: `Booking ${effectiveScope} payment for ${booking.vehicle?.name || "vehicle rental"}`,
+      itemName,
+      description,
       referenceNumber,
       successUrl,
       cancelUrl,
+      billing,
       paymentMethodTypes: methodTypes,
       metadata: {
         bookingId: String(booking._id),
         renterId: String(req.user._id),
+        renterName,
+        renterEmail: billing.email,
         ownerId: String(booking.owner?._id || booking.owner || ""),
         paymentScope: effectiveScope,
         paymentChannel: requestedChannel,
@@ -681,6 +1379,7 @@ export const createBookingPayment = async (req, res) => {
     }
 
     booking.paymentMethod = "PayMongo";
+    resetWalkInPaymentState(booking);
     booking.paymongoReference = getPayMongoCheckoutReferenceNumber(checkoutSession) || referenceNumber;
     booking.paymongoCheckoutId = checkoutId;
     booking.paymentIntentId = getPayMongoPaymentIntentId(checkoutSession) || booking.paymentIntentId;
@@ -718,13 +1417,378 @@ export const createBookingPayment = async (req, res) => {
     });
   } catch (error) {
     if (error?.isPayMongoError) {
+      logPayMongoError("Checkout session creation failed", error);
       const statusCode = error?.statusCode >= 400 && error?.statusCode < 600 ? error.statusCode : 502;
       return res.status(statusCode).json({
         success: false,
-        message: error.message || "Failed to create PayMongo checkout session.",
+        message: "We could not start the payment. Please try again later.",
       });
     }
+    console.error("[Booking Payment] Checkout session creation failed", error);
     return res.status(500).json({ success: false, message: "Failed to create booking payment." });
+  }
+};
+
+const shouldAutoSyncBookingPayment = (booking) => {
+  if (!booking) return false;
+
+  const bookingStatus = String(booking?.status || "").trim().toLowerCase();
+  if (!PAYMENT_ALLOWED_STATUSES.has(bookingStatus)) return false;
+
+  const paymentStatus = String(booking?.paymentStatus || "").trim().toLowerCase();
+  if (!["unpaid", "partial"].includes(paymentStatus)) return false;
+
+  const checkoutId = normalizeIdText(booking?.paymongoCheckoutId);
+  if (!checkoutId) return false;
+
+  if (paymentStatus === "partial") {
+    const checkoutAmount = roundCurrency(Number(booking?.paymentCheckoutAmount || 0));
+    if (!(checkoutAmount > 0)) return false;
+  }
+
+  return true;
+};
+
+const doesCheckoutMetadataMatchBooking = (booking, metadata = {}) => {
+  const expectedBookingId = normalizeIdText(booking?._id);
+  const expectedRenterId = normalizeIdText(booking?.renter?._id || booking?.renter);
+  const expectedOwnerId = normalizeIdText(booking?.owner?._id || booking?.owner);
+
+  const metadataBookingId = normalizeIdText(metadata?.bookingId);
+  const metadataRenterId = normalizeIdText(metadata?.renterId);
+  const metadataOwnerId = normalizeIdText(metadata?.ownerId);
+
+  if (metadataBookingId && metadataBookingId !== expectedBookingId) return false;
+  if (metadataRenterId && metadataRenterId !== expectedRenterId) return false;
+  if (metadataOwnerId && metadataOwnerId !== expectedOwnerId) return false;
+
+  return true;
+};
+
+const autoSyncBookingPaymentFromPayMongo = async (booking) => {
+  if (!shouldAutoSyncBookingPayment(booking)) {
+    return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+  }
+
+  const checkoutId = normalizeIdText(booking?.paymongoCheckoutId);
+  if (!checkoutId) {
+    return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+  }
+
+  try {
+    const checkoutSession = await getPayMongoCheckoutSession(checkoutId);
+    const sessionCheckoutId = getPayMongoCheckoutId(checkoutSession) || checkoutId;
+    const sessionReferenceNumber = getPayMongoCheckoutReferenceNumber(checkoutSession);
+    const sessionMetadata = getPayMongoCheckoutMetadata(checkoutSession);
+
+    if (!doesCheckoutMetadataMatchBooking(booking, sessionMetadata)) {
+      return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+    }
+
+    if (!isPayMongoCheckoutPaid(checkoutSession) || hasVerifiedCheckoutId(booking, sessionCheckoutId)) {
+      return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+    }
+
+    const sessionAmountInCentavos = getPayMongoCheckoutAmountInCentavos(checkoutSession);
+    const sessionAmount = roundCurrency(Number(sessionAmountInCentavos) / 100);
+    if (
+      !Number.isFinite(sessionAmountInCentavos) ||
+      sessionAmountInCentavos <= 0 ||
+      !Number.isFinite(sessionAmount) ||
+      sessionAmount <= 0
+    ) {
+      return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+    }
+
+    const totalPayable = getBookingPayableAmount(booking);
+    const paidBefore = getBookingPaidAmount(booking);
+    const remainingBefore = roundCurrency(Math.max(totalPayable - paidBefore, 0));
+    if (sessionAmount > roundCurrency(remainingBefore + PAYMENT_AMOUNT_EPSILON)) {
+      return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+    }
+
+    const paidAfter = Math.min(totalPayable, roundCurrency(paidBefore + sessionAmount));
+    const remainingAfter = roundCurrency(Math.max(totalPayable - paidAfter, 0));
+
+    booking.paymentMethod = "PayMongo";
+    booking.paymongoCheckoutId = sessionCheckoutId;
+    booking.paymongoReference = sessionReferenceNumber || booking.paymongoReference;
+    booking.paymentIntentId = getPayMongoPaymentIntentId(checkoutSession) || booking.paymentIntentId;
+    booking.paymentAmountPaid = paidAfter;
+    booking.paymentAmountDue = remainingAfter;
+    booking.paymentCheckoutAmount = 0;
+    booking.paymentUpdatedAt = new Date();
+
+    if (remainingAfter <= 0) {
+      booking.paymentStatus = "paid";
+      booking.paidAt = booking.paidAt || new Date();
+    } else {
+      booking.paymentStatus = "partial";
+      booking.paidAt = null;
+    }
+
+    resetWalkInPaymentState(booking);
+    appendVerifiedCheckoutId(booking, sessionCheckoutId);
+
+    await booking.save();
+    await recordBookingOnChainIfEligible(booking);
+
+    return { updated: true, paymentStatus: String(booking.paymentStatus || "").toLowerCase() };
+  } catch (error) {
+    if (error?.isPayMongoError) {
+      logPayMongoError("Automatic payment sync failed", error);
+      return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+    }
+    return { updated: false, paymentStatus: String(booking?.paymentStatus || "").toLowerCase() };
+  }
+};
+
+const emitBookingUpdateToParties = (req, booking) => {
+  if (!booking?._id) return;
+  const payload = serializeBooking(req, booking);
+  const { ownerId, renterId } = getBookingParties(booking);
+  if (ownerId) emitToUser(ownerId, "booking:updated", payload);
+  if (renterId) emitToUser(renterId, "booking:updated", payload);
+};
+
+const syncBookingLifecycleState = async (req, booking, { emitUpdate = false } = {}) => {
+  if (!booking?._id) return { updated: false };
+
+  const now = new Date();
+  const gracePolicy = getBookingLifecycleGracePolicy();
+  const normalizedStatus = String(booking?.status || "").trim().toLowerCase();
+  const isActiveStatus = ACTIVE_BOOKING_STATUSES.has(normalizedStatus);
+  const returnAt = toDate(booking?.returnAt);
+  if (!returnAt) return { updated: false };
+
+  if (!isActiveStatus) {
+    return { updated: false };
+  }
+
+  if (now.getTime() < returnAt.getTime()) {
+    return { updated: false };
+  }
+
+  const paymentSettled = hasSettledBookingPayment(booking);
+  if (paymentSettled) {
+    const autoCompleteBoundary = getBookingReturnBoundaryWithGrace(booking, gracePolicy.autoCompleteMinutes);
+    if (!autoCompleteBoundary || now.getTime() < autoCompleteBoundary.getTime()) {
+      return { updated: false };
+    }
+
+    let changed = false;
+    if (booking.status !== "completed") {
+      booking.status = "completed";
+      changed = true;
+    }
+    if (!booking.autoCompletedAt) {
+      booking.autoCompletedAt = now;
+      changed = true;
+    }
+    if (!booking.actualReturnAt) {
+      booking.actualReturnAt = returnAt;
+      changed = true;
+    }
+    if (booking.lateReturnIsOverdue) {
+      booking.lateReturnIsOverdue = false;
+      changed = true;
+    }
+    if (Number(booking.lateReturnOverdueMinutes || 0) > 0) {
+      booking.lateReturnOverdueMinutes = 0;
+      changed = true;
+    }
+
+    if (changed) {
+      await booking.save();
+      await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
+
+      eventBus.emit(NOTIFICATION_EVENTS.BOOKING_COMPLETED, {
+        booking,
+        autoCompleted: true,
+      });
+
+      if (emitUpdate) {
+        emitBookingUpdateToParties(req, booking);
+      }
+    }
+
+    return { updated: changed, status: String(booking.status || "").toLowerCase() };
+  }
+
+  const overdueMinutes = getBookingOverdueMinutes(booking, now, gracePolicy.overdueMinutes);
+  if (overdueMinutes <= 0) {
+    return { updated: false };
+  }
+  let changed = false;
+
+  if (!booking.lateReturnIsOverdue) {
+    booking.lateReturnIsOverdue = true;
+    changed = true;
+  }
+  if (Number(booking.lateReturnOverdueMinutes || 0) !== overdueMinutes) {
+    booking.lateReturnOverdueMinutes = overdueMinutes;
+    changed = true;
+  }
+  if (!booking.lateReturnDetectedAt) {
+    booking.lateReturnDetectedAt = now;
+    changed = true;
+  }
+  const penaltyRatePerHour = getBookingLatePenaltyRatePerHour(booking);
+  if (roundCurrency(Number(booking.lateReturnPenaltyRatePerHour || 0)) !== penaltyRatePerHour) {
+    booking.lateReturnPenaltyRatePerHour = penaltyRatePerHour;
+    changed = true;
+  }
+
+  let shouldNotifyOverdue = false;
+  if (!booking.lateReturnNotifiedAt) {
+    booking.lateReturnNotifiedAt = now;
+    shouldNotifyOverdue = true;
+    changed = true;
+  }
+
+  if (changed) {
+    await booking.save();
+  }
+
+  if (shouldNotifyOverdue) {
+    eventBus.emit(NOTIFICATION_EVENTS.BOOKING_OVERDUE, {
+      booking,
+      overdueMinutes,
+    });
+  }
+
+  if ((changed || shouldNotifyOverdue) && emitUpdate) {
+    emitBookingUpdateToParties(req, booking);
+  }
+
+  return { updated: changed || shouldNotifyOverdue, status: String(booking.status || "").toLowerCase() };
+};
+
+const autoSyncBookingLifecycles = async (req, bookings = []) => {
+  const updatedBookings = [];
+  for (const booking of bookings) {
+    const result = await syncBookingLifecycleState(req, booking, { emitUpdate: true });
+    if (result.updated) {
+      updatedBookings.push(booking);
+    }
+  }
+  return updatedBookings;
+};
+
+const autoSyncBookingPayments = async (bookings = []) => {
+  const updatedBookings = [];
+  const candidates = bookings.filter((booking) => shouldAutoSyncBookingPayment(booking)).slice(0, 5);
+  for (const booking of candidates) {
+    const result = await autoSyncBookingPaymentFromPayMongo(booking);
+    if (result.updated) {
+      updatedBookings.push(booking);
+    }
+  }
+  return updatedBookings;
+};
+
+export const setBookingBalancePaymentMethod = async (req, res) => {
+  try {
+    const booking = await Booking.findOne({ _id: req.params.id, renter: req.user._id }).populate(
+      bookingPopulate
+    );
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+    await syncBookingLifecycleState(req, booking, { emitUpdate: false });
+    if (["cancelled", "rejected"].includes(booking.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Cancelled bookings cannot be updated for payment.",
+      });
+    }
+    if (!PAYMENT_ALLOWED_STATUSES.has(String(booking.status || "").trim().toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking must be approved, extended, or completed before setting payment options.",
+      });
+    }
+
+    const normalizedPaymentStatus = String(booking.paymentStatus || "").toLowerCase();
+    if (normalizedPaymentStatus !== "partial") {
+      return res.status(400).json({
+        success: false,
+        message: "Walk-in payment is only available after the downpayment is recorded.",
+      });
+    }
+
+    const remainingAmount = getBookingRemainingAmount(booking);
+    if (!Number.isFinite(remainingAmount) || remainingAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "This booking has no remaining balance.",
+      });
+    }
+
+    const requestedMethod = String(req.body?.method || "").trim().toLowerCase();
+    if (!["walkin", "walk-in", "on_return", "on-return", "manual"].includes(requestedMethod)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid balance payment method.",
+      });
+    }
+
+    const currentWalkInStatus = normalizeWalkInStatus(booking.walkInPaymentStatus, "none");
+    if (currentWalkInStatus === "requested") {
+      return res.status(409).json({
+        success: false,
+        message: "Walk-in payment approval is already pending.",
+      });
+    }
+    if (currentWalkInStatus === "approved") {
+      return res.status(409).json({
+        success: false,
+        message: "Walk-in payment has already been approved by the owner.",
+      });
+    }
+    if (currentWalkInStatus === "completed") {
+      return res.status(400).json({
+        success: false,
+        message: "Walk-in payment has already been confirmed.",
+      });
+    }
+
+    const requestNote = toOptionalText(req.body?.note, 500);
+    booking.balancePaymentMethod = "Walk-in";
+    booking.walkInPaymentStatus = "requested";
+    booking.walkInRequestedAt = new Date();
+    booking.walkInRequestedBy = req.user._id;
+    booking.walkInRequestNote = requestNote;
+    booking.walkInReviewedAt = null;
+    booking.walkInReviewedBy = null;
+    booking.walkInReviewNote = "";
+    booking.walkInConfirmedAt = null;
+    booking.walkInConfirmedBy = null;
+    booking.walkInConfirmationNote = "";
+    booking.paymentUpdatedAt = new Date();
+    await booking.save();
+
+    const refreshed = await Booking.findById(booking._id).populate(bookingPopulate);
+    const payload = serializeBooking(req, refreshed);
+    const { ownerId, renterId } = getBookingParties(refreshed);
+
+    eventBus.emit(NOTIFICATION_EVENTS.WALKIN_PAYMENT_REQUESTED, {
+      booking: refreshed,
+      actor: req.user,
+      ownerId,
+      renterId,
+    });
+
+    emitToUser(ownerId, "booking:updated", payload);
+    emitToUser(renterId, "booking:updated", payload);
+
+    return res.json({
+      success: true,
+      message: "Walk-in payment request submitted. Waiting for owner approval.",
+      booking: payload,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Failed to update payment method." });
   }
 };
 
@@ -736,6 +1800,7 @@ export const verifyBookingPayment = async (req, res) => {
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
+    await syncBookingLifecycleState(req, booking, { emitUpdate: false });
     if (["cancelled", "rejected"].includes(booking.status)) {
       return res.status(400).json({
         success: false,
@@ -743,25 +1808,19 @@ export const verifyBookingPayment = async (req, res) => {
       });
     }
     const wasPaid = booking.paymentStatus === "paid";
-    if (!wasPaid && booking.status !== "confirmed") {
+    if (!wasPaid && !PAYMENT_ALLOWED_STATUSES.has(String(booking.status || "").trim().toLowerCase())) {
       return res.status(400).json({
         success: false,
-        message: "Booking payment can only be verified after owner approval.",
+        message: "Booking payment can only be verified for approved, extended, or completed bookings.",
       });
     }
     let isPaid = wasPaid;
+    let verificationApplied = false;
 
     if (!wasPaid) {
       const checkoutIdInput = String(req.body?.checkoutId || "").trim();
       const storedCheckoutId = String(booking.paymongoCheckoutId || "").trim();
-      if (checkoutIdInput && storedCheckoutId && checkoutIdInput !== storedCheckoutId) {
-        return res.status(400).json({
-          success: false,
-          message: "Checkout reference does not match this booking.",
-        });
-      }
-
-      const checkoutId = storedCheckoutId || checkoutIdInput;
+      const checkoutId = checkoutIdInput || storedCheckoutId;
       if (!checkoutId) {
         return res.status(400).json({
           success: false,
@@ -775,71 +1834,92 @@ export const verifyBookingPayment = async (req, res) => {
       const sessionMetadata = getPayMongoCheckoutMetadata(checkoutSession);
       const sessionAmountInCentavos = getPayMongoCheckoutAmountInCentavos(checkoutSession);
 
-      if (storedCheckoutId && sessionCheckoutId && sessionCheckoutId !== storedCheckoutId) {
-        return res.status(400).json({
-          success: false,
-          message: "Payment checkout session does not belong to this booking.",
-        });
-      }
-
-      const storedReferenceNumber = String(booking.paymongoReference || "").trim();
-      if (storedReferenceNumber && sessionReferenceNumber && sessionReferenceNumber !== storedReferenceNumber) {
-        return res.status(400).json({
-          success: false,
-          message: "Payment reference does not match this booking.",
-        });
-      }
-
-      const configuredCheckoutAmount = roundCurrency(Number(booking.paymentCheckoutAmount || 0));
-      const expectedCheckoutAmount =
-        configuredCheckoutAmount > 0
-          ? configuredCheckoutAmount
-          : String(booking.paymentStatus || "").toLowerCase() === "partial"
-            ? getBookingRemainingAmount(booking)
-            : getBookingPayableAmount(booking);
-      const expectedAmountInCentavos = Math.round(expectedCheckoutAmount * 100);
-      if (
-        !Number.isFinite(expectedAmountInCentavos) ||
-        expectedAmountInCentavos <= 0 ||
-        sessionAmountInCentavos !== expectedAmountInCentavos
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Payment amount does not match this booking.",
-        });
-      }
-
       const expectedBookingId = String(booking._id || "");
       const expectedRenterId = String(booking.renter?._id || booking.renter || "");
       const expectedOwnerId = String(booking.owner?._id || booking.owner || "");
       const metadataBookingId = String(sessionMetadata?.bookingId || "");
       const metadataRenterId = String(sessionMetadata?.renterId || "");
       const metadataOwnerId = String(sessionMetadata?.ownerId || "");
+      const metadataMatchesBooking = metadataBookingId && metadataBookingId === expectedBookingId;
+      const metadataMatchesRenter = !metadataRenterId || metadataRenterId === expectedRenterId;
+      const metadataMatchesOwner = !metadataOwnerId || metadataOwnerId === expectedOwnerId;
+      const metadataMatchesExpected = metadataMatchesBooking && metadataMatchesRenter && metadataMatchesOwner;
 
-      if (
-        (metadataBookingId && metadataBookingId !== expectedBookingId) ||
-        (metadataRenterId && metadataRenterId !== expectedRenterId) ||
-        (metadataOwnerId && metadataOwnerId !== expectedOwnerId)
-      ) {
+      if (!metadataMatchesRenter || !metadataMatchesOwner || (metadataBookingId && !metadataMatchesBooking)) {
         return res.status(400).json({
           success: false,
           message: "Payment metadata does not match this booking.",
         });
       }
 
+      const storedReferenceNumber = String(booking.paymongoReference || "").trim();
+      const matchesStoredCheckout = Boolean(
+        storedCheckoutId &&
+          ((sessionCheckoutId && sessionCheckoutId === storedCheckoutId) || checkoutId === storedCheckoutId)
+      );
+      const matchesStoredReference = Boolean(
+        storedReferenceNumber && sessionReferenceNumber && sessionReferenceNumber === storedReferenceNumber
+      );
+
+      if (!metadataMatchesExpected && !matchesStoredCheckout && !matchesStoredReference) {
+        return res.status(400).json({
+          success: false,
+          message: "Payment checkout session does not belong to this booking.",
+        });
+      }
+
       isPaid = isPayMongoCheckoutPaid(checkoutSession);
+      const normalizedSessionCheckoutId = sessionCheckoutId || checkoutId;
+      const alreadyVerifiedCheckout = hasVerifiedCheckoutId(booking, normalizedSessionCheckoutId);
 
       booking.paymentMethod = "PayMongo";
-      booking.paymongoCheckoutId = getPayMongoCheckoutId(checkoutSession) || checkoutId;
-      booking.paymongoReference =
-        getPayMongoCheckoutReferenceNumber(checkoutSession) || booking.paymongoReference;
+      booking.paymongoCheckoutId = normalizedSessionCheckoutId || booking.paymongoCheckoutId;
+      booking.paymongoReference = sessionReferenceNumber || booking.paymongoReference;
       booking.paymentIntentId = getPayMongoPaymentIntentId(checkoutSession) || booking.paymentIntentId;
       booking.paymentUpdatedAt = new Date();
 
-      if (isPaid) {
+      if (isPaid && !alreadyVerifiedCheckout) {
+        const configuredCheckoutAmount = roundCurrency(Number(booking.paymentCheckoutAmount || 0));
+        const metadataPaymentAmount = roundCurrency(Number(sessionMetadata?.paymentAmount || 0));
+        const fallbackCheckoutAmount =
+          String(booking.paymentStatus || "").toLowerCase() === "partial"
+            ? getBookingRemainingAmount(booking)
+            : getBookingPayableAmount(booking);
+        const candidateAmounts = [configuredCheckoutAmount, metadataPaymentAmount, fallbackCheckoutAmount].filter(
+          (amount) => Number.isFinite(amount) && amount > 0
+        );
+        const sessionAmount = roundCurrency(Number(sessionAmountInCentavos) / 100);
+        let resolvedCheckoutAmount = candidateAmounts.find(
+          (amount) => Math.abs(amount - sessionAmount) <= PAYMENT_AMOUNT_EPSILON
+        );
+        if (!resolvedCheckoutAmount && metadataMatchesExpected) {
+          resolvedCheckoutAmount = sessionAmount;
+        }
+
+        if (
+          !Number.isFinite(sessionAmountInCentavos) ||
+          sessionAmountInCentavos <= 0 ||
+          !Number.isFinite(sessionAmount) ||
+          sessionAmount <= 0 ||
+          !resolvedCheckoutAmount
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Payment amount does not match this booking.",
+          });
+        }
+
         const totalPayable = getBookingPayableAmount(booking);
         const paidBefore = getBookingPaidAmount(booking);
-        const paidAfter = Math.min(totalPayable, roundCurrency(paidBefore + expectedCheckoutAmount));
+        const remainingBefore = roundCurrency(Math.max(totalPayable - paidBefore, 0));
+        if (sessionAmount > roundCurrency(remainingBefore + PAYMENT_AMOUNT_EPSILON)) {
+          return res.status(409).json({
+            success: false,
+            message: "This payment has already been applied or exceeds the remaining balance.",
+          });
+        }
+
+        const paidAfter = Math.min(totalPayable, roundCurrency(paidBefore + resolvedCheckoutAmount));
         const remainingAfter = roundCurrency(Math.max(totalPayable - paidAfter, 0));
 
         booking.paymentAmountPaid = paidAfter;
@@ -853,6 +1933,9 @@ export const verifyBookingPayment = async (req, res) => {
           booking.paymentStatus = "partial";
           booking.paidAt = null;
         }
+        resetWalkInPaymentState(booking);
+        appendVerifiedCheckoutId(booking, normalizedSessionCheckoutId);
+        verificationApplied = true;
       }
 
       await booking.save();
@@ -864,29 +1947,13 @@ export const verifyBookingPayment = async (req, res) => {
     const payload = serializeBooking(req, refreshed);
     const { ownerId, renterId } = getBookingParties(refreshed);
 
-    if (isPaid && !wasPaid) {
-      const isNowPaidInFull = payload.paymentStatus === "paid";
-      await createNotification({
-        user: ownerId,
-        type: "booking_payment",
-        title: isNowPaidInFull ? "Booking paid" : "Downpayment received",
-        message: isNowPaidInFull
-          ? `${req.user.name || "A renter"} completed payment for ${
-              refreshed.vehicle?.name || "a booking"
-            }.`
-          : `${req.user.name || "A renter"} paid a downpayment for ${
-              refreshed.vehicle?.name || "a booking"
-            }.`,
-        data: { bookingId: refreshed._id, paymentStatus: payload.paymentStatus },
-      });
-      await createNotification({
-        user: renterId,
-        type: "booking_payment",
-        title: isNowPaidInFull ? "Payment successful" : "Downpayment successful",
-        message: isNowPaidInFull
-          ? `Your payment for ${refreshed.vehicle?.name || "your booking"} was successful.`
-          : `Your downpayment for ${refreshed.vehicle?.name || "your booking"} was successful.`,
-        data: { bookingId: refreshed._id, paymentStatus: payload.paymentStatus },
+    if (verificationApplied) {
+      eventBus.emit(NOTIFICATION_EVENTS.PAYMENT_RECEIVED, {
+        booking: refreshed,
+        actor: req.user,
+        ownerId,
+        renterId,
+        paymentStatus: payload.paymentStatus,
       });
     }
 
@@ -932,12 +1999,14 @@ export const verifyBookingPayment = async (req, res) => {
     });
   } catch (error) {
     if (error?.isPayMongoError) {
+      logPayMongoError("Payment verification failed", error);
       const statusCode = error?.statusCode >= 400 && error?.statusCode < 600 ? error.statusCode : 502;
       return res.status(statusCode).json({
         success: false,
-        message: error.message || "Failed to verify PayMongo payment.",
+        message: "We could not verify the payment right now. Please try again later.",
       });
     }
+    console.error("[Booking Payment] Payment verification failed", error);
     return res.status(500).json({ success: false, message: "Failed to verify booking payment." });
   }
 };
@@ -1017,12 +2086,10 @@ export const addBookingReview = async (req, res) => {
     booking.reviewCreatedAt = new Date();
     await booking.save();
 
-    await createNotification({
-      user: booking.owner,
-      type: "system",
-      title: "New vehicle review",
-      message: "A renter left a review on a completed booking.",
-      data: { bookingId: booking._id, rating: booking.reviewRating },
+    eventBus.emit(NOTIFICATION_EVENTS.REVIEW_CREATED, {
+      booking,
+      actor: req.user,
+      rating: booking.reviewRating,
     });
 
     const populated = await Booking.findById(booking._id).populate(bookingPopulate);

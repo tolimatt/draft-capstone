@@ -1,6 +1,7 @@
 // User model for regular users and owners
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
+import { normalizePhilippineMobile } from "../utils/phone.js";
 
 const userSchema = new mongoose.Schema(
   {
@@ -53,9 +54,22 @@ const userSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    notificationSettings: {
+      email: { type: Boolean, default: true },
+      sms: { type: Boolean, default: false },
+      bookingUpdates: { type: Boolean, default: true },
+      promotions: { type: Boolean, default: false },
+    },
 
     // Shared profile fields
-    phone: { type: String },
+    phone: {
+      type: String,
+      trim: true,
+      set: (value) => {
+        const normalized = normalizePhilippineMobile(value);
+        return normalized || undefined;
+      },
+    },
     dateOfBirth: { type: String },
     gender: { type: String, enum: ["Male", "Female", "Prefer not to say", ""] },
     ownerType: { type: String, enum: ["individual", "business"] },
@@ -68,7 +82,14 @@ const userSchema = new mongoose.Schema(
     city: { type: String },
     barangay: { type: String },
     emergencyContactName: { type: String },
-    emergencyContactPhone: { type: String },
+    emergencyContactPhone: {
+      type: String,
+      trim: true,
+      set: (value) => {
+        const normalized = normalizePhilippineMobile(value);
+        return normalized || undefined;
+      },
+    },
     emergencyContactRelationship: { type: String },
   },
   { timestamps: true }
