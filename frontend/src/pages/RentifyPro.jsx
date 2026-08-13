@@ -83,6 +83,7 @@ const normalizeFeaturedVehicle = (vehicle) => ({
   location: vehicle.location,
   coverImageUrl: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
   image: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
+  coverDisplayMode: vehicle.coverDisplayMode || "auto",
   category: vehicle.specs?.subType
     ? `${vehicle.specs?.type || "Vehicle"} · ${vehicle.specs.subType}`
     : "Owner-listed Vehicle",
@@ -304,7 +305,7 @@ export default function RentifyPro({
   );
 
   return (
-    <div id="home" className="min-h-screen">
+    <div id="home" className="rp-renter-home min-h-screen">
       <Navbar
         activePage="home"
         isLoggedIn={isLoggedIn}
@@ -325,15 +326,15 @@ export default function RentifyPro({
         onLogout={onLogout}
       />
 
-      <section className="relative pt-28 sm:pt-36 pb-28 overflow-hidden">
+      <section className="relative mx-auto max-w-7xl overflow-hidden pt-28 sm:rounded-b-[2rem] sm:pt-36 pb-28">
         <img
           src="/hero-car1.png"
           alt="RentifyPro Hero"
-          className="absolute inset-0 w-full h-full object-cover"
+          className="rp-home-hero-image absolute inset-0 h-full w-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-br from-[#020617]/80 via-[#0f172a]/60 to-[#0B75E7]/50" />
 
-        <div className="relative z-10 max-w-7xl mx-auto px-5 sm:px-8">
+        <div className="relative z-10 mx-auto max-w-7xl px-5 sm:px-8">
           <div className="max-w-3xl rp-animate-fade-up">
             <span className="rp-chip bg-white/18 text-white border border-white/30">
               Premium Mobility Marketplace
@@ -361,7 +362,7 @@ export default function RentifyPro({
         </div>
       </section>
 
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 -mt-16 sm:-mt-20 relative z-20">
+      <section className="relative z-20 mx-auto -mt-16 max-w-6xl px-4 sm:-mt-20 sm:px-6">
         <div className="rp-surface p-5 sm:p-7">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="sm:col-span-2 relative">
@@ -434,8 +435,9 @@ export default function RentifyPro({
         </div>
       </section>
 
-      <section className="max-w-6xl mx-auto px-5 sm:px-8 py-16 sm:py-20">
-        <div className="text-center mb-10">
+      <section className="rp-home-section mx-auto max-w-6xl px-5 py-16 sm:px-8 sm:py-20">
+        <div className="rp-section-heading mb-10 text-center">
+          <span className="rp-page-eyebrow">Find your perfect ride</span>
           <h2 className="text-3xl sm:text-4xl font-bold">
             Select Your <span className="text-[#0B75E7]">Vehicle Category</span>
           </h2>
@@ -444,7 +446,7 @@ export default function RentifyPro({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {categories.map((category) => (
             <button
               key={category.id}
@@ -477,11 +479,14 @@ export default function RentifyPro({
         </div>
       </section>
 
-      <section className="py-16 sm:py-20 bg-slate-100/70">
-        <div className="max-w-7xl mx-auto px-5 sm:px-8">
-          <h2 className="text-3xl sm:text-4xl font-bold mb-10">
-            <span className="text-[#0B75E7]">Featured</span> Vehicles
-          </h2>
+      <section className="bg-white/55 py-16 backdrop-blur-[2px] sm:py-20">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <div className="rp-section-heading mb-10">
+            <span className="rp-page-eyebrow">Curated marketplace</span>
+            <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
+              <span className="text-[#0B75E7]">Featured</span> Vehicles
+            </h2>
+          </div>
 
           {featuredLoading && (
             <div className="rp-surface p-6 text-sm text-slate-600">Loading featured vehicles...</div>
@@ -583,8 +588,9 @@ export default function RentifyPro({
         </div>
       </section>
 
-      <section id="about" className="scroll-mt-28 max-w-7xl mx-auto px-5 sm:px-8 py-16 sm:py-20">
-        <div className="text-center mb-10">
+      <section id="about" className="rp-home-section mx-auto max-w-7xl scroll-mt-28 px-5 py-16 sm:px-8 sm:py-20">
+        <div className="rp-section-heading mb-10 text-center">
+          <span className="rp-page-eyebrow">Built for better journeys</span>
           <h2 className="text-3xl sm:text-4xl font-bold">
             About <span className="text-[#0B75E7]">RentifyPro</span>
           </h2>
@@ -624,10 +630,13 @@ export default function RentifyPro({
         </div>
       </section>
 
-      <section className="max-w-7xl mx-auto px-5 sm:px-8 pb-16 sm:pb-20">
-        <h2 className="text-3xl sm:text-4xl font-bold text-center mb-10">
-          Why Choose <span className="text-[#0B75E7]">RentifyPro</span>
-        </h2>
+      <section className="rp-home-section mx-auto max-w-7xl px-5 pb-16 pt-12 sm:px-8 sm:pb-20">
+        <div className="rp-section-heading mb-10 text-center">
+          <span className="rp-page-eyebrow">Simple, secure, dependable</span>
+          <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
+            Why Choose <span className="text-[#0B75E7]">RentifyPro</span>
+          </h2>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {featureItems.map((item) => (
@@ -644,9 +653,9 @@ export default function RentifyPro({
 
       <footer
         id="contacts"
-        className="bg-gradient-to-r from-[#045FC3] to-[#0B75E7] text-white py-14 mt-8"
+        className="mx-auto mt-8 max-w-7xl overflow-hidden bg-gradient-to-r from-[#045FC3] to-[#0B75E7] py-14 text-white sm:rounded-t-[2rem]"
       >
-        <div className="max-w-7xl mx-auto px-5 sm:px-8">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
               <h3 className="text-2xl font-bold">RentifyPro</h3>

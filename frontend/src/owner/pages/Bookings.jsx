@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { CalendarDays, CarFront, Clock3, CreditCard, MapPin, Users } from "lucide-react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { getTransactionFee } from "../../utils/fees";
 import { formatDurationMinutes, getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
+import { resolveAssetUrl } from "../../utils/media";
 
 const statusFilters = [
-  { id: "all", label: "All" },
-  { id: "pending", label: "Pending" },
-  { id: "confirmed", label: "Confirmed" },
-  { id: "extended", label: "Extended" },
-  { id: "completed", label: "Completed" },
-  { id: "cancelled", label: "Cancelled" },
+  { id: "action", label: "Needs Approval" },
+  { id: "active", label: "Active Rentals" },
+  { id: "past", label: "Past Bookings" },
+  { id: "all", label: "All Bookings" },
 ];
 const statusStyles = {
   pending: "bg-yellow-100 text-yellow-700",
@@ -39,6 +39,26 @@ const toTitleCase = (value = "") =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 const normalizeBookingStatus = (booking) =>
   booking?.status === "rejected" ? { ...booking, status: "cancelled" } : booking;
+const ACTIVE_BOOKING_STATUSES = ["pending", "confirmed", "extended"];
+const PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
+const bookingNeedsOwnerAction = (booking) => {
+  const status = String(booking?.status || "").toLowerCase();
+  return (
+    status === "pending" ||
+    String(booking?.extensionStatus || booking?.extension_request?.status || "").toLowerCase() === "requested" ||
+    String(booking?.cancellationStatus || booking?.cancellation_request?.status || "").toLowerCase() === "requested" ||
+    getWalkInStatus(booking) === "requested" ||
+    (Boolean(booking?.lateReturn?.isOverdue || booking?.late_return?.isOverdue) &&
+      ["confirmed", "extended"].includes(status))
+  );
+};
+const bookingMatchesView = (booking, view) => {
+  const status = String(booking?.status || "").toLowerCase();
+  if (view === "action") return bookingNeedsOwnerAction(booking);
+  if (view === "active") return ACTIVE_BOOKING_STATUSES.includes(status);
+  if (view === "past") return PAST_BOOKING_STATUSES.includes(status);
+  return true;
+};
 const getWalkInStatus = (booking) =>
   String(booking?.walkInPayment?.status || booking?.walk_in_payment?.status || "none")
     .trim()
@@ -129,25 +149,34 @@ export default function Bookings() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("action");
+  const [bookingPage, setBookingPage] = useState({ hasMore: false, nextCursor: null });
+  const [loadingMore, setLoadingMore] = useState(false);
   const [walkInActionBookingId, setWalkInActionBookingId] = useState("");
 
-  const loadBookings = async (status = "all") => {
-    setLoading(true);
+  const loadBookings = async ({ cursor = null, append = false } = {}) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     setError("");
     try {
-      const response = await API.getOwnerBookings(status);
+      const response = await API.getOwnerBookings({
+        view: statusFilter,
+        limit: 25,
+        ...(cursor ? { cursor } : {}),
+      });
       const mapped = (response.bookings || []).map(normalizeBookingStatus);
-      setBookings(mapped);
+      setBookings((previous) => (append ? [...previous, ...mapped] : mapped));
+      setBookingPage(response.page || { hasMore: false, nextCursor: null });
     } catch (err) {
       setError(err.message || "Failed to load bookings.");
     } finally {
-      setLoading(false);
+      if (append) setLoadingMore(false);
+      else setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadBookings(statusFilter);
+    loadBookings();
   }, [statusFilter]);
 
   useEffect(() => {
@@ -171,9 +200,7 @@ export default function Bookings() {
 
   const filteredBookings = useMemo(
     () =>
-      statusFilter === "all"
-        ? bookings
-        : bookings.filter((booking) => booking.status === statusFilter),
+      bookings.filter((booking) => bookingMatchesView(booking, statusFilter)),
     [bookings, statusFilter]
   );
 
@@ -218,6 +245,19 @@ export default function Bookings() {
     }
   };
 
+  const reviewCancellationRequest = async (bookingId, action) => {
+    try {
+      setWalkInActionBookingId(bookingId);
+      const response = await API.reviewOwnerBookingCancellationRequest(bookingId, action);
+      const normalized = normalizeBookingStatus(response.booking);
+      setBookings((prev) => prev.map((booking) => (booking._id === bookingId ? normalized : booking)));
+    } catch (err) {
+      setError(err.message || "Failed to review cancellation request.");
+    } finally {
+      setWalkInActionBookingId("");
+    }
+  };
+
   const reviewWalkInRequest = async (bookingId, action) => {
     try {
       setWalkInActionBookingId(bookingId);
@@ -246,22 +286,20 @@ export default function Bookings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Booking Management</h1>
-        <p className="text-sm text-gray-600">
-          View and manage renter bookings with status and payment updates.
-        </p>
+      <div className="border-b border-slate-200 pb-5">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Booking management</h1>
+        <p className="mt-1 text-sm text-slate-500">Review renter requests, active rentals, and payment activity.</p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
         {statusFilters.map((status) => (
           <button
             key={status.id}
             onClick={() => setStatusFilter(status.id)}
-            className={`px-3 py-2 rounded-lg border text-sm ${
+            className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
               statusFilter === status.id
-                ? "bg-[#017FE6] text-white border-[#017FE6]"
-                : "bg-white text-gray-700"
+                ? "bg-[#017FE6] text-white shadow-md shadow-blue-100"
+                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             }`}
           >
             {status.label}
@@ -269,12 +307,14 @@ export default function Bookings() {
         ))}
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {loading && <p className="text-sm text-gray-600">Loading bookings...</p>}
+      {error && <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+      {loading && <p className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">Loading bookings...</p>}
 
       {!loading && !filteredBookings.length && (
-        <div className="bg-white rounded-xl border p-6 text-sm text-gray-600">
-          No bookings available.
+        <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#017FE6]"><CarFront size={26} /></div>
+          <h2 className="mt-4 text-lg font-bold text-slate-900">Your queue is clear</h2>
+          <p className="mt-1 text-sm text-slate-500">No bookings match this view right now. New renter activity will appear here.</p>
         </div>
       )}
 
@@ -283,17 +323,26 @@ export default function Bookings() {
           const lateReturnInfo = getLateReturnInfo(booking);
           const extensionInfo = getExtensionRequestInfo(booking);
           const cancellationInfo = getCancellationRequestInfo(booking);
+          const vehicleImage = resolveAssetUrl(booking.vehicle?.imageUrl || booking.vehicle?.images?.[0] || "");
 
           return (
-          <article key={booking._id} className="bg-white rounded-xl border p-5">
-            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold">{booking.vehicle?.name || "Vehicle"}</h3>
-                <p className="text-sm text-gray-500">
-                  Renter: {booking.renter?.name || booking.renter?.email || "-"}
-                </p>
+          <article key={booking._id} className="group overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-100/70 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex min-w-0 gap-4">
+                <div className="h-20 w-24 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-100 to-blue-100 sm:h-24 sm:w-32">
+                  {vehicleImage ? (
+                    <img src={vehicleImage} alt={booking.vehicle?.name || "Vehicle"} className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-[#017FE6]"><CarFront size={30} /></div>
+                  )}
+                </div>
+                <div className="min-w-0 py-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Booking #{String(booking._id || "").slice(-6).toUpperCase()}</p>
+                  <h3 className="mt-1 truncate text-xl font-bold text-slate-900">{booking.vehicle?.name || "Vehicle"}</h3>
+                  <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-slate-500"><Users size={14} className="text-slate-400" /> {booking.renter?.name || booking.renter?.email || "Renter details unavailable"}</p>
+                </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2 lg:justify-end">
                 <span
                   className={`text-xs px-2 py-1 rounded-full ${
                     statusStyles[booking.status] || "bg-gray-100 text-gray-700"
@@ -339,11 +388,11 @@ export default function Bookings() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-4 text-sm">
-              <Info title="Pickup" value={formatDateTime(booking.pickupAt)} />
-              <Info title="Return" value={formatDateTime(booking.returnAt)} />
-              <Info title="Duration" value={formatDurationMinutes(getBookingDurationMinutesForPricing(booking))} />
-              <Info title="Location" value={booking.vehicle?.location || "-"} />
+            <div className="mt-5 grid grid-cols-1 gap-3 border-y border-slate-100 py-4 text-sm md:grid-cols-2 xl:grid-cols-4">
+              <Info icon={CalendarDays} title="Pickup" value={formatDateTime(booking.pickupAt)} />
+              <Info icon={CalendarDays} title="Return" value={formatDateTime(booking.returnAt)} />
+              <Info icon={Clock3} title="Duration" value={formatDurationMinutes(getBookingDurationMinutesForPricing(booking))} />
+              <Info icon={MapPin} title="Location" value={booking.vehicle?.location || "-"} />
               <Info title="Vehicle Rate" value={`${money(booking.vehicleHourlyRate ?? booking.vehicleDailyRate)} / hr`} />
               <Info
                 title="Driver Option"
@@ -358,7 +407,7 @@ export default function Bookings() {
                 title="Late Penalty"
                 value={lateReturnInfo.penaltyFee > 0 ? money(lateReturnInfo.penaltyFee) : money(0)}
               />
-              <Info title="Total Payment" value={money(getPayableAmount(booking))} />
+              <Info icon={CreditCard} title="Total Payment" value={money(getPayableAmount(booking))} />
             </div>
 
             {lateReturnInfo.isOverdue && (
@@ -377,8 +426,8 @@ export default function Bookings() {
 
 
 
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="flex gap-2 flex-wrap">
+            <div className="mt-5 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 md:grid-cols-2">
+              <div className="flex flex-wrap gap-2">
                 {booking.status === "pending" && (
                   <>
                     <button
@@ -426,6 +475,24 @@ export default function Bookings() {
                       className="px-3 py-2 rounded-lg bg-rose-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Reject Extension
+                    </button>
+                  </>
+                )}
+                {cancellationInfo.status === "requested" && (
+                  <>
+                    <button
+                      onClick={() => reviewCancellationRequest(booking._id, "approve")}
+                      disabled={walkInActionBookingId === booking._id}
+                      className="px-3 py-2 rounded-lg bg-amber-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Approve Cancellation
+                    </button>
+                    <button
+                      onClick={() => reviewCancellationRequest(booking._id, "reject")}
+                      disabled={walkInActionBookingId === booking._id}
+                      className="px-3 py-2 rounded-lg bg-slate-700 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Keep Booking
                     </button>
                   </>
                 )}
@@ -493,10 +560,10 @@ export default function Bookings() {
                 )}
               </div>
 
-              <div className="flex justify-start md:justify-end items-center gap-2">
-                <label className="text-sm text-gray-600">Payment</label>
+              <div className="flex items-center gap-2 md:justify-end">
+                <label className="text-sm font-medium text-slate-600">Payment</label>
                 <select
-                  className="border rounded-lg px-2 py-2 text-sm"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-[#017FE6]"
                   value={booking.paymentStatus}
                   disabled={walkInActionBookingId === booking._id}
                   onChange={(e) => updatePaymentStatus(booking._id, e.target.value)}
@@ -511,15 +578,28 @@ export default function Bookings() {
           );
         })}
       </div>
+
+      {bookingPage.hasMore && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => loadBookings({ cursor: bookingPage.nextCursor, append: true })}
+            disabled={loadingMore}
+            className="rounded-lg border border-[#017FE6] px-4 py-2 text-sm font-medium text-[#017FE6] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingMore ? "Loading..." : "Load more bookings"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function Info({ title, value }) {
+function Info({ title, value, icon: Icon }) {
   return (
-    <div className="bg-gray-50 rounded-lg p-3">
-      <p className="text-gray-500">{title}</p>
-      <p className="font-medium">{value}</p>
+    <div className="rounded-xl bg-slate-50 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">{Icon && <Icon size={13} className="text-[#017FE6]" />}{title}</p>
+      <p className="mt-1 font-semibold text-slate-800">{value}</p>
     </div>
   );
 }

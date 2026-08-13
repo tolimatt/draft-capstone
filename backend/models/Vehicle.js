@@ -81,11 +81,23 @@ const vehicleSchema = new mongoose.Schema(
     images: {
       type: [String],
       default: [],
+      validate: {
+        validator: (images) =>
+          Array.isArray(images) &&
+          images.length <= 8 &&
+          images.every((image) => typeof image === "string" && image.length > 0 && image.length <= 2048),
+        message: "Vehicles require between one and eight valid image references.",
+      },
     },
     imageUrl: {
       type: String,
       trim: true,
       default: "",
+    },
+    coverDisplayMode: {
+      type: String,
+      enum: ["auto", "photo", "cutout"],
+      default: "auto",
     },
     driverOptionEnabled: {
       type: Boolean,

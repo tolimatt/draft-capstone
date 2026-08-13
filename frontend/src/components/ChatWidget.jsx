@@ -24,6 +24,8 @@ const BLOCKED_WORDS = [
   "tarantado",
   "pakyu",
   "bwisit",
+  "nigger",
+  "nigga",
 ];
 
 const TIME_BASED_GREETINGS = {
@@ -44,8 +46,14 @@ const getWelcomeText = (date = new Date()) => {
   const greetingPeriod = getGreetingPeriod(date);
   const greeting = TIME_BASED_GREETINGS[greetingPeriod] || TIME_BASED_GREETINGS.evening;
 
-  return `${greeting}, I am RentifyPro AI. I automatically reply in English, Filipino, or Taglish based on how you ask your question. What can I help you with today?`;
+  return `${greeting}, I am Rentify AI. I automatically reply in English, Filipino, or Taglish based on how you ask your question. What can I help you with today?`;
 };
+
+const QUICK_PROMPTS = [
+  "Show available vehicles",
+  "How does booking work?",
+  "What are the rental requirements?",
+];
 
 const createWelcomeMessage = (language, date = new Date()) => ({
   id: `${WELCOME_MESSAGE_ID_PREFIX}${language}-${getGreetingPeriod(date)}`,
@@ -71,13 +79,19 @@ const BLOCKED_WORD_GLOBAL_PATTERN = new RegExp(
   "gi"
 );
 
+const maskBadWord = (word = "") => {
+  const characters = Array.from(String(word || ""));
+  if (characters.length <= 2) return "*".repeat(characters.length);
+  return `${characters[0]}${"*".repeat(characters.length - 2)}${characters.at(-1)}`;
+};
+
 const sanitizeDraftInput = (value = "") =>
   String(value || "")
     .replace(DISALLOWED_CHAT_INPUT_REGEX, "")
     .slice(0, CHAT_INPUT_MAX_LENGTH);
 
 const censorBadWords = (value = "") =>
-  String(value || "").replace(BLOCKED_WORD_GLOBAL_PATTERN, (word) => "*".repeat(word.length));
+  String(value || "").replace(BLOCKED_WORD_GLOBAL_PATTERN, (word) => maskBadWord(word));
 
 const normalizeMessage = (message) => {
   if (!message || typeof message !== "object") {
@@ -262,10 +276,11 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
 
     if (!message || isSending) return;
 
+    const userMessageId = `user-${Date.now()}`;
     updateMessagesForLanguage(activeLanguage, (current) => [
       ...current,
       {
-        id: `user-${Date.now()}`,
+        id: userMessageId,
         sender: "user",
         text: censorBadWords(message),
         recommendations: [],
@@ -277,25 +292,35 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
 
     try {
       const response = await API.chatWithBot({ message, language: "auto" });
-      updateMessagesForLanguage(activeLanguage, (current) => [
-        ...current,
-        {
-          id: `bot-${Date.now()}`,
-          sender: "bot",
-          text:
-            response.reply ||
-            (activeLanguage === "filipino"
-              ? "May problema sa tugon ng chatbot. Pakisubukan muli."
-              : "There was a problem with the chatbot response. Please try again."),
-          recommendations: Array.isArray(response.recommendations)
-            ? response.recommendations
-            : [],
-          showViewAvailableVehicles:
-            response.intent === "available_vehicles" &&
-            Array.isArray(response.recommendations) &&
-            response.recommendations.length > 0,
-        },
-      ]);
+      updateMessagesForLanguage(activeLanguage, (current) => {
+        const updatedMessages = response.censoredMessage
+          ? current.map((item) =>
+              item.id === userMessageId
+                ? { ...item, text: String(response.censoredMessage) }
+                : item
+            )
+          : current;
+
+        return [
+          ...updatedMessages,
+          {
+            id: `bot-${Date.now()}`,
+            sender: "bot",
+            text:
+              response.reply ||
+              (activeLanguage === "filipino"
+                ? "May problema sa tugon ng chatbot. Pakisubukan muli."
+                : "There was a problem with the chatbot response. Please try again."),
+            recommendations: Array.isArray(response.recommendations)
+              ? response.recommendations
+              : [],
+            showViewAvailableVehicles:
+              response.intent === "available_vehicles" &&
+              Array.isArray(response.recommendations) &&
+              response.recommendations.length > 0,
+          },
+        ];
+      });
     } catch (error) {
       updateMessagesForLanguage(activeLanguage, (current) => [
         ...current,
@@ -319,33 +344,65 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-[90] w-[95vw] max-w-[420px] h-[72vh] max-h-[560px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.28)] flex flex-col">
-      <div className="bg-gradient-to-r from-[#0B75E7] to-[#045FC3] text-white px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold">RentifyPro AI</h3>
+    <div
+      role="dialog"
+      aria-label="Rentify AI chatbot"
+      className="fixed bottom-4 right-4 z-[90] flex h-[76vh] max-h-[620px] w-[calc(100vw-2rem)] max-w-[440px] flex-col overflow-hidden rounded-[1.75rem] border border-blue-100/80 bg-white shadow-[0_30px_100px_rgba(2,32,71,0.3)]"
+    >
+      <div className="relative overflow-hidden bg-[linear-gradient(135deg,#0B75E7_0%,#056ED9_55%,#045FC3_100%)] px-4 py-4 text-white">
+        <div className="pointer-events-none absolute -right-10 -top-14 h-36 w-36 rounded-full border border-white/10 bg-white/5" />
+        <div className="pointer-events-none absolute -bottom-16 right-20 h-28 w-28 rounded-full border border-white/10" />
+        <div className="relative flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/25 bg-white/15 p-1 shadow-lg shadow-blue-950/15 backdrop-blur-sm">
+              <img
+                src="/rentify-ai-logo-bubble.png"
+                alt="Rentify AI"
+                className="h-full w-full rounded-full object-contain"
+              />
+            </div>
+            <div>
+              <h3 className="text-base font-bold tracking-tight">Rentify AI</h3>
+              <div className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-blue-100">
+                <span className="relative flex h-2 w-2" aria-hidden="true">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-70" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white/25" />
+                </span>
+                <span>Online</span>
+              </div>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 transition flex items-center justify-center"
-            aria-label="Close chatbot"
+            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 transition hover:rotate-3 hover:bg-white/20"
+            aria-label="Close Rentify AI"
           >
             <X size={18} />
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-slate-50 px-4 py-4 space-y-3">
+      <div className="rp-ai-chat-body flex-1 space-y-4 overflow-y-auto px-4 py-5">
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
+            className={`flex items-end gap-2.5 ${message.sender === "user" ? "justify-end" : "justify-start"}`}
           >
+            {message.sender === "bot" && (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white p-0.5 shadow-sm">
+                <img
+                  src="/rentify-ai-logo-bubble.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-full w-full rounded-full object-contain"
+                />
+              </div>
+            )}
             <div
-              className={`max-w-[84%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+              className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                 message.sender === "user"
-                  ? "bg-[#0B75E7] text-white rounded-br-md"
-                  : "bg-white text-slate-700 border border-slate-200 rounded-bl-md"
+                  ? "rounded-br-md bg-[linear-gradient(135deg,#0B75E7,#056ED9)] text-white shadow-[0_10px_24px_rgba(11,117,231,0.2)]"
+                  : "rounded-bl-md border border-slate-200/90 bg-white text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
               }`}
             >
               <p className="whitespace-pre-line">{message.text}</p>
@@ -355,7 +412,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
                   {message.recommendations.map((vehicle, index) => (
                     <article
                       key={`${message.id}-${vehicle._id || vehicle.name || index}`}
-                      className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                      className="rounded-2xl border border-blue-100 bg-[linear-gradient(145deg,#f8fbff,#eff6ff)] p-3 transition hover:border-blue-200"
                     >
                       <h4 className="font-semibold text-slate-900">
                         {vehicle.name || "Vehicle"}
@@ -375,7 +432,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
                         onClose?.();
                         onViewAvailableVehicles();
                       }}
-                      className="mt-1 inline-flex items-center justify-center rounded-xl bg-[#0B75E7] px-3 py-2 text-xs font-semibold text-white hover:bg-[#095fb8] transition"
+                      className="mt-1 inline-flex items-center justify-center rounded-xl bg-[#0B75E7] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#095fb8]"
                     >
                       View available vehicles
                     </button>
@@ -386,8 +443,31 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
           </div>
         ))}
 
+        {messages.length === 1 && !isSending && (
+          <div className="pl-10">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">
+              Suggested questions
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {QUICK_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => updateDraftForLanguage(language, prompt)}
+                  className="rounded-full border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-[#0B75E7] shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isSending && (
-          <div className="flex justify-start">
+          <div className="flex items-end gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white p-0.5 shadow-sm">
+              <img src="/rentify-ai-logo-bubble.png" alt="" aria-hidden="true" className="h-full w-full rounded-full object-contain" />
+            </div>
             <div className="inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
               <LoaderCircle size={16} className="animate-spin" />
               {language === "filipino" ? "Nag-iisip..." : "Thinking..."}
@@ -398,8 +478,8 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-slate-200 bg-white p-3">
-        <div className="flex items-center gap-2">
+      <div className="border-t border-slate-200/80 bg-white/95 p-3.5 backdrop-blur">
+        <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-1.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-50">
           <input
             value={draft}
             onChange={(event) =>
@@ -416,22 +496,23 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
                 ? "Magtanong tungkol sa sasakyan o booking..."
                 : "Ask about vehicles or booking..."
             }
-            className="rp-input text-sm flex-1"
+            className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-slate-800 outline-none placeholder:text-slate-400"
             disabled={isSending}
             maxLength={CHAT_INPUT_MAX_LENGTH}
           />
           <button
             onClick={sendMessage}
             disabled={isSending}
-            className="h-11 w-11 rounded-2xl bg-[#0B75E7] text-white flex items-center justify-center disabled:opacity-60 flex-shrink-0"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#0B75E7,#045FC3)] text-white shadow-[0_8px_18px_rgba(11,117,231,0.24)] transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Send message"
           >
             <Send size={16} />
           </button>
         </div>
-        <p className="mt-1 text-[11px] text-slate-500">
-          {draft.length}/{CHAT_INPUT_MAX_LENGTH} characters
-        </p>
+        <div className="mt-1.5 flex items-center justify-between px-1 text-[10px] text-slate-400">
+          <span>Press Enter to send</span>
+          <span>{draft.length}/{CHAT_INPUT_MAX_LENGTH}</span>
+        </div>
       </div>
     </div>
   );

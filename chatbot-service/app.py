@@ -255,9 +255,9 @@ RECO_NO_MATCH = {
 }
 
 LEGACY_TAGLISH_RESPONSE_OVERRIDES = {
-    "chat_greeting": "Hello! Ako si RentifyPro AI. I can help you sa booking, requirements, payments, at available vehicles.",
+    "chat_greeting": "Hello! Ako si Rentify AI. I can help you sa booking, requirements, payments, at available vehicles.",
     "chat_wellbeing": "Okay ako and ready akong tumulong sa booking, payment, at vehicle questions mo.",
-    "chat_identity": "Ako si RentifyPro AI assistant mo for rentals, booking steps, payment, at recommendations.",
+    "chat_identity": "Ako si Rentify AI assistant mo for rentals, booking steps, payment, at recommendations.",
     "chat_capabilities": "Matutulungan kita sa vehicle availability, booking process, payment methods, requirements, at recommendations.",
     "chat_gratitude": "You're welcome! Sabihin mo lang if may tanong ka pa about booking o rentals.",
     "rental_rate": "Depende ang rental rate sa vehicle at duration. Sabihin mo lang anong unit at ilang oras o araw.",

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Search,
   Bell,
   Plus,
   Menu,
@@ -8,21 +7,39 @@ import {
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../../utils/liveCounters";
+import { getOwnerProfileFromStorage } from "../utils/ownerProfile";
+import {
+  SESSION_OWNER_PROFILE_UPDATED_EVENT,
+} from "../../utils/sessionStore";
 
 const isNotificationRead = (notification) =>
   Boolean(notification?.readAt);
 
-export default function Topbar({ title, onNavigateToNotifications, onToggleSidebar }) {
+const getGreetingPrefix = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+};
+
+export default function Topbar({ onNavigateToNotifications, onToggleSidebar }) {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [owner, setOwner] = useState(() => getOwnerProfileFromStorage());
+
+  useEffect(() => {
+    const syncOwner = () => setOwner(getOwnerProfileFromStorage());
+    window.addEventListener("owner-profile-updated", syncOwner);
+    window.addEventListener(SESSION_OWNER_PROFILE_UPDATED_EVENT, syncOwner);
+    return () => {
+      window.removeEventListener("owner-profile-updated", syncOwner);
+      window.removeEventListener(SESSION_OWNER_PROFILE_UPDATED_EVENT, syncOwner);
+    };
+  }, []);
 
   const syncUnreadNotifications = useCallback(async () => {
     try {
-      const response = await API.getNotifications();
-      const unread = (response.notifications || []).reduce(
-        (count, notification) => count + (isNotificationRead(notification) ? 0 : 1),
-        0
-      );
-      setUnreadNotifications(unread);
+      const response = await API.getUnreadNotificationCount();
+      setUnreadNotifications(Number(response.unreadCount || 0));
     } catch {
       // Keep current badge value when sync fails.
     }
@@ -62,13 +79,12 @@ export default function Topbar({ title, onNavigateToNotifications, onToggleSideb
     return () => socket.off("notification:new", handleNotification);
   }, []);
 
+  const displayFirstName = owner.firstName || owner.name?.split(/\s+/)?.[0] || "there";
+  const greeting = `${getGreetingPrefix()}, ${displayFirstName}!`;
+
   return (
     <header
-      className="sticky top-0 z-30 bg-[#017FE6] border-b border-white/20"
-      style={{
-        background: "#017FE6",
-        borderBottom: "1px solid rgba(255,255,255,0.20)",
-      }}
+      className="sticky top-0 z-30 border-b border-white/20 bg-[linear-gradient(90deg,#056ed9_0%,#017fe6_58%,#0787ee_100%)]"
     >
       {/* top bar */}
       <div className="h-20 px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-3 sm:gap-6">
@@ -85,35 +101,16 @@ export default function Topbar({ title, onNavigateToNotifications, onToggleSideb
           </button>
           <div className="min-w-0">
             <h1 className="text-lg sm:text-xl font-bold text-white leading-tight truncate">
-              {title}
+              {greeting}
             </h1>
             <p className="hidden sm:block text-sm text-white/80">
-              Welcome back! Here's what's happening today.
+              Here&apos;s what&apos;s happening with your rentals today.
             </p>
           </div>
         </div>
 
         {/* right side */}
         <div className="flex items-center gap-2 sm:gap-3">
-
-          {/* search */}
-          <div className="relative hidden xl:block">
-            <Search
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-white/70"
-            />
-            <input
-              placeholder="Search..."
-              className="
-                w-72 h-10 rounded-xl
-                bg-white/15 border border-white/20
-                pl-10 pr-4 text-sm
-                text-white placeholder:text-white/60
-                outline-none
-                focus:ring-2 focus:ring-white/25
-              "
-            />
-          </div>
 
           {/* notifications */}
           <button
@@ -169,4 +166,3 @@ export default function Topbar({ title, onNavigateToNotifications, onToggleSideb
     </header>
   );
 }
-

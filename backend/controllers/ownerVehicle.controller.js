@@ -1,29 +1,21 @@
-import fs from "fs";
-import path from "path";
 import Vehicle from "../models/Vehicle.js";
 import { hasActiveBookingForVehicle } from "../utils/vehicleAvailability.js";
 import { HOURLY_RATE_UNIT, getVehicleHourlyRate } from "../utils/pricing.js";
+import {
+  cleanupUploadedVehicleFiles,
+  MAX_VEHICLE_IMAGES,
+  normalizeVehicleImageReference,
+  removeLocalVehicleImages,
+} from "../utils/localMedia.js";
 
 const allowedAvailabilityStatuses = new Set(["available", "unavailable"]);
-const UPLOADS_SEGMENT = "/uploads/";
-
-const normalizePathForUrl = (value = "") => value.replace(/\\/g, "/");
+const allowedCoverDisplayModes = new Set(["auto", "photo", "cutout"]);
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
+const normalizeImagePath = normalizeVehicleImageReference;
 
-const normalizeImagePath = (value = "") => {
-  const raw = normalizePathForUrl(String(value || "").trim());
-  if (!raw) return "";
-  if (/^https?:\/\//i.test(raw)) return raw;
-
-  const uploadsIndex = raw.toLowerCase().lastIndexOf(UPLOADS_SEGMENT);
-  if (uploadsIndex >= 0) return raw.slice(uploadsIndex + 1);
-
-  if (raw.toLowerCase().startsWith("uploads/")) return raw;
-  if (raw.startsWith("./")) return raw.slice(2);
-  if (raw.startsWith("/")) return raw.slice(1);
-  if (/^[a-z]:\//i.test(raw)) return "";
-
-  return raw;
+const normalizeCoverDisplayMode = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return allowedCoverDisplayModes.has(normalized) ? normalized : "auto";
 };
 
 const parseBoolean = (value, fallback = false) => {
@@ -44,20 +36,6 @@ const getImageUrl = (req, filePath) => {
 
   const baseUrl = process.env.BACKEND_PUBLIC_URL?.replace(/\/+$/, "") || `${req.protocol}://${req.get("host")}`;
   return `${baseUrl}/${normalizedPath}`;
-};
-
-const removeLocalImageIfExists = (imagePath = "") => {
-  if (!imagePath || /^https?:\/\//i.test(imagePath)) return;
-
-  const normalized = normalizeImagePath(imagePath);
-  if (!normalized) return;
-
-  const absolutePath = path.isAbsolute(normalized) ? normalized : path.resolve(normalized);
-  try {
-    if (fs.existsSync(absolutePath)) fs.unlinkSync(absolutePath);
-  } catch {
-    // Ignore cleanup errors here.
-  }
 };
 
 const toNumeric = (value, fallback = 0) => {
@@ -81,8 +59,11 @@ const buildImageSet = ({ uploadedPaths = [], linkedPaths = [], existingPaths = [
   const merged = [...ensureArray(existingPaths), ...ensureArray(uploadedPaths), ...ensureArray(linkedPaths)]
     .map((value) => normalizeImagePath(value))
     .filter(Boolean);
-  return [...new Set(merged)];
+  return [...new Set(merged)].slice(0, MAX_VEHICLE_IMAGES);
 };
+
+const hasInvalidImageReferences = (values = []) =>
+  ensureArray(values).some((value) => String(value || "").trim() && !normalizeImagePath(value));
 
 const parseUploadIndex = (value) => {
   if (value === undefined || value === null || value === "") return -1;
@@ -175,6 +156,7 @@ const serializeVehicle = (req, vehicle) => {
     coverImageUrl: primaryImage,
     coverImagePath,
     imageUrl: primaryImage,
+    coverDisplayMode: normalizeCoverDisplayMode(vehicle.coverDisplayMode),
     driverOptionEnabled: Boolean(vehicle.driverOptionEnabled),
     driverDailyRate: getVehicleHourlyRate(vehicle, {
       rateField: "driverDailyRate",
@@ -207,7 +189,15 @@ export const createOwnerVehicle = async (req, res) => {
   try {
     const uploadedPaths = extractUploadedPaths(req.files);
     const linkedPaths = ensureArray(req.body.imageUrls);
+    if (hasInvalidImageReferences(linkedPaths)) {
+      await cleanupUploadedVehicleFiles(req.files);
+      return res.status(400).json({ success: false, message: "Vehicle image references must be HTTPS URLs or managed vehicle uploads." });
+    }
     const images = buildImageSet({ uploadedPaths, linkedPaths });
+    if (!images.length) {
+      await cleanupUploadedVehicleFiles(req.files);
+      return res.status(400).json({ success: false, message: "At least one vehicle image is required." });
+    }
     const coverImagePath = resolveCoverImagePath({
       requestedCoverPath: req.body.coverImagePath,
       requestedCoverUploadIndex: req.body.coverUploadIndex,
@@ -228,6 +218,7 @@ export const createOwnerVehicle = async (req, res) => {
       availabilityStatus: req.body.availabilityStatus,
       images,
       imageUrl: coverImagePath || images[0] || "",
+      coverDisplayMode: normalizeCoverDisplayMode(req.body.coverDisplayMode),
       driverOptionEnabled,
       driverDailyRate,
       specs,
@@ -235,6 +226,7 @@ export const createOwnerVehicle = async (req, res) => {
 
     res.status(201).json({ success: true, vehicle: serializeVehicle(req, vehicle) });
   } catch {
+    await cleanupUploadedVehicleFiles(req.files);
     res.status(500).json({ success: false, message: "Failed to create vehicle." });
   }
 };
@@ -243,6 +235,7 @@ export const updateOwnerVehicle = async (req, res) => {
   try {
     const vehicle = await Vehicle.findOne({ _id: req.params.id, owner: req.user._id });
     if (!vehicle) {
+      await cleanupUploadedVehicleFiles(req.files);
       return res.status(404).json({ success: false, message: "Vehicle not found." });
     }
 
@@ -253,11 +246,15 @@ export const updateOwnerVehicle = async (req, res) => {
       vehicle.pricingUnit = HOURLY_RATE_UNIT;
     }
     if (req.body.location !== undefined) vehicle.location = req.body.location.trim();
+    if (req.body.coverDisplayMode !== undefined) {
+      vehicle.coverDisplayMode = normalizeCoverDisplayMode(req.body.coverDisplayMode);
+    }
     if (req.body.availabilityStatus && allowedAvailabilityStatuses.has(req.body.availabilityStatus)) {
       if (
         req.body.availabilityStatus === "available" &&
         (await hasActiveBookingForVehicle(vehicle._id))
       ) {
+        await cleanupUploadedVehicleFiles(req.files);
         return res.status(409).json({
           success: false,
           message: "This vehicle has an active booking and cannot be marked available yet.",
@@ -276,12 +273,18 @@ export const updateOwnerVehicle = async (req, res) => {
       vehicle.driverDailyRate = vehicle.driverOptionEnabled ? toNumeric(req.body.driverDailyRate, vehicle.driverDailyRate || 0) : 0;
     }
 
+    let removedImages = [];
     const uploadedPaths = extractUploadedPaths(req.files);
     const linkedPaths = ensureArray(req.body.imageUrls);
     const hasExistingImagesInput = req.body.existingImages !== undefined;
     const hasRequestedCoverInput =
       req.body.coverImagePath !== undefined || req.body.coverUploadIndex !== undefined;
     const existingImages = hasExistingImagesInput ? ensureArray(req.body.existingImages) : ensureArray(vehicle.images);
+
+    if (hasInvalidImageReferences([...linkedPaths, ...existingImages])) {
+      await cleanupUploadedVehicleFiles(req.files);
+      return res.status(400).json({ success: false, message: "Vehicle image references must be HTTPS URLs or managed vehicle uploads." });
+    }
 
     if (
       uploadedPaths.length ||
@@ -296,6 +299,7 @@ export const updateOwnerVehicle = async (req, res) => {
       });
 
       if (!nextImages.length) {
+        await cleanupUploadedVehicleFiles(req.files);
         return res.status(400).json({
           success: false,
           message: "At least one image is required.",
@@ -307,8 +311,7 @@ export const updateOwnerVehicle = async (req, res) => {
           .map((image) => [normalizeImagePath(image), image])
           .filter(([normalized]) => Boolean(normalized))
       );
-      const removedImages = [...previousImageMap.keys()].filter((image) => !nextImages.includes(image));
-      removedImages.forEach((image) => removeLocalImageIfExists(previousImageMap.get(image) || image));
+      removedImages = [...previousImageMap.keys()].filter((image) => !nextImages.includes(image));
 
       vehicle.images = nextImages;
       vehicle.imageUrl = resolveCoverImagePath({
@@ -321,8 +324,12 @@ export const updateOwnerVehicle = async (req, res) => {
     }
 
     await vehicle.save();
+    if (removedImages.length) {
+      await removeLocalVehicleImages(removedImages);
+    }
     res.json({ success: true, vehicle: serializeVehicle(req, vehicle) });
   } catch {
+    await cleanupUploadedVehicleFiles(req.files);
     res.status(500).json({ success: false, message: "Failed to update vehicle." });
   }
 };
@@ -334,8 +341,8 @@ export const deleteOwnerVehicle = async (req, res) => {
       return res.status(404).json({ success: false, message: "Vehicle not found." });
     }
 
-    ensureArray(vehicle.images).forEach(removeLocalImageIfExists);
     await vehicle.deleteOne();
+    await removeLocalVehicleImages(vehicle.images);
 
     res.json({ success: true, message: "Vehicle deleted." });
   } catch {

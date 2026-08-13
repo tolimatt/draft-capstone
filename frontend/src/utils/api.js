@@ -135,9 +135,15 @@ const API = {
     }),
 
   createBooking: (body) => request("/bookings", { method: "POST", body: JSON.stringify(body) }),
-  getMyBookings: (status = "all") => request(`/bookings/me?status=${encodeURIComponent(status)}`),
+  getMyBookings: (options = "all") => {
+    const params = typeof options === "string" ? { view: options } : options;
+    return request(`/bookings/me${buildQueryString(params)}`);
+  },
   getBookingById: (id) => request(`/bookings/${id}`),
-  getOwnerBookings: (status = "all") => request(`/owner/bookings?status=${encodeURIComponent(status)}`),
+  getOwnerBookings: (options = "all") => {
+    const params = typeof options === "string" ? { view: options } : options;
+    return request(`/owner/bookings${buildQueryString(params)}`);
+  },
   payBooking: (id, body = {}) =>
     request(`/bookings/${id}/pay`, { method: "POST", body: JSON.stringify(body || {}) }),
   setBookingBalancePaymentMethod: (id, body = {}) =>
@@ -242,11 +248,14 @@ const API = {
       method: "PATCH",
     }),
 
-  getNotifications: () => request("/notifications"),
+  getNotifications: (params = {}) => request(`/notifications${buildQueryString(params)}`),
+  getUnreadNotificationCount: () => request("/notifications/unread-count"),
   markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: "PATCH" }),
-  markAllNotificationsRead: () => request("/notifications/read-all", { method: "PATCH" }),
+  markAllNotificationsRead: (ids = []) => request("/notifications/read-all", { method: "PATCH", body: JSON.stringify(ids.length ? { ids } : {}) }),
   deleteAllReadNotifications: () => request("/notifications/read-all", { method: "DELETE" }),
-  archiveReadNotifications: () => request("/notifications/archive-read", { method: "PATCH" }),
+  archiveNotification: (id) => request(`/notifications/${id}/archive`, { method: "PATCH" }),
+  restoreNotification: (id) => request(`/notifications/${id}/restore`, { method: "PATCH" }),
+  deleteNotification: (id) => request(`/notifications/${id}`, { method: "DELETE" }),
 };
 
 export default API;

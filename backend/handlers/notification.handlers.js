@@ -432,6 +432,7 @@ const handleChatMessageReceived = async (payload = {}) => {
   const receiverId = toIdString(payload.receiverId || payload.receiver?._id || payload.receiver);
   const senderId = toIdString(payload.senderId || payload.sender?._id || payload.sender);
   const messageId = toIdString(payload.messageId || payload.message?._id || payload.message);
+  const conversationId = [receiverId, senderId, getBookingId(payload) || getVehicleId(payload) || "general"].sort().join(":");
 
   await NotificationService.send({
     user: receiverId,
@@ -440,14 +441,16 @@ const handleChatMessageReceived = async (payload = {}) => {
     event: NOTIFICATION_EVENTS.CHAT_MESSAGE_RECEIVED,
     title: "New message",
     message: `${displayName(payload.actor || payload.sender, "Someone")} sent you a message.`,
-    entityType: messageId ? "message" : getBookingId(payload) ? "booking" : "conversation",
-    entityId: messageId || getBookingId(payload) || getVehicleId(payload),
-    dedupeKey: messageId ? notificationKey(receiverId, NOTIFICATION_EVENTS.CHAT_MESSAGE_RECEIVED, messageId) : "",
+    entityType: "conversation",
+    entityId: conversationId,
+    dedupeKey: notificationKey(receiverId, NOTIFICATION_EVENTS.CHAT_MESSAGE_RECEIVED, conversationId),
+    coalesce: true,
     data: {
       senderId,
       bookingId: getBookingId(payload) || null,
       vehicleId: getVehicleId(payload) || null,
       messageId: messageId || null,
+      conversationId,
     },
   });
 };

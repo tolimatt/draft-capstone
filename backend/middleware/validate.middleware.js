@@ -263,6 +263,7 @@ export const validateObjectIdParam = (paramName = "id") => (req, _res, next) => 
 };
 
 const AVAILABILITY_STATUSES = new Set(["available", "unavailable"]);
+const COVER_DISPLAY_MODES = new Set(["auto", "photo", "cutout"]);
 const BOOKING_STATUSES = new Set(["pending", "confirmed", "extended", "completed", "cancelled", "rejected"]);
 const PAYMENT_STATUSES = new Set(["unpaid", "partial", "paid", "refunded"]);
 
@@ -329,6 +330,12 @@ const sanitizeVehicleBody = (req, { isUpdate = false } = {}) => {
     req.body.coverUploadIndex = "";
   }
 
+  if (hasOwn(req.body, "coverDisplayMode")) {
+    req.body.coverDisplayMode = toText(req.body.coverDisplayMode).toLowerCase();
+  } else if (!isUpdate) {
+    req.body.coverDisplayMode = "auto";
+  }
+
   if (req.body.driverOptionEnabled !== undefined) {
     req.body.driverOptionEnabled = parseBoolean(req.body.driverOptionEnabled, false);
   } else if (!isUpdate) {
@@ -358,6 +365,10 @@ export const validateVehicleCreate = (req, res, next) => {
 
   if (!AVAILABILITY_STATUSES.has(body.availabilityStatus)) {
     errors.availabilityStatus = "Availability status must be 'available' or 'unavailable'.";
+  }
+
+  if (!COVER_DISPLAY_MODES.has(body.coverDisplayMode)) {
+    errors.coverDisplayMode = "Cover display mode must be 'auto', 'photo', or 'cutout'.";
   }
 
   const seats = Number(body.specSeats);
@@ -422,6 +433,14 @@ export const validateVehicleUpdate = (req, res, next) => {
     !AVAILABILITY_STATUSES.has(body.availabilityStatus)
   ) {
     errors.availabilityStatus = "Availability status must be 'available' or 'unavailable'.";
+  }
+
+
+  if (
+    body.coverDisplayMode !== undefined &&
+    !COVER_DISPLAY_MODES.has(body.coverDisplayMode)
+  ) {
+    errors.coverDisplayMode = "Cover display mode must be 'auto', 'photo', or 'cutout'.";
   }
 
   if (body.specSeats !== undefined && body.specSeats !== "") {

@@ -1,7 +1,5 @@
 import mongoose from "mongoose";
 
-const WALLET_INDEX_NAME = "walletAddress_1";
-const PHONE_INDEX_NAME = "phone_1";
 const DEFAULT_CONNECT_RETRIES = 5;
 const DEFAULT_RETRY_DELAY_MS = 5000;
 
@@ -43,76 +41,6 @@ const getCandidateMongoUris = () => {
   return [direct, primary].filter((value, index, arr) => value && arr.indexOf(value) === index);
 };
 
-const ensureWalletAddressIndex = async () => {
-  try {
-    const usersCollection = mongoose.connection.collection("users");
-
-    await usersCollection.updateMany(
-      {
-        $or: [{ walletAddress: null }, { walletAddress: "" }],
-      },
-      {
-        $unset: { walletAddress: "" },
-      }
-    );
-
-    const indexes = await usersCollection.indexes();
-    const walletIndex = indexes.find((index) => index.name === WALLET_INDEX_NAME);
-
-    if (walletIndex) {
-      await usersCollection.dropIndex(WALLET_INDEX_NAME);
-    }
-
-    await usersCollection.createIndex(
-      { walletAddress: 1 },
-      {
-        name: WALLET_INDEX_NAME,
-        unique: true,
-        sparse: true,
-      }
-    );
-
-    console.log("Ensured users.walletAddress uses a unique sparse index.");
-  } catch (error) {
-    console.error("Failed to rebuild users.walletAddress index:", error.message);
-  }
-};
-
-const ensurePhoneIndex = async () => {
-  try {
-    const usersCollection = mongoose.connection.collection("users");
-
-    await usersCollection.updateMany(
-      {
-        $or: [{ phone: null }, { phone: "" }],
-      },
-      {
-        $unset: { phone: "" },
-      }
-    );
-
-    const indexes = await usersCollection.indexes();
-    const phoneIndex = indexes.find((index) => index.name === PHONE_INDEX_NAME);
-
-    if (phoneIndex) {
-      await usersCollection.dropIndex(PHONE_INDEX_NAME);
-    }
-
-    await usersCollection.createIndex(
-      { phone: 1 },
-      {
-        name: PHONE_INDEX_NAME,
-        unique: true,
-        sparse: true,
-      }
-    );
-
-    console.log("Ensured users.phone uses a unique sparse index.");
-  } catch (error) {
-    console.error("Failed to rebuild users.phone index:", error.message);
-  }
-};
-
 const connectDB = async () => {
   const uris = getCandidateMongoUris();
   if (!uris.length) {
@@ -127,6 +55,8 @@ const connectDB = async () => {
   const dbName = String(process.env.MONGO_DB_NAME || "").trim();
   const connectOptions = {
     serverSelectionTimeoutMS,
+    // Production schema changes run through explicit migrations, never web-process startup.
+    autoIndex: String(process.env.MONGO_AUTO_INDEX || "").toLowerCase() === "true",
     ...(dbName ? { dbName } : {}),
   };
 
@@ -147,8 +77,6 @@ const connectDB = async () => {
         console.log(`Database: ${conn.connection.name}`);
         console.log(`Host: ${conn.connection.host}:${conn.connection.port}`);
 
-        await ensureWalletAddressIndex();
-        await ensurePhoneIndex();
         return;
       } catch (error) {
         lastError = error;

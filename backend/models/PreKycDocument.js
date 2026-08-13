@@ -35,7 +35,9 @@ const preKycDocumentSchema = new mongoose.Schema(
     reason: { type: String, default: "" },
     provider: { type: String, default: "gemini" },
     fileName: { type: String, default: "" },
-    filePath: { type: String, default: "" },
+    // Object key only. Do not retain host paths or a public URL for KYC evidence.
+    fileKey: { type: String, default: "" },
+    filePath: { type: String, default: "" }, // Legacy data only; new writes leave this blank.
     mimeType: { type: String, default: "" },
     fileSize: { type: Number, default: 0 },
     fileHash: { type: String, default: "" },

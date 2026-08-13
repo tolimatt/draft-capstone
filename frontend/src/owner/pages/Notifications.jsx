@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import NotificationActionMenu from "../../components/NotificationActionMenu";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { requestLiveCountersRefresh } from "../../utils/liveCounters";
@@ -18,8 +19,8 @@ const isNotificationRead = (notification) =>
 
 const DELETE_ALL_CONFIRMATION_MESSAGE =
   "\u201cAre you sure you want to delete all read messages? This action can\u2019t be undone.\u201d";
-const ARCHIVE_CONFIRMATION_MESSAGE =
-  "\u201cThis action will store your notifications in the archive for 3 days. Click OK to continue.\u201d";
+const DELETE_NOTIFICATION_CONFIRMATION_MESSAGE =
+  "\u201cAre you sure you want to permanently delete this notification? This action can\u2019t be undone.\u201d";
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
@@ -27,6 +28,7 @@ export default function Notifications() {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
   const [confirmationAction, setConfirmationAction] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const unreadCount = useMemo(
     () => notifications.filter((notification) => !isNotificationRead(notification)).length,
@@ -37,11 +39,11 @@ export default function Notifications() {
     [notifications]
   );
 
-  const loadNotifications = async () => {
+  const loadNotifications = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await API.getNotifications();
+      const response = await API.getNotifications({ archived: showArchived || undefined, limit: 100 });
       setNotifications(response.notifications || []);
       requestLiveCountersRefresh();
     } catch (err) {
@@ -49,13 +51,14 @@ export default function Notifications() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showArchived]);
 
   useEffect(() => {
     loadNotifications();
-  }, []);
+  }, [loadNotifications]);
 
   useEffect(() => {
+    if (showArchived) return undefined;
     const socket = getSocket();
     if (!socket) return undefined;
 
@@ -68,7 +71,7 @@ export default function Notifications() {
 
     socket.on("notification:new", handleNotification);
     return () => socket.off("notification:new", handleNotification);
-  }, []);
+  }, [showArchived]);
 
   const markAsRead = async (notificationId) => {
     try {
@@ -119,15 +122,43 @@ export default function Notifications() {
     }
   };
 
-  const archiveRead = async () => {
+  const archiveNotification = async (notificationId) => {
     setUpdating(true);
     setError("");
     try {
-      await API.archiveReadNotifications();
-      setNotifications((prev) => prev.filter((notification) => !isNotificationRead(notification)));
+      await API.archiveNotification(notificationId);
+      setNotifications((previous) => previous.filter((notification) => notification._id !== notificationId));
       requestLiveCountersRefresh();
     } catch (err) {
-      setError(err.message || "Failed to archive read notifications.");
+      setError(err.message || "Failed to archive notification.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const restoreNotification = async (notificationId) => {
+    setUpdating(true);
+    setError("");
+    try {
+      await API.restoreNotification(notificationId);
+      setNotifications((previous) => previous.filter((notification) => notification._id !== notificationId));
+      requestLiveCountersRefresh();
+    } catch (err) {
+      setError(err.message || "Failed to restore notification.");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const deleteNotification = async (notificationId) => {
+    setUpdating(true);
+    setError("");
+    try {
+      await API.deleteNotification(notificationId);
+      setNotifications((previous) => previous.filter((notification) => notification._id !== notificationId));
+      requestLiveCountersRefresh();
+    } catch (err) {
+      setError(err.message || "Failed to delete notification.");
     } finally {
       setUpdating(false);
     }
@@ -136,15 +167,12 @@ export default function Notifications() {
   const confirmAction = async () => {
     const action = confirmationAction;
     setConfirmationAction(null);
-    if (!action) return;
-    if (!readCount || updating) return;
-
-    if (action === "delete") {
-      await deleteAllRead();
+    if (!action || updating) return;
+    if (action.type === "delete-all") {
+      if (readCount) await deleteAllRead();
       return;
     }
-
-    await archiveRead();
+    await deleteNotification(action.notificationId);
   };
 
   return (
@@ -156,20 +184,17 @@ export default function Notifications() {
             {unreadCount} unread notification{unreadCount === 1 ? "" : "s"}.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+          <button onClick={() => setShowArchived((value) => !value)} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm">
+            {showArchived ? "Active" : "Archive"}
+          </button>
+          {!showArchived && <>
           <button
-            onClick={() => setConfirmationAction("delete")}
+            onClick={() => setConfirmationAction({ type: "delete-all" })}
             disabled={!readCount || updating}
             className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm disabled:opacity-50"
           >
             Delete All
-          </button>
-          <button
-            onClick={() => setConfirmationAction("archive")}
-            disabled={!readCount || updating}
-            className="px-4 py-2 rounded-lg border border-amber-300 text-amber-700 text-sm disabled:opacity-50"
-          >
-            Archive
           </button>
           <button
             onClick={markAllAsRead}
@@ -178,6 +203,7 @@ export default function Notifications() {
           >
             Mark all as read
           </button>
+          </>}
         </div>
       </div>
 
@@ -186,7 +212,7 @@ export default function Notifications() {
 
       {!loading && !notifications.length && (
         <div className="bg-white border rounded-xl p-6 text-sm text-gray-600">
-          No notifications yet.
+          {showArchived ? "No archived notifications." : "No notifications yet."}
         </div>
       )}
 
@@ -205,9 +231,13 @@ export default function Notifications() {
                   <p className="text-sm text-gray-700 mt-1">{notification.message}</p>
                   <div className="flex items-center gap-3 mt-2">
                     <p className="text-xs text-gray-500">
-                      {formatDateTime(notification.createdAt)}
+                      {formatDateTime(notification.lastOccurredAt || notification.createdAt)}
                     </p>
-                    {isUnread ? (
+                    {showArchived ? (
+                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                        archived
+                      </span>
+                    ) : isUnread ? (
                       <span className="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
                         unread
                       </span>
@@ -219,14 +249,14 @@ export default function Notifications() {
                   </div>
                 </div>
 
-                {isUnread && (
-                  <button
-                    onClick={() => markAsRead(notification._id)}
-                    className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200"
-                  >
-                    Mark as read
-                  </button>
-                )}
+                <NotificationActionMenu
+                  isUnread={isUnread}
+                  isArchived={showArchived}
+                  onMarkAsRead={() => markAsRead(notification._id)}
+                  onArchive={() => archiveNotification(notification._id)}
+                  onRestore={() => restoreNotification(notification._id)}
+                  onDelete={() => setConfirmationAction({ type: "delete-one", notificationId: notification._id })}
+                />
               </div>
             </article>
           );
@@ -244,9 +274,9 @@ export default function Notifications() {
           >
             <h2 className="text-lg font-bold text-slate-900 mb-2">Confirm Action</h2>
             <p className="text-sm text-slate-700">
-              {confirmationAction === "delete"
+              {confirmationAction.type === "delete-all"
                 ? DELETE_ALL_CONFIRMATION_MESSAGE
-                : ARCHIVE_CONFIRMATION_MESSAGE}
+                : DELETE_NOTIFICATION_CONFIRMATION_MESSAGE}
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button

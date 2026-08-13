@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from "react";
-import { X } from "lucide-react";
+import { Send, X } from "lucide-react";
 
 export default function AIChat({ isOpen, onClose }) {
   const [userMessage, setUserMessage] = useState("");
   const [messages, setMessages] = useState([
-    { sender: "ai", text: "Hi! 👋 This is RentifyPro AI. How can I assist you today?" },
+    { sender: "ai", text: "Hi! This is Rentify AI. How can I assist you today?" },
   ]);
   const [isTyping, setIsTyping] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setMessages([{ sender: "ai", text: "Hi! 👋 This is RentifyPro AI. How can I assist you today?" }]);
+    setMessages([{ sender: "ai", text: "Hi! This is Rentify AI. How can I assist you today?" }]);
   }, [isOpen]);
 
   const handleSendMessage = () => {
@@ -21,7 +21,7 @@ export default function AIChat({ isOpen, onClose }) {
     setIsTyping(true);
 
     setTimeout(() => {
-      setMessages((prev) => [...prev, { sender: "ai", text: "Got it! 😊 Let me help you with that." }]);
+      setMessages((prev) => [...prev, { sender: "ai", text: "Got it. Let me help you with that." }]);
       setIsTyping(false);
     }, 1200);
   };
@@ -33,8 +33,11 @@ export default function AIChat({ isOpen, onClose }) {
       {/* header */}
       <div className="bg-[#017FE6] text-white px-4 py-3 flex justify-between items-center">
         <div>
-          <h3 className="font-semibold text-sm">RentifyPro AI</h3>
-          <p className="text-xs opacity-80">Online • Ready to help</p>
+          <h3 className="font-semibold text-sm">Rentify AI</h3>
+          <p className="flex items-center gap-1.5 text-xs opacity-90">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white/25" />
+            Online
+          </p>
         </div>
         <button onClick={onClose} className="hover:bg-white/20 p-1 rounded-full transition-colors duration-300">
           <X size={20} />
@@ -58,8 +61,13 @@ export default function AIChat({ isOpen, onClose }) {
           placeholder="Ask me about vehicles, bookings..."
           className="flex-1 border rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-[#017FE6] focus:outline-none transition-all duration-300"
         />
-        <button onClick={handleSendMessage} className="bg-[#017FE6] text-white w-9 h-9 rounded-full hover:bg-[#0165B8] transition-all duration-300 hover:scale-110 flex items-center justify-center">
-          ➤
+        <button
+          type="button"
+          onClick={handleSendMessage}
+          aria-label="Send message"
+          className="bg-[#017FE6] text-white w-9 h-9 rounded-full hover:bg-[#0165B8] transition-all duration-300 hover:scale-110 flex items-center justify-center"
+        >
+          <Send size={16} />
         </button>
       </div>
     </div>
@@ -70,7 +78,7 @@ function Message({ message }) {
   return (
     <div className={`flex items-end gap-2 ${message.sender === "user" ? "justify-end" : "justify-start"} animate-fadeIn`}>
       {message.sender === "ai" && (
-        <img src="/robot-ai.png" alt="AI" className="w-8 h-8 rounded-full" />
+        <img src="/rentify-ai-logo-bubble.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
       )}
 
       <div className={`px-4 py-2 rounded-2xl text-sm max-w-[75%] shadow transition-all duration-300 ${
@@ -93,7 +101,7 @@ function Message({ message }) {
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-2 animate-fadeIn">
-      <img src="/robot-ai.png" alt="AI" className="w-8 h-8 rounded-full" />
+      <img src="/rentify-ai-logo-bubble.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
       <div className="bg-white px-4 py-2 rounded-2xl shadow text-sm text-gray-500 flex gap-1">
         <span className="animate-bounce">.</span>
         <span className="animate-bounce" style={{ animationDelay: "150ms" }}>.</span>

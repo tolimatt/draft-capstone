@@ -9,14 +9,16 @@ KYC flow:
   4) POST /api/kyc/selfie/verify   → Compare selfie vs stored ID embedding
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 import base64
 import os
 import re
 import logging
+import hmac
 from datetime import datetime, timezone, timedelta
 
 import cv2
@@ -44,11 +46,12 @@ MONGO_DB_NAME    = os.getenv("MONGO_DB_NAME", "rentifypro").strip() or "rentifyp
 MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "15000"))
 FRONTEND_URL     = os.getenv("FRONTEND_URL", "http://localhost:5173")
 NODE_BACKEND_URL = os.getenv("NODE_BACKEND_URL", "http://localhost:5000")
-INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "rentifypro-internal-secret")
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "").strip()
 FACE_SERVICE_PORT = int(os.getenv("FACE_SERVICE_PORT", "8000"))
+BIOMETRIC_TEMPLATE_TTL_HOURS = max(1, int(os.getenv("BIOMETRIC_TEMPLATE_TTL_HOURS", "24")))
 
-if INTERNAL_API_KEY == "rentifypro-internal-secret":
-    logger.warning("INTERNAL_API_KEY is using the default value. Set a strong secret in your environment.")
+if not INTERNAL_API_KEY:
+    logger.error("INTERNAL_API_KEY is missing. KYC endpoints will reject requests until it is configured.")
 
 # Face model settings
 MODEL_NAME       = "Facenet512"
@@ -107,12 +110,11 @@ ACTIVE_MONGO_URI = ""
 mongo_client = None
 mongo_db = None
 kyc_col = None
-users_col = None
 challenges_col = None
 
 
 async def connect_mongo_with_fallback() -> None:
-    global ACTIVE_MONGO_URI, mongo_client, mongo_db, kyc_col, users_col, challenges_col
+    global ACTIVE_MONGO_URI, mongo_client, mongo_db, kyc_col, challenges_col
 
     uris = get_candidate_mongo_uris()
     if not uris:
@@ -133,8 +135,7 @@ async def connect_mongo_with_fallback() -> None:
             ACTIVE_MONGO_URI = uri
             mongo_client = client
             mongo_db = mongo_client[MONGO_DB_NAME]
-            kyc_col = mongo_db["kycverifications"]
-            users_col = mongo_db["users"]
+            kyc_col = mongo_db["biometric_templates"]
             challenges_col = mongo_db["kycchallenges"]
 
             logger.info("MongoDB connected successfully.")
@@ -166,20 +167,32 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def require_internal_key(request: Request, call_next):
+    """The face service is backend-only; browsers must never call it directly."""
+    if request.url.path.startswith("/api/kyc/"):
+        supplied = request.headers.get("x-internal-key", "")
+        if not INTERNAL_API_KEY:
+            return JSONResponse({"detail": "Face service is not securely configured."}, status_code=503)
+        if not hmac.compare_digest(supplied, INTERNAL_API_KEY):
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    return await call_next(request)
+
+
 # Load models on startup
 @app.on_event("startup")
 async def startup():
     await connect_mongo_with_fallback()
 
-    # Make sure indexes exist
+    # Collections are intentionally separated from Node's kyc_cases collection.
+    # Never drop/rebuild indexes during service startup.
     try:
         existing = await kyc_col.index_information()
-        if "user_1" in existing:
-            await kyc_col.drop_index("user_1")
-            logger.info("Dropped broken 'user_1' index")
         if "user_id_1" not in existing:
             await kyc_col.create_index([("user_id", ASCENDING)], unique=True, name="user_id_1")
-            logger.info("Created 'user_id_1' unique index")
+        if "expires_at_1" not in existing:
+            await kyc_col.create_index([("expires_at", ASCENDING)], expireAfterSeconds=0, name="expires_at_1")
+        logger.info("Biometric template indexes ensured.")
     except Exception as e:
         logger.warning(f"Index fix note: {e}")
 
@@ -726,8 +739,8 @@ async def post_kyc_id_register(req: KycIdRegisterRequest):
                 "id_embedding": emb.tolist(),
                 "model": MODEL_NAME,
                 "detector": DETECTOR_BACKEND,
-                "id_registered_at": now.isoformat(),
-                "kyc_status": "id_uploaded",
+                "id_registered_at": now,
+                "expires_at": now + timedelta(hours=BIOMETRIC_TEMPLATE_TTL_HOURS),
                 "id_faces_detected": best["face_count"],
             }},
             upsert=True,
@@ -986,15 +999,18 @@ async def post_kyc_selfie_verify(req: KycSelfieVerifyRequest):
         await kyc_col.update_one(
             {"user_id": req.user_id},
             {"$set": {
-                "kyc_status": "approved" if verified else "rejected",
                 "face_match_score": round(conf, 2),
                 "cosine_distance": round(dist, 4),
-                "verified_at": now.isoformat(),
+                "verified_at": now,
                 "remarks": msg,
+                "expires_at": now + timedelta(hours=BIOMETRIC_TEMPLATE_TTL_HOURS),
             }},
         )
 
         await notify_node_backend(req.user_id, verified, conf)
+        if verified:
+            # The Node KYC case is the durable status source. Retain no biometric template after approval.
+            await kyc_col.delete_one({"user_id": req.user_id})
 
         return KycSelfieVerifyResponse(
             verified=verified,

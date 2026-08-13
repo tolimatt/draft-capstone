@@ -8,6 +8,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "db:check": "node scripts/check-mongo-connection.js",
+    "db:migrate:kyc": "node scripts/migrate-kyc-collections.js",
+    "db:migrate:notifications": "node scripts/migrate-notifications.js",
     "db:migrate:local": "node scripts/migrate-mongo-to-local.js",
     "services:check": "node scripts/check-external-services.js",
     "blockchain:compile": "node blockchain/scripts/compile-booking-ledger.cjs",

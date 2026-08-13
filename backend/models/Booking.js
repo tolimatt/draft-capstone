@@ -447,6 +447,14 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ vehicle: 1, pickupAt: 1, returnAt: 1 });
 bookingSchema.index({ owner: 1, status: 1, createdAt: -1 });
 bookingSchema.index({ renter: 1, createdAt: -1 });
+// Tenant-scoped indexes for the paginated renter and owner booking work queues.
+// Do not remove legacy indexes during application startup; validate their use in
+// production with $indexStats before scheduling a separate migration.
+bookingSchema.index({ renter: 1, status: 1, pickupAt: 1 });
+bookingSchema.index({ renter: 1, status: 1, updatedAt: -1 });
+bookingSchema.index({ owner: 1, status: 1, pickupAt: 1 });
+bookingSchema.index({ owner: 1, status: 1, updatedAt: -1 });
+bookingSchema.index({ owner: 1, updatedAt: -1 });
 bookingSchema.index(
   { vehicle: 1, status: 1, reviewCreatedAt: -1 },
   { partialFilterExpression: { reviewRating: { $exists: true } } }

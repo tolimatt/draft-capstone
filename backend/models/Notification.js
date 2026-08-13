@@ -89,12 +89,21 @@ const notificationSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    lastOccurredAt: {
+      type: Date,
+      default: Date.now,
+    },
+    expiresAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true }
 );
 
-notificationSchema.index({ user: 1, archived_at: 1, createdAt: -1 });
-notificationSchema.index({ archived_at: 1 });
+notificationSchema.index({ user: 1, archived_at: 1, lastOccurredAt: -1, _id: -1 });
+notificationSchema.index({ user: 1, archived_at: 1, readAt: 1, lastOccurredAt: -1 });
 notificationSchema.index(
   { user: 1, dedupeKey: 1 },
   {
@@ -102,8 +111,8 @@ notificationSchema.index(
     partialFilterExpression: { dedupeKey: { $exists: true, $gt: "" } },
   }
 );
-notificationSchema.index({ user: 1, category: 1, readAt: 1, createdAt: -1 });
-notificationSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
+notificationSchema.index({ user: 1, category: 1, readAt: 1, lastOccurredAt: -1 });
+notificationSchema.index({ entityType: 1, entityId: 1, lastOccurredAt: -1 });
 
 export default mongoose.model("Notification", notificationSchema);
 

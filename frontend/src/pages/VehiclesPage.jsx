@@ -24,6 +24,7 @@ const normalizeVehicle = (vehicle) => ({
   coverImageUrl: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
   image: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
   images: vehicle.images || [],
+  coverDisplayMode: vehicle.coverDisplayMode || "auto",
   type: normalizeVehicleType(vehicle.specs?.type || "car"),
   subType: vehicle.specs?.subType || "Standard",
   category: "Owner-listed Vehicle",
@@ -205,7 +206,7 @@ export default function VehiclesPage({
   );
 
   return (
-      <div className="min-h-screen">
+      <div className="rp-renter-page min-h-screen">
         <Navbar
           activePage="vehicles"
           isLoggedIn={isLoggedIn}
@@ -226,10 +227,11 @@ export default function VehiclesPage({
           onLogout={onLogout}
         />
 
-        <div className="pt-24 sm:pt-28 max-w-[1380px] mx-auto px-4 sm:px-6 pb-16">
-          <div className="rp-surface p-5 sm:p-6 mb-6">
+        <div className="rp-page-shell mx-auto max-w-[1380px] px-4 pb-16 pt-24 sm:px-6 sm:pt-28">
+          <div className="rp-page-header mb-6">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
               <div>
+                <span className="rp-page-eyebrow">Rental marketplace</span>
                 <h1 className="text-3xl sm:text-4xl font-bold">Browse Vehicles</h1>
                 <p className="text-slate-600 mt-2">
                   Explore verified listings with flexible schedules and transparent pricing.

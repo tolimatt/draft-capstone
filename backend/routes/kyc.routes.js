@@ -19,6 +19,12 @@ import {
 } from "../middleware/security.middleware.js";
 
 const router = express.Router();
+// Identity documents, face scores, and verification status must never enter browser/proxy caches.
+router.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Pragma", "no-cache");
+  next();
+});
 
 // Logged-in KYC routes
 router.post("/face/detect", protect, kycLimiter, faceDetect);

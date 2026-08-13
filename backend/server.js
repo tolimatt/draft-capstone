@@ -42,6 +42,12 @@ import {
   startBookingLifecycleJob,
   stopBookingLifecycleJob,
 } from "./jobs/bookingLifecycle.job.js";
+import {
+  startKycFileCleanupJob,
+  stopKycFileCleanupJob,
+} from "./jobs/kycFileCleanup.job.js";
+import { startLogRetentionJob, stopLogRetentionJob } from "./jobs/logRetention.job.js";
+import { startNotificationDeliveryJob, stopNotificationDeliveryJob } from "./jobs/notificationDelivery.job.js";
 
 const app = express();
 const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1);
@@ -56,8 +62,14 @@ const corsOriginHandler = (origin, callback) => {
   if (isAllowedOrigin(origin)) return callback(null, true);
   return callback(new Error(`Origin ${origin || "(unknown)"} is not allowed by CORS`));
 };
-const allowCrossOriginUploads = (_req, res, next) => {
+const allowPublicVehicleMedia = (_req, res, next) => {
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  next();
+};
+const allowPublicAvatarMedia = (_req, res, next) => {
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader("Cache-Control", "public, max-age=3600");
   next();
 };
 
@@ -77,13 +89,17 @@ console.log(
 );
 
 // Body parsing
-app.use(express.json({ limit: "100mb" }));
-app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+// KYC includes a bounded image payload; every other endpoint gets the much smaller default.
+app.use("/api/kyc", express.json({ limit: process.env.KYC_JSON_BODY_LIMIT || "8mb" }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: process.env.URLENCODED_BODY_LIMIT || "1mb" }));
 app.use(cookieParser());
-// Serve uploads from the backend path, with a cwd fallback for older files.
-app.use("/uploads", allowCrossOriginUploads, express.static(backendUploadsDir));
+// Only public vehicle and avatar media are exposed. Private KYC files are never static.
+app.use("/uploads/vehicles", allowPublicVehicleMedia, express.static(path.join(backendUploadsDir, "vehicles")));
+app.use("/uploads/avatars", allowPublicAvatarMedia, express.static(path.join(backendUploadsDir, "avatars")));
 if (backendUploadsDir.toLowerCase() !== cwdUploadsDir.toLowerCase()) {
-  app.use("/uploads", allowCrossOriginUploads, express.static(cwdUploadsDir));
+  app.use("/uploads/vehicles", allowPublicVehicleMedia, express.static(path.join(cwdUploadsDir, "vehicles")));
+  app.use("/uploads/avatars", allowPublicAvatarMedia, express.static(path.join(cwdUploadsDir, "avatars")));
 }
 
 // Request body sanitizers
@@ -180,6 +196,9 @@ const startServer = async () => {
   });
   startNotificationCleanupJob();
   startBookingLifecycleJob();
+  startKycFileCleanupJob();
+  startLogRetentionJob();
+  startNotificationDeliveryJob();
 };
 
 startServer().catch((error) => {
@@ -192,6 +211,9 @@ process.on("unhandledRejection", (err) => {
   console.error("Unhandled Rejection:", err);
   stopNotificationCleanupJob();
   stopBookingLifecycleJob();
+  stopKycFileCleanupJob();
+  stopLogRetentionJob();
+  stopNotificationDeliveryJob();
   if (!server) {
     process.exit(1);
     return;
@@ -203,6 +225,9 @@ process.on("SIGTERM", () => {
   console.log("SIGTERM received: closing server");
   stopNotificationCleanupJob();
   stopBookingLifecycleJob();
+  stopKycFileCleanupJob();
+  stopLogRetentionJob();
+  stopNotificationDeliveryJob();
   if (!server) {
     process.exit(0);
     return;
@@ -214,6 +239,9 @@ process.on("SIGINT", () => {
   console.log("SIGINT received: closing server");
   stopNotificationCleanupJob();
   stopBookingLifecycleJob();
+  stopKycFileCleanupJob();
+  stopLogRetentionJob();
+  stopNotificationDeliveryJob();
   if (!server) {
     process.exit(0);
     return;

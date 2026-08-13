@@ -20,9 +20,9 @@
         "Hello, available ba ang mga sasakyan today?"
       ],
       "responses": {
-        "en": "Hello! I am RentifyPro AI. I can help you with available vehicles, booking steps, rental requirements, payments, and recommendations. What would you like to know?",
-        "fil": "Hello! Ako si RentifyPro AI. Maaari kitang tulungan sa available na sasakyan, booking, requirements, bayad, at recommendations. Ano ang gusto mong malaman?",
-        "taglish": "Hello! Ako si RentifyPro AI. I can help you sa booking, requirements, payment, at available vehicles."
+        "en": "Hello! I am Rentify AI. I can help you with available vehicles, booking steps, rental requirements, payments, and recommendations. What would you like to know?",
+        "fil": "Hello! Ako si Rentify AI. Maaari kitang tulungan sa available na sasakyan, booking, requirements, bayad, at recommendations. Ano ang gusto mong malaman?",
+        "taglish": "Hello! Ako si Rentify AI. I can help you sa booking, requirements, payment, at available vehicles."
       }
     },
     {
@@ -53,9 +53,9 @@
         "Who ka sa RentifyPro?"
       ],
       "responses": {
-        "en": "I am RentifyPro AI, your assistant for vehicle rentals, booking steps, payments, rental requirements, and vehicle recommendations.",
-        "fil": "Ako si RentifyPro AI, ang assistant mo para sa vehicle rentals, booking steps, bayad, rental requirements, at vehicle recommendations.",
-        "taglish": "Ako si RentifyPro AI assistant mo for rentals, booking steps, payment, at recommendations."
+        "en": "I am Rentify AI, your assistant for vehicle rentals, booking steps, payments, rental requirements, and vehicle recommendations.",
+        "fil": "Ako si Rentify AI, ang assistant mo para sa vehicle rentals, booking steps, bayad, rental requirements, at vehicle recommendations.",
+        "taglish": "Ako si Rentify AI, assistant mo for rentals, booking steps, payment, at recommendations."
       }
     },
     {

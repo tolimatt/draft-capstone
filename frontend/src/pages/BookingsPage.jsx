@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { MessageCircle, MoreHorizontal, Pencil, Send, Trash2, X } from "lucide-react";
+import {
+  CalendarDays,
+  CarFront,
+  CheckCircle2,
+  Clock3,
+  History,
+  MapPin,
+  MessageCircle,
+  MoreHorizontal,
+  Pencil,
+  Send,
+  Trash2,
+  WalletCards,
+  X,
+} from "lucide-react";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
 import Navbar from "../components/Navbar";
@@ -28,13 +42,51 @@ const statusStyles = {
   rejected: "bg-rose-100 text-rose-800 border border-rose-200",
 };
 
-const paymentStyles = {
-  unpaid: "bg-rose-100 text-rose-800 border border-rose-200",
-  partial: "bg-orange-100 text-orange-800 border border-orange-200",
-  paid: "bg-emerald-100 text-emerald-800 border border-emerald-200",
-  refunded: "bg-cyan-100 text-cyan-800 border border-cyan-200",
-};
 const DOWNPAYMENT_RATE = 0.3;
+const ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
+const PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
+
+const bookingMatchesView = (booking, view) => {
+  const status = String(booking?.status || "").toLowerCase();
+  if (view === "active") return ACTIVE_BOOKING_STATUSES.includes(status);
+  if (view === "past") return PAST_BOOKING_STATUSES.includes(status);
+  if (view === "all") return !["cancelled", "rejected"].includes(status);
+  return status === view;
+};
+
+const getBookingDisplayState = (booking) => {
+  const status = String(booking?.status || "").trim().toLowerCase();
+  const payment = String(booking?.paymentStatus || "").trim().toLowerCase();
+  const isOverdue = Boolean(booking?.lateReturn?.isOverdue || booking?.late_return?.isOverdue);
+  const bookingLabel = status === "rejected" ? "Cancelled / declined" : toTitleCase(status || "booking");
+
+  if (isOverdue && ["confirmed", "extended"].includes(status)) {
+    return { label: `${bookingLabel} · Overdue`, tone: "overdue" };
+  }
+
+  const paymentLabel = {
+    unpaid: "Unpaid",
+    partial: "Partial payment",
+    paid: "Paid",
+    refunded: "Refunded",
+  }[payment];
+
+  return {
+    label: paymentLabel ? `${bookingLabel} · ${paymentLabel}` : bookingLabel,
+    tone: status,
+  };
+};
+
+const renterViewMeta = {
+  active: { label: "Active trips", description: "Your upcoming and current rentals", icon: CalendarDays },
+  past: { label: "Past trips", description: "Completed and cancelled rentals", icon: History },
+  all: { label: "All bookings", description: "Every reservation in one place", icon: CarFront },
+  pending: { label: "Awaiting approval", description: "Reservations waiting on the owner", icon: Clock3 },
+  confirmed: { label: "Confirmed trips", description: "Ready for your next drive", icon: CheckCircle2 },
+  extended: { label: "Extended trips", description: "Rentals with an updated return time", icon: Clock3 },
+  completed: { label: "Completed trips", description: "Trips you have already finished", icon: CheckCircle2 },
+  cancelled: { label: "Cancelled trips", description: "Cancelled or declined reservations", icon: History },
+};
 
 const money = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
@@ -204,6 +256,8 @@ export default function BookingsPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [bookingPage, setBookingPage] = useState({ hasMore: false, nextCursor: null });
+  const [loadingMore, setLoadingMore] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState({});
   const [chatBooking, setChatBooking] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
@@ -225,6 +279,8 @@ export default function BookingsPage({
   const [approvalModalBooking, setApprovalModalBooking] = useState(null);
   const [paymentConfirmBooking, setPaymentConfirmBooking] = useState(null);
   const [extensionModalBooking, setExtensionModalBooking] = useState(null);
+  const [cancellationModalBooking, setCancellationModalBooking] = useState(null);
+  const [cancellingBookingId, setCancellingBookingId] = useState("");
   const [extensionForm, setExtensionForm] = useState({
     newReturnDate: "",
     newReturnTime: "",
@@ -239,20 +295,27 @@ export default function BookingsPage({
   const [showAI, setShowAI] = useState(false);
   const currentUserId = user?._id || getSessionUser()?._id || "";
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ cursor = null, append = false } = {}) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     setError("");
     try {
-      const bookingResponse = await API.getMyBookings(statusFilter);
+      const bookingResponse = await API.getMyBookings({
+        view: statusFilter,
+        limit: 25,
+        ...(cursor ? { cursor } : {}),
+      });
       const normalized = (bookingResponse.bookings || []).map((booking) =>
         booking.status === "rejected" ? { ...booking, status: "cancelled" } : booking
       );
-      setBookings(normalized);
+      setBookings((previous) => (append ? [...previous, ...normalized] : normalized));
+      setBookingPage(bookingResponse.page || { hasMore: false, nextCursor: null });
       requestLiveCountersRefresh();
     } catch (err) {
       setError(err.message || "Failed to load booking history.");
     } finally {
-      setLoading(false);
+      if (append) setLoadingMore(false);
+      else setLoading(false);
     }
   };
 
@@ -274,6 +337,7 @@ export default function BookingsPage({
   useEffect(() => {
     if (!isLoggedIn) {
       setBookings([]);
+      setBookingPage({ hasMore: false, nextCursor: null });
       setChatBooking(null);
       setChatMessages([]);
       setEditingChatMessageId("");
@@ -364,20 +428,27 @@ export default function BookingsPage({
 
   const filteredBookings = useMemo(
     () =>
-      statusFilter === "all"
-        ? bookings
-        : bookings.filter((booking) => booking.status === statusFilter),
+      bookings.filter((booking) => bookingMatchesView(booking, statusFilter)),
     [bookings, statusFilter]
   );
+  const activeView = renterViewMeta[statusFilter] || renterViewMeta.all;
+  const ActiveViewIcon = activeView.icon;
 
-  const cancelBooking = async (bookingId) => {
+  const confirmCancellation = async () => {
+    const bookingId = cancellationModalBooking?._id;
+    if (!bookingId || cancellingBookingId) return;
+
     try {
+      setCancellingBookingId(bookingId);
       const response = await API.cancelBooking(bookingId);
       setBookings((prev) =>
         prev.map((booking) => (booking._id === bookingId ? response.booking : booking))
       );
+      setCancellationModalBooking(null);
     } catch (err) {
       setError(err.message || "Failed to cancel booking.");
+    } finally {
+      setCancellingBookingId("");
     }
   };
 
@@ -819,7 +890,7 @@ export default function BookingsPage({
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="rp-renter-page min-h-screen">
         <Navbar
           activePage="bookings"
           isLoggedIn={isLoggedIn}
@@ -840,8 +911,9 @@ export default function BookingsPage({
           onLogout={onLogout}
         />
 
-        <div className="max-w-4xl mx-auto px-6 pt-24 pb-16">
-          <div className="bg-white border rounded-2xl p-8 text-center">
+        <div className="rp-page-shell mx-auto max-w-4xl px-6 pb-16 pt-24">
+          <div className="rp-surface p-8 text-center">
+            <span className="rp-page-eyebrow">Your rental workspace</span>
             <h1 className="text-3xl font-bold">Bookings</h1>
             <p className="text-sm text-gray-600 mt-2">
               You are on the bookings page. Sign in or register to view your booking history.
@@ -883,7 +955,7 @@ export default function BookingsPage({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="rp-renter-page min-h-screen">
       <Navbar
         activePage="bookings"
         isLoggedIn={isLoggedIn}
@@ -904,31 +976,34 @@ export default function BookingsPage({
         onLogout={onLogout}
       />
 
-      <div className="max-w-7xl mx-auto px-6 pt-24 pb-16 space-y-6">
-        <div className="flex justify-between items-start gap-4">
+      <div className="rp-page-shell mx-auto max-w-7xl space-y-6 px-4 pb-16 pt-24 sm:px-6">
+        <div className="rp-page-header">
           <div>
-            <h1 className="text-3xl font-bold">My Bookings</h1>
-            <p className="text-sm text-gray-600">Real-time booking updates and notifications.</p>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="all">All</option>
-              <option value="pending">Pending</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="extended">Extended</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
+            <span className="rp-page-eyebrow">Your rental workspace</span>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">My bookings</h1>
+            <p className="mt-1 text-sm text-slate-500">Manage your reservations, payments, and trip updates.</p>
           </div>
         </div>
 
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          Payment reminder: Complete payment within the booked rental duration, or request walk-in settlement upon
-          returning the vehicle.
+        <div className="flex w-full gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm sm:w-fit">
+          {[
+            { id: "all", label: "All Bookings" },
+            { id: "active", label: "Active Bookings" },
+            { id: "pending", label: "Pending Bookings" },
+          ].map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => setStatusFilter(filter.id)}
+              className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition sm:flex-none sm:px-4 ${
+                statusFilter === filter.id
+                  ? "bg-[#017FE6] text-white shadow-md shadow-blue-100"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
         </div>
 
         {loading && <p className="text-sm text-gray-600">Loading bookings...</p>}
@@ -936,8 +1011,10 @@ export default function BookingsPage({
         {paymentNotice && <p className="text-sm text-emerald-700">{paymentNotice}</p>}
 
         {!loading && !error && filteredBookings.length === 0 && (
-          <div className="bg-white border rounded-xl p-6 text-sm text-gray-600">
-            No bookings found.
+          <div className="rp-minimal-card border-dashed p-10 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#017FE6]"><ActiveViewIcon size={26} /></div>
+            <h2 className="mt-4 text-lg font-bold text-slate-900">No {activeView.label.toLowerCase()} yet</h2>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">{activeView.description}. Your reservations will appear here as soon as there is activity.</p>
           </div>
         )}
 
@@ -946,33 +1023,40 @@ export default function BookingsPage({
             const lateReturnInfo = getLateReturnInfo(booking);
             const extensionInfo = getExtensionRequestInfo(booking);
             const ownerDisplayName = getOwnerDisplayName(booking);
+            const displayState = getBookingDisplayState(booking);
             const isPaymentEligibleStatus = ["confirmed", "extended", "completed"].includes(
               String(booking.status || "").toLowerCase()
             );
             const canResolveOverdue =
               lateReturnInfo.isOverdue && ["confirmed", "extended"].includes(String(booking.status || "").toLowerCase());
+            const vehicleImage = resolveAssetUrl(booking.vehicle?.imageUrl || booking.vehicle?.images?.[0] || "");
 
             return (
-            <article key={booking._id} className="bg-white border rounded-xl p-5">
-              <div className="flex flex-col md:flex-row md:justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">{booking.vehicle?.name || "Vehicle"}</h2>
-                  <p className="text-sm text-gray-500">{booking.vehicle?.location || "-"}</p>
+            <article key={booking._id} className="rp-booking-card group overflow-hidden p-4 sm:p-5">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="flex min-w-0 gap-4">
+                  <div className="h-20 w-24 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-100 to-blue-100 shadow-inner sm:h-24 sm:w-32">
+                    {vehicleImage ? (
+                      <img src={vehicleImage} alt={booking.vehicle?.name || "Booked vehicle"} className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[#017FE6]"><CarFront size={30} /></div>
+                    )}
+                  </div>
+                  <div className="min-w-0 py-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Rental booking</p>
+                    <h2 className="mt-1 truncate text-xl font-bold text-slate-900">{booking.vehicle?.name || "Vehicle"}</h2>
+                    <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-slate-500"><MapPin size={14} className="text-slate-400" /> {booking.vehicle?.location || "Location to be confirmed"}</p>
+                  </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 md:justify-end">
                   <span
                     className={`inline-flex items-center text-xs font-semibold px-3 py-1 rounded-full ${
-                      statusStyles[booking.status] || "bg-gray-100 text-gray-700"
+                      displayState.tone === "overdue"
+                        ? "border border-rose-200 bg-rose-100 text-rose-800"
+                        : statusStyles[displayState.tone] || "bg-gray-100 text-gray-700"
                     }`}
                   >
-                    {toTitleCase(booking.status)}
-                  </span>
-                  <span
-                    className={`inline-flex items-center text-xs font-semibold px-3 py-1 rounded-full ${
-                      paymentStyles[booking.paymentStatus] || "bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    {toTitleCase(booking.paymentStatus)}
+                    {displayState.label}
                   </span>
                   {extensionInfo.status !== "none" && (
                     <span
@@ -990,10 +1074,10 @@ export default function BookingsPage({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-4 text-sm">
-                <Info title="Pickup" value={formatDate(booking.pickupAt)} />
-                <Info title="Return" value={formatDate(booking.returnAt)} />
-                <Info title="Duration" value={formatDurationMinutes(getBookingDurationMinutesForPricing(booking))} />
+              <div className="mt-5 grid grid-cols-1 gap-3 border-y border-slate-100 py-4 text-sm md:grid-cols-2 xl:grid-cols-4">
+                <Info icon={CalendarDays} title="Pickup" value={formatDate(booking.pickupAt)} />
+                <Info icon={CalendarDays} title="Return" value={formatDate(booking.returnAt)} />
+                <Info icon={Clock3} title="Duration" value={formatDurationMinutes(getBookingDurationMinutesForPricing(booking))} />
                 <Info
                   title="Vehicle Rate"
                   value={`${money(booking.vehicleHourlyRate ?? booking.vehicleDailyRate)} / hr`}
@@ -1006,13 +1090,13 @@ export default function BookingsPage({
                       : "No"
                   }
                 />
-                <Info title="Rental Total" value={money(getRentalTotal(booking))} />
+                <Info icon={WalletCards} title="Rental Total" value={money(getRentalTotal(booking))} />
                 <Info
                   title="Late Penalty"
                   value={lateReturnInfo.penaltyFee > 0 ? moneyWithCents(lateReturnInfo.penaltyFee) : moneyWithCents(0)}
                 />
                 <Info title="Transaction Fee" value={moneyWithCents(getTransactionFee())} />
-                <Info title="Amount Payable" value={moneyWithCents(getAmountPayable(booking))} />
+                <Info icon={WalletCards} title="Amount Payable" value={moneyWithCents(getAmountPayable(booking))} />
               </div>
 
               {lateReturnInfo.isOverdue && (
@@ -1036,16 +1120,16 @@ export default function BookingsPage({
                 </div>
               )}
 
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <div className="flex min-w-0 max-w-full items-center gap-2">
+              <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+                <div className="mr-auto flex min-w-0 max-w-full items-center gap-2">
                   <span className="min-w-0 truncate text-sm text-slate-600">
                     Owner: <span className="font-medium text-slate-900">{ownerDisplayName}</span>
                   </span>
                   <button
                     onClick={() => openChat(booking)}
-                    className="shrink-0 px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-sm"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
                   >
-                    Chat Owner
+                    <MessageCircle size={15} /> Chat owner
                   </button>
                 </div>
 
@@ -1058,7 +1142,7 @@ export default function BookingsPage({
                         payingBookingId === booking._id || verifyingBookingId === booking._id
                           ? "bg-slate-200 text-slate-500 cursor-not-allowed"
                           : isPaymentEligibleStatus
-                            ? "bg-[#017FE6] text-white"
+                            ? "bg-[#017FE6] text-white shadow-lg shadow-blue-200 hover:bg-[#006cc3]"
                             : "bg-amber-100 text-amber-800 border border-amber-300"
                       }`}
                     >
@@ -1080,8 +1164,8 @@ export default function BookingsPage({
 
                 {["pending", "confirmed", "extended"].includes(booking.status) && (
                   <button
-                    onClick={() => cancelBooking(booking._id)}
-                    className="px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm"
+                    onClick={() => setCancellationModalBooking(booking)}
+                    className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100"
                   >
                     Cancel Booking
                   </button>
@@ -1179,6 +1263,19 @@ export default function BookingsPage({
             );
           })}
         </div>
+
+        {bookingPage.hasMore && (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => load({ cursor: bookingPage.nextCursor, append: true })}
+              disabled={loadingMore}
+              className="rounded-lg border border-[#017FE6] px-4 py-2 text-sm font-medium text-[#017FE6] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loadingMore ? "Loading..." : "Load more bookings"}
+            </button>
+          </div>
+        )}
       </div>
 
       {chatBooking && (
@@ -1723,6 +1820,65 @@ export default function BookingsPage({
           </div>
         </>
       )}
+
+      {cancellationModalBooking && (
+        <>
+          <div
+            className="fixed inset-0 z-[90] bg-slate-950/45 backdrop-blur-sm"
+            onClick={() => {
+              if (!cancellingBookingId) setCancellationModalBooking(null);
+            }}
+          />
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="cancel-booking-title">
+            <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_25px_90px_rgba(15,23,42,0.32)]">
+              <div className="border-b border-rose-100 bg-gradient-to-r from-rose-50 via-white to-white px-6 pb-5 pt-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-600">Cancellation confirmation</p>
+                    <h3 id="cancel-booking-title" className="mt-1 text-xl font-bold text-slate-900">Cancel this booking?</h3>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Close cancellation confirmation"
+                    onClick={() => setCancellationModalBooking(null)}
+                    disabled={Boolean(cancellingBookingId)}
+                    className="rounded-xl p-2 text-slate-400 transition hover:bg-white hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+              <div className="px-6 py-5">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="font-semibold text-slate-900">{cancellationModalBooking.vehicle?.name || "This rental"}</p>
+                  <p className="mt-1 text-sm text-slate-500">Pickup: {formatDate(cancellationModalBooking.pickupAt)}</p>
+                </div>
+                <p className="mt-4 text-sm leading-6 text-slate-600">
+                  Are you sure you want to cancel? The owner will be notified, and this booking will no longer be active.
+                </p>
+                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setCancellationModalBooking(null)}
+                    disabled={Boolean(cancellingBookingId)}
+                    className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Keep booking
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmCancellation}
+                    disabled={Boolean(cancellingBookingId)}
+                    className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-200 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cancellingBookingId ? "Cancelling..." : "Yes, cancel booking"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
       <ChatWidget
         isOpen={showAI}
         onClose={() => setShowAI(false)}
@@ -1754,11 +1910,11 @@ function OwnerAvatar({ owner }) {
   );
 }
 
-function Info({ title, value }) {
+function Info({ title, value, icon: Icon }) {
   return (
-    <div className="bg-gray-50 rounded-lg p-3">
-      <p className="text-gray-500">{title}</p>
-      <p className="font-medium">{value}</p>
+    <div className="rounded-xl bg-slate-50 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">{Icon && <Icon size={13} className="text-[#017FE6]" />}{title}</p>
+      <p className="mt-1 font-semibold text-slate-800">{value}</p>
     </div>
   );
 }

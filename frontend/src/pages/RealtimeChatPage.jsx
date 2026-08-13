@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Send, Trash2 } from "lucide-react";
+import { ArrowLeft, MessageSquare, Search, Send, Trash2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
@@ -7,6 +7,10 @@ import { requestLiveCountersRefresh } from "../utils/liveCounters";
 import { formatDisplayName, getInitialsFromName } from "../utils/dateUtils";
 import { resolveAssetUrl } from "../utils/media";
 import { getSessionUser } from "../utils/sessionStore";
+import {
+  REALTIME_CHAT_INPUT_MAX_LENGTH,
+  sanitizeRealtimeChatInput,
+} from "../utils/realtimeChatInput";
 
 const getId = (value) => String(value?._id || value || "");
 const formatDateTime = (value) =>
@@ -111,11 +115,27 @@ export default function RealtimeChatPage({
   const [activeMessageActionId, setActiveMessageActionId] = useState("");
   const [showDeleteConversationConfirm, setShowDeleteConversationConfirm] = useState(false);
   const [deletingConversation, setDeletingConversation] = useState(false);
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [isMobileView, setIsMobileView] = useState(() => window.innerWidth < 768);
+  const [showConversationList, setShowConversationList] = useState(true);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => getId(conversation.partner) === activePartnerId),
     [conversations, activePartnerId]
   );
+
+  const filteredConversations = useMemo(() => {
+    const query = conversationQuery.trim().toLowerCase();
+    if (!query) return conversations;
+
+    return conversations.filter((conversation) =>
+      [
+        conversation.partner?.name,
+        conversation.partner?.email,
+        conversation.lastMessage?.text,
+      ].some((value) => String(value || "").toLowerCase().includes(query))
+    );
+  }, [conversationQuery, conversations]);
 
   const mergeInitialPartnerConversation = (list = []) => {
     const initialPartner = normalizeInitialPartner(initialChatContext);
@@ -184,12 +204,19 @@ export default function RealtimeChatPage({
   }, []);
 
   useEffect(() => {
+    const handleResize = () => setIsMobileView(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
     const initialPartner = normalizeInitialPartner(initialChatContext);
     if (!initialPartner?._id) return;
 
     setConversations((prev) => mergeInitialPartnerConversation(prev));
     setActivePartnerId(initialPartner._id);
     setActiveChatContext(normalizeChatContext(initialChatContext));
+    setShowConversationList(false);
     onChatContextHandled?.();
   }, [initialChatContext, onChatContextHandled]);
 
@@ -330,7 +357,7 @@ export default function RealtimeChatPage({
   const startEditMessage = (message) => {
     if (!message?._id || message.isDeleted) return;
     setEditingMessageId(message._id);
-    setEditingText(String(message.text || ""));
+    setEditingText(sanitizeRealtimeChatInput(message.text));
     setActiveMessageActionId("");
   };
 
@@ -415,6 +442,7 @@ export default function RealtimeChatPage({
       cancelEditMessage();
       setShowDeleteConversationConfirm(false);
       await loadConversations();
+      if (isMobileView) setShowConversationList(true);
       requestLiveCountersRefresh();
     } catch (err) {
       setError(err.message || "Failed to delete conversation.");
@@ -423,8 +451,11 @@ export default function RealtimeChatPage({
     }
   };
 
+  const isShowingList = !isMobileView || showConversationList;
+  const isShowingThread = !isMobileView || !showConversationList;
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       <Navbar
         activePage=""
         isLoggedIn={isLoggedIn}
@@ -442,213 +473,272 @@ export default function RealtimeChatPage({
         onLogout={onLogout}
       />
 
-      <div className="max-w-7xl mx-auto px-6 pt-24 pb-16">
-        <div className="mb-5">
-          <h1 className="text-3xl font-bold">Real-Time Chat</h1>
-          <p className="text-sm text-gray-600">Talk with owners about your bookings in real time.</p>
+      <main className="mx-auto max-w-[1380px] px-4 pb-12 pt-24 sm:px-6 sm:pt-28">
+        <div className="rp-chat-page-header rp-surface">
+          <div className="rp-chat-page-heading">
+            <span className="rp-chat-page-icon" aria-hidden="true">
+              <MessageSquare size={22} />
+            </span>
+            <div>
+              <p className="rp-chat-eyebrow">Renter inbox</p>
+              <h1>Messages</h1>
+              <p>Talk with vehicle owners about bookings, pickup details, and trip updates.</p>
+            </div>
+          </div>
+          <span className="rp-chat-live-pill">
+            <span aria-hidden="true" />
+            Real-time messaging
+          </span>
         </div>
 
-        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        {error && (
+          <div className="rp-chat-alert" role="alert">
+            {error}
+          </div>
+        )}
 
-        <div className="bg-white border rounded-xl overflow-hidden grid grid-cols-1 md:grid-cols-[320px_1fr] min-h-[64vh]">
-          <aside className="border-r bg-gray-50">
-            <div className="px-4 py-3 border-b font-semibold">Conversations</div>
-            {loadingConversations && (
-              <p className="px-4 py-3 text-sm text-gray-500">Loading conversations...</p>
-            )}
-            {!loadingConversations && !conversations.length && (
-              <p className="px-4 py-3 text-sm text-gray-500">No conversations yet.</p>
-            )}
-            <div className="max-h-[64vh] overflow-y-auto">
-              {conversations.map((conversation) => {
+        <div className="rp-chat-shell">
+          <aside className={`rp-chat-sidebar ${isShowingList ? "rp-chat-panel-visible" : "rp-chat-panel-hidden"}`}>
+            <div className="rp-chat-sidebar-header">
+              <div>
+                <h2>Conversations</h2>
+                <p>{conversations.length} total</p>
+              </div>
+              <span className="rp-chat-count" aria-label={`${conversations.length} conversations`}>
+                {conversations.length > 99 ? "99+" : conversations.length}
+              </span>
+            </div>
+
+            <div className="rp-chat-search">
+              <Search size={16} aria-hidden="true" />
+              <input
+                value={conversationQuery}
+                onChange={(event) => setConversationQuery(event.target.value)}
+                placeholder="Search conversations"
+                aria-label="Search conversations"
+              />
+            </div>
+
+            <div className="rp-chat-conversation-list">
+              {loadingConversations && (
+                <p className="rp-chat-list-message">Loading conversations...</p>
+              )}
+              {!loadingConversations && !conversations.length && (
+                <div className="rp-chat-list-empty">
+                  <MessageSquare size={20} aria-hidden="true" />
+                  <p>No conversations yet</p>
+                  <span>Open a vehicle listing to message its owner.</span>
+                </div>
+              )}
+              {!loadingConversations && conversations.length > 0 && !filteredConversations.length && (
+                <p className="rp-chat-list-message">No conversations match your search.</p>
+              )}
+
+              {filteredConversations.map((conversation) => {
                 const partnerId = getId(conversation.partner);
+                const isActive = activePartnerId === partnerId;
                 return (
                   <button
                     key={partnerId}
+                    type="button"
                     onClick={() => {
                       setActivePartnerId(partnerId);
                       setActiveChatContext({ bookingId: "", vehicleId: "" });
+                      setShowConversationList(false);
                     }}
-                    className={`w-full text-left px-4 py-3 border-b hover:bg-gray-100 ${
-                      activePartnerId === partnerId ? "bg-gray-100" : ""
-                    }`}
+                    className={`rp-chat-conversation ${isActive ? "rp-chat-conversation-active" : ""}`}
+                    aria-current={isActive ? "true" : undefined}
                   >
-                    <div className="flex justify-between items-center gap-3">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <AvatarCircle
-                          name={conversation.partner?.name || "User"}
-                          avatar={conversation.partner?.avatar}
-                          sizeClass="w-8 h-8"
-                        />
-                        <p className="font-medium text-sm truncate">
-                          {conversation.partner?.name || "User"}
-                        </p>
+                    <AvatarCircle
+                      name={conversation.partner?.name || "User"}
+                      avatar={conversation.partner?.avatar}
+                      sizeClass="h-11 w-11"
+                    />
+                    <div className="rp-chat-conversation-copy">
+                      <div className="rp-chat-conversation-title">
+                        <p>{conversation.partner?.name || "User"}</p>
+                        <time>{formatDateTime(conversation.lastMessage?.createdAt)}</time>
                       </div>
-                      {conversation.unreadCount > 0 && (
-                        <span className="bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
+                      <div className="rp-chat-conversation-preview">
+                        <p>{conversation.lastMessage?.text || "No messages yet"}</p>
+                        {conversation.unreadCount > 0 && (
+                          <span aria-label={`${conversation.unreadCount} unread messages`}>
                           {conversation.unreadCount}
-                        </span>
-                      )}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-xs text-gray-500 truncate mt-1">
-                      {conversation.lastMessage?.text || "No messages"}
-                    </p>
-                    <p className="text-[11px] text-gray-400 mt-1">
-                      {formatDateTime(conversation.lastMessage?.createdAt)}
-                    </p>
                   </button>
                 );
               })}
             </div>
           </aside>
 
-          <section className="flex flex-col">
-            <div className="px-5 py-4 border-b">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                <h2 className="font-semibold">
-                  {activeConversation?.partner?.name || "Select a conversation"}
-                </h2>
-                {activeConversation?.partner?.email && (
-                  <p className="text-xs text-gray-500">{activeConversation.partner.email}</p>
+          <section className={`rp-chat-thread ${isShowingThread ? "rp-chat-panel-visible" : "rp-chat-panel-hidden"}`}>
+            <div className="rp-chat-thread-header">
+              <div className="rp-chat-thread-person">
+                {isMobileView && (
+                  <button
+                    type="button"
+                    className="rp-chat-back-button"
+                    onClick={() => setShowConversationList(true)}
+                    aria-label="Back to conversations"
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
                 )}
+                {activeConversation && (
+                  <AvatarCircle
+                    name={activeConversation.partner?.name || "User"}
+                    avatar={activeConversation.partner?.avatar}
+                    sizeClass="h-10 w-10"
+                  />
+                )}
+                <div className="min-w-0">
+                  <h2>{activeConversation?.partner?.name || "Select a conversation"}</h2>
+                  <p>
+                    {activeConversation?.partner?.email || "Choose an owner from your conversations"}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteConversationConfirm(true)}
-                  disabled={!activePartnerId}
-                  className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Trash2 size={14} />
-                  Delete
-                </button>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowDeleteConversationConfirm(true)}
+                disabled={!activePartnerId}
+                className="rp-chat-delete-button"
+                aria-label="Delete conversation"
+              >
+                <Trash2 size={15} />
+                <span>Delete</span>
+              </button>
             </div>
 
             <div
-              className="flex-1 overflow-y-auto p-5 space-y-3 bg-gray-50"
+              className="rp-chat-message-area"
               onClick={() => setActiveMessageActionId("")}
             >
-              {loadingMessages && <p className="text-sm text-gray-500">Loading messages...</p>}
+              {loadingMessages && <p className="rp-chat-state-message">Loading messages...</p>}
               {!loadingMessages && !messages.length && (
-                <p className="text-sm text-gray-500">
-                  {activePartnerId ? "No messages yet." : "Choose a conversation to start chatting."}
-                </p>
+                <div className="rp-chat-empty-thread">
+                  <span aria-hidden="true"><MessageSquare size={24} /></span>
+                  <h3>{activePartnerId ? "Start the conversation" : "Your messages live here"}</h3>
+                  <p>
+                    {activePartnerId
+                      ? "Send a message to discuss booking details with this vehicle owner."
+                      : "Choose a conversation from the list to view and send messages."}
+                  </p>
+                </div>
               )}
 
-              {messages.map((message) => {
-                const isMine = getId(message.sender) === String(currentUserId);
-                const isEditing = isMine && editingMessageId === message._id;
-                const showActions =
-                  isMine &&
-                  !isEditing &&
-                  !message.isDeleted &&
-                  activeMessageActionId === String(message._id);
-                return (
-                  <div key={message._id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
-                    <div
-                      className={`max-w-[75%] rounded-xl px-3 py-2 text-sm ${
-                        isMine ? "bg-[#017FE6] text-white" : "bg-white border"
-                      }`}
-                      onClick={(event) => {
-                        if (!isMine || isEditing || message.isDeleted) return;
-                        event.stopPropagation();
-                        setActiveMessageActionId((prev) =>
-                          prev === String(message._id) ? "" : String(message._id)
-                        );
-                      }}
-                    >
-                      {isEditing ? (
-                        <div className="space-y-2">
-                          <input
-                            value={editingText}
-                            onChange={(event) => setEditingText(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                saveEditedMessage();
-                              }
-                            }}
-                            onClick={(event) => event.stopPropagation()}
-                            className="w-full rounded border border-white/30 bg-white px-2 py-1 text-sm text-slate-900"
-                          />
-                          <div className="flex justify-end gap-2 text-[11px]">
+              <div className="rp-chat-message-list">
+                {messages.map((message) => {
+                  const isMine = getId(message.sender) === String(currentUserId);
+                  const isEditing = isMine && editingMessageId === message._id;
+                  const showActions =
+                    isMine &&
+                    !isEditing &&
+                    !message.isDeleted &&
+                    activeMessageActionId === String(message._id);
+                  return (
+                    <div key={message._id} className={`rp-chat-message-row ${isMine ? "rp-chat-message-row-mine" : ""}`}>
+                      {!isMine && activeConversation && (
+                        <AvatarCircle
+                          name={activeConversation.partner?.name || "User"}
+                          avatar={activeConversation.partner?.avatar}
+                          sizeClass="h-8 w-8"
+                        />
+                      )}
+                      <div className={`rp-chat-message-stack ${isMine ? "rp-chat-message-stack-mine" : ""}`}>
+                        <div
+                          className={`rp-chat-bubble ${isMine ? "rp-chat-bubble-mine" : "rp-chat-bubble-other"}`}
+                          onClick={(event) => {
+                            if (!isMine || isEditing || message.isDeleted) return;
+                            event.stopPropagation();
+                            setActiveMessageActionId((prev) =>
+                              prev === String(message._id) ? "" : String(message._id)
+                            );
+                          }}
+                        >
+                          {isEditing ? (
+                            <div className="rp-chat-edit-box">
+                              <input
+                                value={editingText}
+                                onChange={(event) =>
+                                  setEditingText(sanitizeRealtimeChatInput(event.target.value))
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    saveEditedMessage();
+                                  }
+                                }}
+                                onClick={(event) => event.stopPropagation()}
+                                maxLength={REALTIME_CHAT_INPUT_MAX_LENGTH}
+                                autoFocus
+                              />
+                              <div>
+                                <button type="button" onClick={cancelEditMessage} disabled={savingEdit}>Cancel</button>
+                                <button type="button" onClick={saveEditedMessage} disabled={savingEdit}>
+                                  {savingEdit ? "Saving..." : "Save"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className={message.isDeleted ? "italic opacity-80" : ""}>{message.text}</p>
+                          )}
+                          <time>
+                            {formatDateTime(message.createdAt)}
+                            {message.isEdited && !message.isDeleted ? " · edited" : ""}
+                          </time>
+                        </div>
+                        {showActions && (
+                          <div className="rp-chat-message-actions">
+                            <button type="button" onClick={() => startEditMessage(message)}>Edit</button>
                             <button
                               type="button"
-                              onClick={cancelEditMessage}
-                              className="rounded bg-white/20 px-2 py-0.5"
-                              disabled={savingEdit}
+                              onClick={() => openDeleteMessageConfirm(message)}
+                              disabled={deletingMessageId === message._id || Boolean(confirmDeleteMessageId)}
                             >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={saveEditedMessage}
-                              className="rounded bg-white px-2 py-0.5 text-[#017FE6]"
-                              disabled={savingEdit}
-                            >
-                              {savingEdit ? "Saving..." : "Save"}
+                              {deletingMessageId === message._id ? "Deleting..." : "Delete"}
                             </button>
                           </div>
-                        </div>
-                      ) : (
-                        <p className={message.isDeleted ? "italic opacity-85" : ""}>{message.text}</p>
-                      )}
-                      <p className={`text-[10px] mt-1 ${isMine ? "text-white/80" : "text-gray-500"}`}>
-                        {formatDateTime(message.createdAt)}
-                        {message.isEdited && !message.isDeleted ? " - edited" : ""}
-                      </p>
-                      {showActions && (
-                        <div className="mt-1 flex justify-end gap-2 text-[10px] text-white/80">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              startEditMessage(message);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openDeleteMessageConfirm(message);
-                            }}
-                            disabled={deletingMessageId === message._id || Boolean(confirmDeleteMessageId)}
-                          >
-                            {deletingMessageId === message._id ? "Deleting..." : "Delete"}
-                          </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="border-t p-3 flex gap-2">
+            <form
+              className="rp-chat-composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                sendMessage();
+              }}
+            >
               <input
                 value={messageText}
-                onChange={(event) => setMessageText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") sendMessage();
-                }}
-                placeholder="Type your message"
-                className="flex-1 border rounded-lg px-3 py-2 text-sm"
+                onChange={(event) =>
+                  setMessageText(sanitizeRealtimeChatInput(event.target.value))
+                }
+                placeholder={activePartnerId ? "Write a message..." : "Select a conversation first"}
+                aria-label="Message"
+                maxLength={REALTIME_CHAT_INPUT_MAX_LENGTH}
                 disabled={!activePartnerId}
               />
               <button
-                onClick={sendMessage}
-                disabled={!activePartnerId}
-                className="px-4 rounded-lg bg-[#017FE6] text-white disabled:opacity-50"
+                type="submit"
+                disabled={!activePartnerId || !messageText.trim()}
+                aria-label="Send message"
               >
-                <Send size={16} />
+                <Send size={18} />
               </button>
-            </div>
+            </form>
           </section>
         </div>
-      </div>
+      </main>
 
       {showDeleteConversationConfirm && (
         <>
@@ -735,15 +825,15 @@ export default function RealtimeChatPage({
 
 function AvatarCircle({ name, avatar, sizeClass = "w-8 h-8" }) {
   const image = String(avatar || "").trim();
-  const [failed, setFailed] = useState(false);
+  const [failedImage, setFailedImage] = useState("");
 
-  if (image && !failed) {
+  if (image && failedImage !== image) {
     return (
       <img
         src={image}
         alt={name}
         className={`${sizeClass} rounded-full object-cover border border-slate-200 flex-shrink-0`}
-        onError={() => setFailed(true)}
+        onError={() => setFailedImage(image)}
       />
     );
   }

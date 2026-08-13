@@ -23,7 +23,9 @@ const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "";
 const PRE_KYC_DOC_TTL_HOURS = Number(process.env.PREKYC_DOC_TTL_HOURS || 3);
 const PRE_KYC_FACE_TTL_HOURS = Number(process.env.PREKYC_FACE_TTL_HOURS || PRE_KYC_DOC_TTL_HOURS || 3);
 const MIN_CHALLENGE_FRAMES = Number(process.env.KYC_MIN_FRAMES || 3);
-const KYC_UPLOAD_DIR = process.env.KYC_UPLOAD_DIR || path.resolve("uploads", "kyc");
+const MAX_CHALLENGE_FRAMES = Math.max(MIN_CHALLENGE_FRAMES, Number(process.env.KYC_MAX_FRAMES || 5));
+const MAX_KYC_IMAGE_BYTES = Number(process.env.KYC_IMAGE_MAX_BYTES || 4 * 1024 * 1024);
+const KYC_UPLOAD_DIR = process.env.KYC_UPLOAD_DIR || path.resolve("private_uploads", "kyc");
 const DEFAULT_KYC_ERROR_MESSAGE = "We couldn't complete verification right now. Please try again.";
 
 const toErrorDetail = (err) => String(err?.stack || err?.message || err || "Unknown error");
@@ -103,7 +105,8 @@ const recordPreKycDocument = async ({ email, role, docType, result }) => {
         confidence: result?.confidence || 0,
         reason: result?.reason || "",
         fileName: result?.fileName || "",
-        filePath: result?.filePath || "",
+        fileKey: result?.fileKey || "",
+        filePath: "",
         mimeType: result?.mimeType || "",
         fileSize: result?.fileSize || 0,
         fileHash: result?.fileHash || "",
@@ -119,29 +122,56 @@ const ensureUploadDir = async () => {
   await fs.mkdir(KYC_UPLOAD_DIR, { recursive: true });
 };
 
-const saveKycBase64File = async ({ base64, mimeType = "image/jpeg", prefix = "doc" }) => {
-  const cleanBase64 = String(base64 || "").includes("base64,")
-    ? String(base64).split("base64,")[1]
-    : String(base64 || "");
-  const buffer = Buffer.from(cleanBase64, "base64");
-  if (!buffer.length) {
-    throw new Error("Document file is empty.");
+const decodeKycBase64 = (base64, { maxBytes = MAX_KYC_IMAGE_BYTES } = {}) => {
+  const raw = String(base64 || "").trim();
+  const cleanBase64 = raw.includes("base64,") ? raw.slice(raw.indexOf("base64,") + 7) : raw;
+  if (!cleanBase64 || !/^[A-Za-z0-9+/=\s]+$/.test(cleanBase64)) {
+    const error = new Error("Document must be a valid base64 image.");
+    error.status = 400;
+    throw error;
   }
+  const buffer = Buffer.from(cleanBase64.replace(/\s/g, ""), "base64");
+  if (!buffer.length || buffer.length > maxBytes) {
+    const error = new Error(`Image must be no larger than ${Math.floor(maxBytes / (1024 * 1024))} MB.`);
+    error.status = 413;
+    throw error;
+  }
+  return buffer;
+};
+
+const getKycFileType = (buffer, suppliedMime = "") => {
+  const mimeType = String(suppliedMime || "").toLowerCase().split(";")[0].trim();
+  const isJpeg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const isPng = buffer.length > 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const isPdf = buffer.length > 4 && buffer.subarray(0, 4).toString("ascii") === "%PDF";
+  if (isJpeg && ["", "image/jpeg", "image/jpg"].includes(mimeType)) return { mimeType: "image/jpeg", ext: "jpg" };
+  if (isPng && ["", "image/png"].includes(mimeType)) return { mimeType: "image/png", ext: "png" };
+  if (isPdf && mimeType === "application/pdf") return { mimeType: "application/pdf", ext: "pdf" };
+  const error = new Error("Unsupported or invalid document format.");
+  error.status = 400;
+  throw error;
+};
+
+const validateKycDocument = (base64, mimeType = "") => {
+  const buffer = decodeKycBase64(base64);
+  return getKycFileType(buffer, mimeType);
+};
+
+const validateKycImage = (base64) => validateKycDocument(base64, "");
+
+const saveKycBase64File = async ({ base64, mimeType = "image/jpeg", prefix = "doc" }) => {
+  const buffer = decodeKycBase64(base64);
+  const fileType = getKycFileType(buffer, mimeType);
   const safePrefix = String(prefix || "doc").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  const ext = mimeType?.includes("pdf")
-    ? "pdf"
-    : mimeType?.includes("png")
-    ? "png"
-    : "jpg";
-  const fileName = `${safePrefix}-${Date.now()}-${crypto.randomBytes(6).toString("hex")}.${ext}`;
+  const fileName = `${safePrefix}-${Date.now()}-${crypto.randomBytes(6).toString("hex")}.${fileType.ext}`;
   await ensureUploadDir();
   const filePath = path.join(KYC_UPLOAD_DIR, fileName);
   await fs.writeFile(filePath, buffer);
   const fileHash = crypto.createHash("sha256").update(buffer).digest("hex");
   return {
     fileName,
-    filePath,
-    mimeType,
+    fileKey: fileName,
+    mimeType: fileType.mimeType,
     fileSize: buffer.length,
     fileHash,
   };
@@ -189,11 +219,14 @@ const proxyToFaceService = async (endpoint, body) => {
   if (!faceServiceUrl) {
     throw new Error("FACE_SERVICE_URL is not configured in production.");
   }
+  if (!INTERNAL_KEY) {
+    throw new Error("INTERNAL_API_KEY is required to communicate with the face service.");
+  }
   const url = `${faceServiceUrl}${endpoint}`;
   auditLog.info("KYC", `Proxying to Python: ${url}`);
   const doRequest = () =>
     axios.post(url, body, {
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-internal-key": INTERNAL_KEY },
       timeout: 60000, // Face checks can take a while
     });
 
@@ -235,6 +268,7 @@ export const faceDetect = async (req, res) => {
   try {
     const { image_base64 } = req.body;
     if (!image_base64) return res.status(400).json({ message: "image_base64 is required" });
+    validateKycImage(image_base64);
 
     const result = await proxyToFaceService("/api/kyc/face/detect", { image_base64 });
     res.json(result);
@@ -252,6 +286,7 @@ export const registerIdFace = async (req, res) => {
   try {
     const { id_image_base64, id_image_mime, id_type, user_profile } = req.body;
     if (!id_image_base64) return res.status(400).json({ message: "id_image_base64 is required" });
+    validateKycImage(id_image_base64);
 
     const fallbackName = splitFirstLastName(req.user?.name || user_profile?.full_name);
     const profileContext = {
@@ -339,6 +374,10 @@ export const selfieChallenge = async (req, res) => {
         message: `Please capture at least ${MIN_CHALLENGE_FRAMES} selfie frames.`,
       });
     }
+    if (frames_base64.length > MAX_CHALLENGE_FRAMES) {
+      return res.status(400).json({ message: `Please submit no more than ${MAX_CHALLENGE_FRAMES} selfie frames.` });
+    }
+    frames_base64.forEach(validateKycImage);
 
     const payload = {
       user_id: req.user._id.toString(),
@@ -370,6 +409,7 @@ export const selfieVerify = async (req, res) => {
     const { challenge_id, selfie_image_base64 } = req.body;
     if (!challenge_id || !selfie_image_base64)
       return res.status(400).json({ message: "challenge_id and selfie_image_base64 are required" });
+    validateKycImage(selfie_image_base64);
 
     const payload = {
       user_id: req.user._id.toString(),
@@ -430,11 +470,11 @@ export const internalUpdateStatus = async (req, res) => {
       return res.json({ message: `Pre-KYC status updated to ${status} for ${normalizedId}` });
     }
 
-    await User.findByIdAndUpdate(normalizedId, { kycStatus: status });
-
+    // kyc_cases is the durable record; User.kycStatus is its denormalized summary for authorization/UI.
     await KycVerification.findOneAndUpdate(
       { user: normalizedId },
       {
+        user: normalizedId,
         status,
         faceMatchScore: confidence || 0,
         verifiedAt: status === "approved" ? new Date() : undefined,
@@ -442,8 +482,10 @@ export const internalUpdateStatus = async (req, res) => {
           status === "approved"
             ? `Face verified with ${confidence}% confidence.`
             : "Face did not match ID photo.",
-      }
+      },
+      { upsert: true }
     );
+    await User.findByIdAndUpdate(normalizedId, { kycStatus: status });
 
     res.json({ message: `KYC status updated to ${status} for user ${normalizedId}` });
   } catch (err) {
@@ -460,7 +502,9 @@ export const internalUpdateStatus = async (req, res) => {
 export const getMyKyc = async (req, res) => {
   try {
     const kyc = await KycVerification.findOne({ user: req.user._id });
-    res.json(kyc || { status: "not_started" });
+    // During the collection-split rollout, User.kycStatus preserves the existing status
+    // until the explicit migration has copied legacy kycverifications records.
+    res.json(kyc || { status: req.user.kycStatus || "not_started" });
   } catch (err) {
     return sendKycError(res, err, {
       logMessage: "Get KYC status failed",
@@ -481,6 +525,7 @@ export const preRegisterIdFace = async (req, res) => {
     if (!email || !id_image_base64) {
       return res.status(400).json({ success: false, message: "email and id_image_base64 are required" });
     }
+    validateKycImage(id_image_base64);
     if (!id_type) {
       return res.status(400).json({ success: false, message: "Please select the ID type before verifying." });
     }
@@ -507,23 +552,12 @@ export const preRegisterIdFace = async (req, res) => {
       userProfile: profileContext,
     });
 
-    let fileMeta = {};
-    try {
-      fileMeta = await saveKycBase64File({
-        base64: id_image_base64,
-        mimeType: id_image_mime || "image/jpeg",
-        prefix: "pre-id",
-      });
-    } catch (saveErr) {
-      auditLog.warn("KYC", "Failed to store pre-reg ID image", { detail: saveErr.message });
-    }
-
     if (!docResult.passed) {
       await recordPreKycDocument({
         email,
         role,
         docType: "id",
-        result: { ...docResult, ...fileMeta },
+        result: docResult,
       });
       return res.status(400).json(formatIdValidationFailure(docResult));
     }
@@ -535,7 +569,20 @@ export const preRegisterIdFace = async (req, res) => {
       id_image_base64,
     };
 
-    auditLog.info("KYC", `Pre-registration ID register for: ${email}`);
+    let fileMeta = {};
+    try {
+      fileMeta = await saveKycBase64File({
+        base64: id_image_base64,
+        mimeType: id_image_mime || "image/jpeg",
+        prefix: "pre-id",
+      });
+    } catch (saveErr) {
+      return sendKycError(res, saveErr, {
+        logMessage: "Pre-reg ID private storage rejected",
+        fallbackMessage: "Please upload a valid ID image.",
+      });
+    }
+    auditLog.info("KYC", "Pre-registration ID register requested");
     const result = await proxyToFaceService("/api/kyc/id/register", payload);
     await recordPreKycDocument({
       email,
@@ -573,13 +620,17 @@ export const preSelfieChallenge = async (req, res) => {
         message: `Please capture at least ${MIN_CHALLENGE_FRAMES} selfie frames.`,
       });
     }
+    if (frames_base64.length > MAX_CHALLENGE_FRAMES) {
+      return res.status(400).json({ success: false, message: `Please submit no more than ${MAX_CHALLENGE_FRAMES} selfie frames.` });
+    }
+    frames_base64.forEach(validateKycImage);
 
     const payload = {
       user_id: email.toLowerCase().trim(),
       frames_base64,
     };
 
-    auditLog.info("KYC", `Pre-registration selfie challenge for: ${email}`);
+    auditLog.info("KYC", "Pre-registration selfie challenge requested");
     const result = await proxyToFaceService("/api/kyc/selfie/challenge", payload);
     res.json(result);
   } catch (err) {
@@ -598,6 +649,7 @@ export const preSelfieVerify = async (req, res) => {
     if (!email || !challenge_id || !selfie_image_base64) {
       return res.status(400).json({ success: false, message: "email, challenge_id, and selfie_image_base64 are required" });
     }
+    validateKycImage(selfie_image_base64);
 
     const payload = {
       user_id: email.toLowerCase().trim(),
@@ -605,7 +657,7 @@ export const preSelfieVerify = async (req, res) => {
       selfie_image_base64,
     };
 
-    auditLog.info("KYC", `Pre-registration selfie verify for: ${email}`);
+    auditLog.info("KYC", "Pre-registration selfie verify requested");
     const result = await proxyToFaceService("/api/kyc/selfie/verify", payload);
     await recordPreKycFace({ email, role, result });
     res.json(result);
@@ -628,6 +680,7 @@ export const preVerifySupportingDocument = async (req, res) => {
         message: "email and doc_image_base64 are required",
       });
     }
+    validateKycDocument(doc_image_base64, doc_image_mime || "");
     if (!supporting_doc_type) {
       return res.status(400).json({
         success: false,

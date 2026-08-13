@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Bot, Bell, MessageCircle, Settings, Car, Camera, ShieldCheck } from "lucide-react";
+import { Bell, Camera, Car, LogOut, MessageCircle, Send, Settings, ShieldCheck, X } from "lucide-react";
 import API from "../utils/api";
 import { getStoredUser, persistUserProfile } from "../utils/userProfile";
 import {
@@ -193,7 +193,7 @@ const handleBack = () => {
      setMessages([
        {
          sender: "ai",
-         text: "Hi! 👋 This is RentifyPro AI. How can I assist you today?"
+          text: "Hi! This is Rentify AI. How can I assist you today?"
        }
       ]);
     }, [showAI]);
@@ -321,7 +321,7 @@ const handleBack = () => {
               {/* AI chat */}
               <button
                 onClick={() => setShowAI(true)}
-                aria-label="AI Assistant"
+                aria-label="Open Rentify AI"
                 className="
                   relative w-11 h-11
                   flex items-center justify-center
@@ -332,7 +332,12 @@ const handleBack = () => {
                   shadow-sm
                 "
               >
-                <Bot size={22} className="text-[#017FE6]" />
+                <img
+                  src="/rentify-ai-logo-bubble.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-10 w-10 object-contain"
+                />
                 <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white" />
               </button>
             
@@ -402,7 +407,9 @@ const handleBack = () => {
                       </button>
               
                       <button onClick={onLogout} 
-                      className="w-full px-4 py-3 text-red-500 hover:bg-red-50"> ⎋ Sign Out 
+                      className="flex w-full items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50">
+                        <LogOut size={18} aria-hidden="true" />
+                        Sign Out
                       </button>
             
                 </div>
@@ -665,7 +672,7 @@ const handleBack = () => {
         <p className="font-medium">Assigned Driver</p>
         <p className="text-sm text-gray-600">Juan Dela Cruz</p>
         <p className="text-sm text-gray-600">License No: D123-456-789</p>
-        <p className="text-sm text-gray-600">5★ Rated Professional Driver</p>
+        <p className="text-sm text-gray-600">5-star rated professional driver</p>
       </div>
     </div>
   )}
@@ -891,10 +898,15 @@ const handleBack = () => {
     {/* header */}
     <div className="bg-[#017FE6] text-white px-4 py-3 flex justify-between items-center">
       <div>
-        <h3 className="font-semibold text-sm">RentifyPro AI</h3>
-        <p className="text-xs opacity-80">Online • Ready to help</p>
+        <h3 className="font-semibold text-sm">Rentify AI</h3>
+        <p className="flex items-center gap-1.5 text-xs opacity-90">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white/25" />
+          Online
+        </p>
       </div>
-      <button onClick={() => setShowAI(false)}>✕</button>
+      <button type="button" onClick={() => setShowAI(false)} aria-label="Close Rentify AI">
+        <X size={18} />
+      </button>
     </div>
 
     {/* chat body */}
@@ -909,7 +921,7 @@ const handleBack = () => {
           }`}
         >
           {msg.sender === "ai" && (
-            <img src="/robot-ai.png" className="w-8 h-8 rounded-full" />
+            <img src="/rentify-ai-logo-bubble.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
           )}
 
           <div
@@ -962,14 +974,16 @@ const handleBack = () => {
           setTimeout(() => {
             setMessages((prev) => [
               ...prev,
-              { sender: "ai", text: "Got it! 😊 Let me help you with that." }
+              { sender: "ai", text: "Got it. Let me help you with that." }
             ]);
             setIsTyping(false);
           }, 1200);
         }}
-        className="bg-[#017FE6] text-white w-9 h-9 rounded-full"
+        type="button"
+        aria-label="Send message"
+        className="bg-[#017FE6] text-white w-9 h-9 rounded-full flex items-center justify-center"
       >
-        ➤
+        <Send size={16} />
       </button>
     </div>
   </div>

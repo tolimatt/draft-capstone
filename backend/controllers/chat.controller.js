@@ -7,6 +7,7 @@ import eventBus from "../events/eventBus.js";
 import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import { emitToUser } from "../socket/index.js";
 import { censorProfanityInText } from "../utils/chatModeration.js";
+import { validateRealtimeChatText } from "../utils/chatMessageValidation.js";
 
 const isObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
 const toIdString = (value) => String(value?._id || value || "");
@@ -548,15 +549,20 @@ export const sendMessageToUser = async (req, res) => {
   try {
     const receiverId = req.params.userId;
     const senderId = req.user._id;
-    const text = String(req.body.text || "").trim();
+    const textValidation = validateRealtimeChatText(req.body?.text);
     const context = parseChatContext(req.body);
 
     if (!isObjectId(receiverId)) {
       return res.status(400).json({ success: false, message: "Invalid receiver ID." });
     }
-    if (!text) {
-      return res.status(400).json({ success: false, message: "Message text is required." });
+    if (!textValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        reason: textValidation.reason,
+        message: textValidation.message,
+      });
     }
+    const text = textValidation.text;
 
     const contextError = validateChatContext(context);
     if (contextError) {
@@ -613,14 +619,19 @@ export const editMessage = async (req, res) => {
   try {
     const messageId = req.params.messageId;
     const currentUserId = req.user._id;
-    const text = String(req.body?.text || "").trim();
+    const textValidation = validateRealtimeChatText(req.body?.text);
 
     if (!isObjectId(messageId)) {
       return res.status(400).json({ success: false, message: "Invalid message ID." });
     }
-    if (!text) {
-      return res.status(400).json({ success: false, message: "Message text is required." });
+    if (!textValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        reason: textValidation.reason,
+        message: textValidation.message,
+      });
     }
+    const text = textValidation.text;
 
     const existingMessage = await ChatMessage.findById(messageId);
     if (!existingMessage || isHiddenForUser(existingMessage, currentUserId)) {

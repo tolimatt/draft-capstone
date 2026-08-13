@@ -2,6 +2,7 @@
 // Uses the authenticated /api/kyc/* routes
 
 import { useState, useRef, useCallback } from "react";
+import { Check, CircleCheck, CircleX, IdCard } from "lucide-react";
 import API from "../utils/api";
 
 const STEPS = [
@@ -197,7 +198,7 @@ export default function VerificationStepper() {
                   : "bg-gray-100 text-gray-400"
               }`}
             >
-              {step > s.id ? "✓" : s.id}
+              {step > s.id ? <Check size={16} strokeWidth={3} aria-hidden="true" /> : s.id}
             </div>
             <span
               className={`text-xs hidden sm:block ${
@@ -236,7 +237,7 @@ export default function VerificationStepper() {
               <img src={idPreview} alt="ID" className="max-h-48 mx-auto rounded-xl object-contain" />
             ) : (
               <div className="text-gray-400">
-                <p className="text-3xl mb-2">🪪</p>
+                <IdCard size={36} className="mx-auto mb-2" aria-hidden="true" />
                 <p className="text-sm">Click to upload</p>
                 <p className="text-xs text-gray-400">JPG, PNG — max 10MB</p>
               </div>
@@ -323,7 +324,7 @@ export default function VerificationStepper() {
       {step === 4 && result && (
         <div className="text-center py-4">
           <div className={`text-5xl mb-4 ${result.verified ? "text-green-500" : "text-red-500"}`}>
-            {result.verified ? "✅" : "❌"}
+            {result.verified ? <CircleCheck size={52} className="mx-auto" aria-hidden="true" /> : <CircleX size={52} className="mx-auto" aria-hidden="true" />}
           </div>
           <h2 className={`text-2xl font-bold mb-2 ${result.verified ? "text-green-700" : "text-red-700"}`}>
             {result.verified ? "Identity Verified!" : "Verification Failed"}

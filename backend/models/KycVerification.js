@@ -21,7 +21,7 @@ const kycVerificationSchema = new mongoose.Schema(
     challengePassedAt: { type: Date },
     verifiedAt: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true, collection: "kyc_cases" }
 );
 
 export default mongoose.model("KycVerification", kycVerificationSchema);

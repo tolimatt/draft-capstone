@@ -96,20 +96,25 @@ const reasonLabel = {
 export default function Blockchain() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [recordFilter, setRecordFilter] = useState("all");
+  const [recordPage, setRecordPage] = useState({ hasMore: false, nextCursor: null });
 
-  const loadRecords = async () => {
-    setLoading(true);
+  const loadRecords = async ({ cursor = null, append = false } = {}) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     setError("");
     try {
-      const response = await API.getOwnerBookings("all");
+      const response = await API.getOwnerBookings({ view: "all", limit: 50, ...(cursor ? { cursor } : {}) });
       const normalized = (response.bookings || []).map(normalizeBookingStatus);
-      setRecords(normalized);
+      setRecords((previous) => (append ? [...previous, ...normalized] : normalized));
+      setRecordPage(response.page || { hasMore: false, nextCursor: null });
     } catch (err) {
       setError(err.message || "Failed to load transaction records.");
     } finally {
-      setLoading(false);
+      if (append) setLoadingMore(false);
+      else setLoading(false);
     }
   };
 
@@ -293,6 +298,19 @@ export default function Blockchain() {
           </tbody>
         </table>
       </div>
+
+      {recordPage.hasMore && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => loadRecords({ cursor: recordPage.nextCursor, append: true })}
+            disabled={loadingMore}
+            className="rounded-lg border border-[#017FE6] px-4 py-2 text-sm font-medium text-[#017FE6] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loadingMore ? "Loading..." : "Load more records"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

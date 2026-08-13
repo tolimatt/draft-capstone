@@ -31,7 +31,7 @@ import Navbar from "../components/Navbar";
     setMessages([
       {
         sender: "ai",
-        text: "Hi! This is RentifyPro AI. How can I assist you today?"
+        text: "Hi! This is Rentify AI. How can I assist you today?"
       }
     ]);
   }, [showAI]);
@@ -260,8 +260,11 @@ import Navbar from "../components/Navbar";
     {/* header */}
     <div className="bg-[#017FE6] text-white px-4 py-3 flex justify-between items-center">
       <div>
-        <h3 className="font-semibold text-sm">RentifyPro AI</h3>
-        <p className="text-xs opacity-80">Online - Ready to help</p>
+        <h3 className="font-semibold text-sm">Rentify AI</h3>
+        <p className="flex items-center gap-1.5 text-xs opacity-90">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white/25" />
+          Online
+        </p>
       </div>
       <button onClick={() => setShowAI(false)}>X</button>
     </div>
@@ -278,7 +281,7 @@ import Navbar from "../components/Navbar";
           }`}
         >
           {msg.sender === "ai" && (
-            <img src="/robot-ai.png" className="w-8 h-8 rounded-full" />
+            <img src="/rentify-ai-logo-bubble.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
           )}
 
           <div
@@ -301,7 +304,7 @@ import Navbar from "../components/Navbar";
 
       {isTyping && (
         <div className="flex items-center gap-2">
-          <img src="/robot-ai.png" className="w-8 h-8 rounded-full" />
+          <img src="/rentify-ai-logo-bubble.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
           <div className="bg-white px-4 py-2 rounded-2xl shadow text-sm text-gray-500 flex gap-1">
             <span className="animate-bounce">.</span>
             <span className="animate-bounce delay-150">.</span>

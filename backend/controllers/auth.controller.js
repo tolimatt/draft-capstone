@@ -19,7 +19,8 @@ const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 45);
 const PASSWORD_RESET_TOKEN_EXPIRE = process.env.PASSWORD_RESET_TOKEN_EXPIRE || "15m";
 const PASSWORD_RESET_TOKEN_SECRET = process.env.PASSWORD_RESET_TOKEN_SECRET || process.env.JWT_SECRET;
-const tokenBlacklist = new Set();
+// Local fallback only. Production multi-instance deployments must use Redis keyed by a hashed jti.
+const tokenBlacklist = new Map();
 const MIN_RENTER_AGE = 18;
 const EMERGENCY_CONTACT_NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 const MAX_EMERGENCY_CONTACT_NAME_LENGTH = 50;
@@ -29,9 +30,31 @@ const CLEAR_PREKYC_ON_REGISTER =
   String(process.env.PREKYC_CLEAR_ON_REGISTER || "").trim().toLowerCase() === "true";
 const AVATAR_UPLOAD_DIR = process.env.AVATAR_UPLOAD_DIR || path.resolve("uploads", "avatars");
 const AVATAR_MAX_BYTES = Number(process.env.AVATAR_MAX_BYTES || 2 * 1024 * 1024);
-const UPLOADS_SEGMENT = "/uploads/";
+const AVATAR_MEDIA_PREFIX = "uploads/avatars/";
 
-export const isTokenBlacklisted = (token) => tokenBlacklist.has(token);
+export const isTokenBlacklisted = (token) => {
+  const expiresAt = tokenBlacklist.get(token);
+  if (!expiresAt) return false;
+  if (expiresAt <= Date.now()) {
+    tokenBlacklist.delete(token);
+    return false;
+  }
+  return true;
+};
+
+const blacklistUntilTokenExpiry = (token) => {
+  const now = Date.now();
+  for (const [candidate, expiresAt] of tokenBlacklist) {
+    if (expiresAt <= now) tokenBlacklist.delete(candidate);
+  }
+  try {
+    const decoded = jwt.decode(token);
+    const expiresAt = Number(decoded?.exp) * 1000;
+    if (Number.isFinite(expiresAt) && expiresAt > now) tokenBlacklist.set(token, expiresAt);
+  } catch {
+    // The cookie is still cleared even if its token cannot be decoded.
+  }
+};
 
 function signToken(user) {
   return jwt.sign(
@@ -181,29 +204,29 @@ const getPublicBaseUrl = (req) => {
   return `${req.protocol}://${req.get("host")}`;
 };
 
-const normalizeUploadPath = (value = "") => {
+const normalizeAvatarKey = (value = "") => {
   const raw = String(value || "").trim().replace(/\\/g, "/");
   if (!raw) return "";
   if (/^https?:\/\//i.test(raw)) {
-    const uploadsIndex = raw.toLowerCase().lastIndexOf(UPLOADS_SEGMENT);
+    const uploadsIndex = raw.toLowerCase().lastIndexOf(`/${AVATAR_MEDIA_PREFIX}`);
     if (uploadsIndex >= 0) return raw.slice(uploadsIndex + 1);
     return "";
   }
-  if (raw.toLowerCase().startsWith("uploads/")) return raw;
-  if (raw.startsWith("./")) return raw.slice(2);
-  if (raw.startsWith("/")) return raw.slice(1);
-  if (/^[a-z]:\//i.test(raw)) return raw;
-  return raw;
+  const prefixIndex = raw.toLowerCase().lastIndexOf(AVATAR_MEDIA_PREFIX);
+  const key = prefixIndex >= 0 ? raw.slice(prefixIndex) : raw;
+  if (!key.toLowerCase().startsWith(AVATAR_MEDIA_PREFIX)) return "";
+  const fileName = key.slice(AVATAR_MEDIA_PREFIX.length);
+  if (!fileName || fileName !== path.basename(fileName) || !/^avatar-[a-z0-9-]+\.(jpg|jpeg|png|webp)$/i.test(fileName)) return "";
+  return `${AVATAR_MEDIA_PREFIX}${fileName}`;
 };
 
 const removeLocalAvatarIfExists = async (avatarValue = "") => {
-  const normalized = normalizeUploadPath(avatarValue);
+  const normalized = normalizeAvatarKey(avatarValue);
   if (!normalized) return;
-  if (!normalized.toLowerCase().includes("/avatars/")) return;
-
-  const absolutePath = path.isAbsolute(normalized)
-    ? normalized
-    : path.resolve(normalized);
+  const fileName = normalized.slice(AVATAR_MEDIA_PREFIX.length);
+  const absolutePath = path.resolve(AVATAR_UPLOAD_DIR, fileName);
+  const relative = path.relative(AVATAR_UPLOAD_DIR, absolutePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return;
   try {
     await fs.unlink(absolutePath);
   } catch {
@@ -232,7 +255,7 @@ const extractAvatarPayload = (rawValue) => {
 
 const saveAvatarBase64 = async ({ base64, mimeType = "image/jpeg", req }) => {
   const clean = String(base64 || "");
-  if (!clean) throw new Error("Avatar image is empty.");
+  if (!clean || !/^[A-Za-z0-9+/=\s]+$/.test(clean)) throw new Error("Avatar image is invalid.");
 
   const approxBytes = Math.floor(clean.length * 0.75);
   if (approxBytes > AVATAR_MAX_BYTES) {
@@ -240,17 +263,14 @@ const saveAvatarBase64 = async ({ base64, mimeType = "image/jpeg", req }) => {
   }
 
   const buffer = Buffer.from(clean, "base64");
-  if (!buffer.length) {
+  const isJpeg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const isPng = buffer.length > 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const isWebp = buffer.length > 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP";
+  if (!buffer.length || (!isJpeg && !isPng && !isWebp)) {
     throw new Error("Avatar image is invalid.");
   }
 
-  const safeExt = mimeType?.includes("png")
-    ? "png"
-    : mimeType?.includes("webp")
-    ? "webp"
-    : mimeType?.includes("gif")
-    ? "gif"
-    : "jpg";
+  const safeExt = isPng ? "png" : isWebp ? "webp" : "jpg";
   const fileName = `avatar-${Date.now()}-${crypto.randomBytes(6).toString("hex")}.${safeExt}`;
 
   await fs.mkdir(AVATAR_UPLOAD_DIR, { recursive: true });
@@ -628,7 +648,7 @@ export const logoutUser = async (req, res) => {
   try {
     const cookieToken = String(req.cookies?.token || "").trim();
     if (cookieToken) {
-      tokenBlacklist.add(cookieToken);
+      blacklistUntilTokenExpiry(cookieToken);
       auditLog.info("AUTH", "Logged out", { userId: req.user?._id?.toString() });
     }
     clearAuthCookie(res);
@@ -1279,7 +1299,17 @@ export const updateProfile = async (req, res) => {
             });
             user.avatar = stored.publicUrl;
           } else {
-            user.avatar = avatarInput;
+            const localAvatarKey = normalizeAvatarKey(avatarInput);
+            if (localAvatarKey) {
+              const baseUrl = getPublicBaseUrl(req);
+              user.avatar = baseUrl ? `${baseUrl}/${localAvatarKey}` : localAvatarKey;
+            } else {
+              const externalUrl = new URL(avatarInput);
+              if (externalUrl.protocol !== "https:" || externalUrl.username || externalUrl.password || avatarInput.length > 2048) {
+                throw new Error("Avatar must be a valid HTTPS image URL.");
+              }
+              user.avatar = externalUrl.toString();
+            }
           }
         }
       } catch (error) {

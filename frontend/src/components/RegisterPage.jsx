@@ -146,6 +146,7 @@ export default function RegisterPage({
     getRemainingRateLimitSeconds(readStoredRateLimitUntil())
   );
   const [successMessage, setSuccessMessage] = useState("");
+  const [formError, setFormError] = useState("");
   const [legalModalType, setLegalModalType] = useState("");
   const isRateLimited = rateLimitSeconds > 0;
   const isFormLocked = isLoading || isRateLimited;
@@ -413,6 +414,7 @@ export default function RegisterPage({
         case "password":
           return VALIDATION_RULES.password(sourceForm.password);
         case "confirmPassword":
+          if (VALIDATION_RULES.password(sourceForm.password)) return "";
           return VALIDATION_RULES.confirmPassword(sourceForm.password, sourceForm.confirmPassword);
         case "agree":
           return VALIDATION_RULES.agree(sourceForm.agree);
@@ -426,6 +428,7 @@ export default function RegisterPage({
   const handleChange = (field, value) => {
     const nextForm = { ...form, [field]: value };
     setForm(nextForm);
+    setFormError("");
     setTouched((prev) => ({ ...prev, [field]: true }));
     setErrors((prev) => ({
       ...prev,
@@ -592,8 +595,8 @@ export default function RegisterPage({
       const track = stream.getVideoTracks()[0];
       const settings = track?.getSettings?.() || {};
       const label = cams.find((c) => c.deviceId === deviceId)?.label || "Camera";
-      setCamInfo(`✅ ${label} | ${settings.width || "?"}x${settings.height || "?"}`);
-      setKycUi((p) => ({ ...p, statusText: "✅ Camera ready. Capture your selfie." }));
+      setCamInfo(`${label} | ${settings.width || "?"}x${settings.height || "?"}`);
+      setKycUi((p) => ({ ...p, statusText: "Camera ready. Capture your selfie." }));
     } catch (e) {
       const name = e?.name || "";
       let msg = "Something went wrong with the camera. Please try again.";
@@ -619,7 +622,7 @@ export default function RegisterPage({
       const track = stream.getVideoTracks()[0];
       const settings = track?.getSettings?.() || {};
       const label = devices.find((d) => d.deviceId === deviceId)?.label || "Camera";
-      setCamInfo(`✅ ${label} | ${settings.width || "?"}x${settings.height || "?"}`);
+      setCamInfo(`${label} | ${settings.width || "?"}x${settings.height || "?"}`);
     } catch {
       setCamError("Failed to switch camera. Please try again.");
     }
@@ -768,7 +771,7 @@ export default function RegisterPage({
         selfieBase64Clean: "",
       }));
       setStepErrors((p) => ({ ...p, idType: "", idRegistered: "" }));
-      setKycUi((p) => ({ ...p, statusText: "✅ ID registered. Open camera to capture your selfie." }));
+      setKycUi((p) => ({ ...p, statusText: "ID registered. Open camera to capture your selfie." }));
     } catch (e) {
       const msg = friendlyError(e.message);
       setStepErrors((p) => ({ ...p, idRegistered: msg }));
@@ -806,7 +809,7 @@ export default function RegisterPage({
 
       setKyc((prev) => ({ ...prev, challengeId: result.challenge_id }));
       setStepErrors((p) => ({ ...p, selfieVerified: "" }));
-      setKycUi((p) => ({ ...p, statusText: "✅ Selfie captured. Click Verify to match with your ID." }));
+      setKycUi((p) => ({ ...p, statusText: "Selfie captured. Click Verify to match with your ID." }));
     } catch (e) {
       setKyc((prev) => ({ ...prev, selfieDataUrl: "", selfieBase64Clean: "", challengeId: "" }));
       const msg = friendlyError(e.message);
@@ -832,7 +835,7 @@ export default function RegisterPage({
       if (!result.verified) throw new Error(result.message || "Face does not match ID.");
       setKyc((prev) => ({ ...prev, selfieVerified: true }));
       setStepErrors((p) => ({ ...p, selfieVerified: "" }));
-      setKycUi((p) => ({ ...p, statusText: "✅ Face verified successfully!" }));
+      setKycUi((p) => ({ ...p, statusText: "Face verified successfully." }));
       closeCamera();
     } catch (e) {
       setKyc((prev) => ({ ...prev, selfieVerified: false }));
@@ -857,6 +860,7 @@ export default function RegisterPage({
     if (!validateStep2()) { setStep(2); return; }
     setIsLoading(true);
     setSuccessMessage("");
+    setFormError("");
     try {
       const response = await API.register({
         name: fullName,
@@ -891,6 +895,37 @@ export default function RegisterPage({
         activateRateLimit(waitSeconds, retryAfterAt);
         setErrors({});
         setStepErrors({});
+        setFormError("");
+        return;
+      }
+      const serverErrors = error?.details?.errors;
+      if (serverErrors && typeof serverErrors === "object") {
+        const fieldErrors = { ...serverErrors };
+        if (fieldErrors.name) {
+          fieldErrors.firstName = fieldErrors.name;
+          delete fieldErrors.name;
+        }
+        setErrors(fieldErrors);
+        setStepErrors({});
+        setFormError("");
+        setStep(1);
+        const fieldRefs = {
+          firstName: firstNameRef,
+          email: emailRef,
+          phone: phoneRef,
+          dateOfBirth: dobRef,
+          gender: genderRef,
+          region: regionRef,
+          province: provinceRef,
+          city: cityRef,
+          barangay: barangayRef,
+          emergencyContactName: emergencyNameRef,
+          emergencyContactPhone: emergencyPhoneRef,
+          emergencyContactRelationship: emergencyRelationshipRef,
+          password: passwordRef,
+        };
+        const firstServerField = Object.keys(fieldErrors).find((field) => fieldErrors[field]);
+        setTimeout(() => fieldRefs[firstServerField]?.current?.focus?.(), 0);
         return;
       }
       const phoneConflict = lower.includes("phone") && lower.includes("already");
@@ -906,14 +941,30 @@ export default function RegisterPage({
 
       if (phoneConflict) {
         setErrors({ phone: msg });
+        setFormError("");
         setStep(1);
         setTimeout(() => phoneRef.current?.focus(), 0);
         return;
       }
 
-      setErrors({ email: msg });
-      setStep(1);
-      setTimeout(() => emailRef.current?.focus(), 0);
+      if (lower.includes("email") && (lower.includes("already") || lower.includes("invalid"))) {
+        setErrors({ email: msg });
+        setFormError("");
+        setStep(1);
+        setTimeout(() => emailRef.current?.focus(), 0);
+        return;
+      }
+
+      if (lower.includes("password")) {
+        setErrors({ password: msg });
+        setFormError("");
+        setStep(1);
+        setTimeout(() => passwordRef.current?.focus(), 0);
+        return;
+      }
+
+      setErrors({});
+      setFormError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -1059,6 +1110,15 @@ export default function RegisterPage({
         )}
 
         <form onSubmit={handleFinalRegister} className="space-y-4" noValidate>
+          {formError && (
+            <div
+              role="alert"
+              className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700"
+            >
+              {formError}
+            </div>
+          )}
+
           <fieldset disabled={isFormLocked} className="space-y-4">
                 {/* step 1 */}
                 {step === 1 && (
@@ -1070,7 +1130,7 @@ export default function RegisterPage({
                         <button type="button" onClick={() => handleAccountSelect("user")}
                           className={`flex items-center gap-3 p-3 rounded-xl border-2 transition ${accountType === "user" ? "border-[#017FE6] bg-blue-50" : "border-gray-200 hover:border-[#017FE6]"}`}>
                           <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 text-xs ${accountType === "user" ? "border-[#017FE6] bg-[#017FE6] text-white" : "border-gray-300"}`}>
-                            {accountType === "user" && "✓"}
+                            {accountType === "user" && <Check size={13} strokeWidth={3} aria-hidden="true" />}
                           </div>
                           <User size={18} className="text-gray-600" />
                           <div className="text-left"><p className="font-semibold text-gray-800 text-sm">User</p><p className="text-xs text-gray-500">Rent vehicles</p></div>
@@ -1308,7 +1368,7 @@ export default function RegisterPage({
                           } disabled:opacity-50`}>
                           {isLoading && !kyc.idRegistered
                             ? <><Loader size={15} className="animate-spin" /> Processing...</>
-                            : kyc.idRegistered ? "✓ ID Registered" : "1. Register ID"}
+                            : kyc.idRegistered ? <><Check size={15} strokeWidth={3} aria-hidden="true" /> ID Registered</> : "1. Register ID"}
                         </button>
 
                         <button type="button" disabled={isLoading || !kyc.idRegistered} onClick={kycUi.showCamera ? closeCamera : openCamera}
@@ -1322,7 +1382,7 @@ export default function RegisterPage({
                           } disabled:opacity-50`}>
                           {isLoading && !kyc.selfieBase64Clean
                             ? <><Loader size={15} className="animate-spin" /> Capturing...</>
-                            : kyc.selfieBase64Clean ? "✓ Retake Selfie" : "3. Capture Selfie"}
+                            : kyc.selfieBase64Clean ? <><Check size={15} strokeWidth={3} aria-hidden="true" /> Retake Selfie</> : "3. Capture Selfie"}
                         </button>
 
                         <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || !kyc.challengeId || kyc.selfieVerified} onClick={verifySelfie}
@@ -1331,7 +1391,7 @@ export default function RegisterPage({
                           } disabled:opacity-50`}>
                           {isLoading && !kyc.selfieVerified
                             ? <><Loader size={15} className="animate-spin" /> Verifying...</>
-                            : kyc.selfieVerified ? "✓ Face Verified!" : "4. Verify Face Match"}
+                            : kyc.selfieVerified ? <><Check size={15} strokeWidth={3} aria-hidden="true" /> Face Verified</> : "4. Verify Face Match"}
                         </button>
                       </div>
 
@@ -1391,7 +1451,7 @@ export default function RegisterPage({
                         { label: "Phone", value: form.phone || "—" },
                         { label: "ID Type", value: kyc.idType || "—" },
                         { label: "Account Type", value: "User (Renter)" },
-                        { label: "KYC Verified", value: kyc.selfieVerified ? "✅ Verified" : "⚠️ Not Verified", highlight: kyc.selfieVerified },
+                        { label: "KYC Verified", value: kyc.selfieVerified ? "Verified" : "Not Verified", highlight: kyc.selfieVerified },
                       ].map(({ label, value, highlight }, i, arr) => (
                         <React.Fragment key={label}>
                           <div className="flex items-center justify-between">

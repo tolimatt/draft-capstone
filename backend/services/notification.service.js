@@ -1,4 +1,5 @@
 import Notification from "../models/Notification.js";
+import NotificationDelivery from "../models/NotificationDelivery.js";
 import { emitToUser } from "../socket/index.js";
 
 const TYPE_CATEGORY_MAP = {
@@ -24,6 +25,31 @@ const toIdString = (value) => {
 };
 
 const compactText = (value) => String(value || "").trim();
+const EMAIL_ENABLED = () => String(process.env.NOTIFICATION_EMAIL_ENABLED || "").toLowerCase() === "true";
+const MAX_NOTIFICATION_DATA_BYTES = 4096;
+const DATA_KEYS = new Set([
+  "bookingId", "vehicleId", "conversationId", "messageId", "senderId", "status", "paymentStatus",
+  "walkInPaymentStatus", "cancellationStatus", "extensionStatus", "requestedReturnAt", "returnAt",
+  "overdueMinutes", "isOverdue", "autoCompleted", "rating", "actions", "unreadCount", "actionUrl",
+]);
+
+const sanitizeData = (data = {}) => {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  const clean = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (!DATA_KEYS.has(key) || value === undefined || value === null) continue;
+    if (Array.isArray(value)) clean[key] = value.map((item) => compactText(item).slice(0, 80)).slice(0, 10);
+    else if (typeof value === "boolean" || typeof value === "number") clean[key] = value;
+    else if (value instanceof Date) clean[key] = value.toISOString();
+    else clean[key] = compactText(value).slice(0, 240);
+  }
+  while (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_NOTIFICATION_DATA_BYTES) {
+    const key = Object.keys(clean).pop();
+    if (!key) break;
+    delete clean[key];
+  }
+  return clean;
+};
 
 const slugify = (value) =>
   compactText(value)
@@ -106,6 +132,19 @@ const findExistingByDedupeKey = ({ user, dedupeKey }) => {
   return Notification.findOne({ user, dedupeKey });
 };
 
+const queueEmailDelivery = async (notification) => {
+  if (!EMAIL_ENABLED() || !notification || notification.category === "chat") return;
+  try {
+    await NotificationDelivery.updateOne(
+      { notification: notification._id },
+      { $setOnInsert: { notification: notification._id, user: notification.user, channel: "email", status: "pending", nextAttemptAt: new Date() } },
+      { upsert: true }
+    );
+  } catch (error) {
+    console.error("[notification] Failed to queue email delivery:", error?.message || error);
+  }
+};
+
 export const NotificationService = {
   async send({
     user,
@@ -121,6 +160,7 @@ export const NotificationService = {
     entityId,
     actionUrl = "",
     dedupeKey,
+    coalesce = false,
   }) {
     const recipientId = toIdString(user);
     const normalizedTitle = compactText(title);
@@ -136,13 +176,14 @@ export const NotificationService = {
       return null;
     }
 
-    const inferredEntity = resolveEntity(data);
-    const resolvedEvent = resolveEvent({ type, event, title: normalizedTitle, data });
+    const safeData = sanitizeData(data);
+    const inferredEntity = resolveEntity(safeData);
+    const resolvedEvent = resolveEvent({ type, event, title: normalizedTitle, data: safeData });
     const resolvedDedupeKey = resolveDedupeKey({
       dedupeKey,
       user: recipientId,
       type,
-      data,
+      data: safeData,
       event: resolvedEvent,
     });
 
@@ -151,7 +192,19 @@ export const NotificationService = {
         user: recipientId,
         dedupeKey: resolvedDedupeKey,
       });
-      if (existing) return existing;
+      if (existing) {
+        if (!coalesce) return existing;
+        const unreadCount = Math.min(999, Number(existing.data?.unreadCount || 0) + 1);
+        existing.title = normalizedTitle;
+        existing.message = normalizedMessage;
+        existing.data = { ...safeData, unreadCount };
+        existing.readAt = null;
+        existing.archived_at = null;
+        existing.lastOccurredAt = new Date();
+        await existing.save();
+        emitToUser(recipientId, "notification:new", existing);
+        return existing;
+      }
 
       const notification = await Notification.create({
         user: recipientId,
@@ -166,10 +219,12 @@ export const NotificationService = {
         dedupeKey: resolvedDedupeKey,
         title: normalizedTitle,
         message: normalizedMessage,
-        data,
+        data: safeData,
+        lastOccurredAt: new Date(),
       });
 
       emitToUser(recipientId, "notification:new", notification);
+      await queueEmailDelivery(notification);
       return notification;
     } catch (error) {
       if (error?.code === 11000) {

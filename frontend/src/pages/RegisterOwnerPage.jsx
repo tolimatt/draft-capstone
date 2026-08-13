@@ -117,6 +117,20 @@ function friendlyError(msg) {
   return "Something went wrong. Please try again.";
 }
 
+function validateOwnerPassword(value) {
+  if (!value) return "Password is required.";
+  if (/\s/.test(value)) return "Password must not contain spaces.";
+  if (EMOJI_REGEX.test(value)) return "Password must not contain emoji.";
+  if (value.length < 8) return "Password must be at least 8 characters.";
+  if (!/[A-Z]/.test(value)) return "Password needs an uppercase letter.";
+  if (!/[a-z]/.test(value)) return "Password needs a lowercase letter.";
+  if (!/[0-9]/.test(value)) return "Password needs a number.";
+  if (!/[!@#$%^&*()_+\-=[\]{}|;':",.<>?/`~]/.test(value)) {
+    return "Password needs a special character.";
+  }
+  return "";
+}
+
 export default function RegisterOwnerPage({
   onBack,
   onNavigateToSignIn,
@@ -135,6 +149,7 @@ export default function RegisterOwnerPage({
   const [stepErrors, setStepErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [formError, setFormError] = useState("");
   const [legalModalType, setLegalModalType] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [showCpw, setShowCpw] = useState(false);
@@ -377,18 +392,9 @@ export default function RegisterOwnerPage({
           if (values.permitNumber.length > 50) return "Permit number is too long (max 50 characters).";
           return "";
         case "password":
-          if (!values.password) return "Password is required.";
-          if (/\s/.test(values.password)) return "Password must not contain spaces.";
-          if (EMOJI_REGEX.test(values.password)) return "Password must not contain emoji.";
-          if (values.password.length < 8) return "Password must be at least 8 characters.";
-          if (!/[A-Z]/.test(values.password)) return "Password needs an uppercase letter.";
-          if (!/[a-z]/.test(values.password)) return "Password needs a lowercase letter.";
-          if (!/[0-9]/.test(values.password)) return "Password needs a number.";
-          if (!/[!@#$%^&*()_+\-=[\]{}|;':",.<>?/`~]/.test(values.password)) {
-            return "Password needs a special character.";
-          }
-          return "";
+          return validateOwnerPassword(values.password);
         case "confirmPassword":
+          if (validateOwnerPassword(values.password)) return "";
           if (!values.confirmPassword) return "Please confirm password.";
           if (/\s/.test(values.confirmPassword)) return "Password must not contain spaces.";
           if (values.password !== values.confirmPassword) return "Passwords do not match.";
@@ -452,6 +458,7 @@ export default function RegisterOwnerPage({
             : normalizedPhone;
       const nextForm = { ...form, [name]: nextValue };
       setForm(nextForm);
+      setFormError("");
       if (step === 1) {
         setTouchedStep1((prev) => ({ ...prev, [name]: true }));
       }
@@ -720,6 +727,7 @@ export default function RegisterOwnerPage({
 
     setIsLoading(true);
     setSuccessMessage("");
+    setFormError("");
     try {
       const dataUrl = await fileToBase64(files.supportingDocument);
       const clean = stripDataUrlPrefix(dataUrl);
@@ -977,6 +985,7 @@ export default function RegisterOwnerPage({
 
     setIsLoading(true);
     setSuccessMessage("");
+    setFormError("");
 
     try {
       const response = await API.register({
@@ -1002,6 +1011,22 @@ export default function RegisterOwnerPage({
     } catch (error) {
       const lower = (error?.message || "").toLowerCase();
       const raw = error?.message || "";
+      const serverErrors = error?.details?.errors;
+      if (serverErrors && typeof serverErrors === "object") {
+        const fieldErrors = { ...serverErrors };
+        if (fieldErrors.email) {
+          fieldErrors.businessEmail = fieldErrors.email;
+          delete fieldErrors.email;
+        }
+        if (fieldErrors.name) {
+          fieldErrors.firstName = fieldErrors.name;
+          delete fieldErrors.name;
+        }
+        setErrors(fieldErrors);
+        setFormError("");
+        setStep(1);
+        return;
+      }
       const phoneConflict = lower.includes("phone") && lower.includes("already");
       const msg = lower.includes("already")
         ? phoneConflict
@@ -1012,10 +1037,22 @@ export default function RegisterOwnerPage({
         : /^[A-Z]/.test(raw) && !/request failed/i.test(raw)
         ? raw
         : "Registration failed. Please try again.";
-      if (lower.includes("password")) setErrors({ password: msg });
-      else if (phoneConflict) setErrors({ phone: msg });
-      else setErrors({ businessEmail: msg });
-      setStep(1);
+      if (lower.includes("password")) {
+        setErrors({ password: msg });
+        setFormError("");
+        setStep(1);
+      } else if (phoneConflict) {
+        setErrors({ phone: msg });
+        setFormError("");
+        setStep(1);
+      } else if (lower.includes("email") && (lower.includes("already") || lower.includes("invalid"))) {
+        setErrors({ businessEmail: msg });
+        setFormError("");
+        setStep(1);
+      } else {
+        setErrors({});
+        setFormError(msg);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -1063,6 +1100,15 @@ export default function RegisterOwnerPage({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          {formError && (
+            <div
+              role="alert"
+              className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700"
+            >
+              {formError}
+            </div>
+          )}
+
           {step === 1 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">

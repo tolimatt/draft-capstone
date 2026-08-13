@@ -17,6 +17,7 @@ lerna-debug.log*
 # Node / JS dependencies
 node_modules/
 .npm/
+.npm-cache/
 .pnpm-store/
 .pnp/
 .pnp.js
@@ -66,6 +67,7 @@ Thumbs.db
 
 # Local runtime data
 uploads/
+private_uploads/
 backend/backups/
 temp/
 tmp/

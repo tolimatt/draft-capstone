@@ -107,7 +107,7 @@ export default function OwnerLayout() {
   }, [activePage]);
 
   return (
-    <div className="relative flex min-h-screen bg-gray-100 lg:h-screen">
+    <div className="relative flex min-h-screen bg-[#f6f9fc] lg:h-screen">
       {isSidebarOpen && (
         <button
           type="button"
@@ -129,13 +129,12 @@ export default function OwnerLayout() {
       <div className="flex min-h-screen flex-1 flex-col overflow-hidden lg:h-screen">
         {/* top bar */}
         <Topbar
-          title={activePage}
           onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
           onNavigateToNotifications={() => setActivePage("Notifications")}
         />
 
         {/* page content */}
-        <main className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6">
           {activePage === "Dashboard" && <Dashboard />}
           {activePage === "Vehicles" && <Vehicles />}
           {activePage === "Bookings" && <Bookings />}

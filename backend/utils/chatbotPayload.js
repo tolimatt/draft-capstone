@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getVehicleHourlyRate, roundCurrency } from "./pricing.js";
+import { containsModeratedContent } from "./chatModeration.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,21 +38,6 @@ const FALLBACK_REPLIES = {
 };
 const CHATBOT_MAX_INPUT_LENGTH = 500;
 const ALLOWED_CHATBOT_MESSAGE_PATTERN = /^[A-Za-z?,. ]+$/;
-const BLOCKED_WORDS = [
-  "fuck",
-  "fucking",
-  "shit",
-  "bitch",
-  "asshole",
-  "puta",
-  "putangina",
-  "gago",
-  "tanga",
-  "ulol",
-  "tarantado",
-  "pakyu",
-  "bwisit",
-];
 const REJECT_REPLIES = {
   english: {
     empty: "Please type a message so I can help you.",
@@ -79,13 +65,6 @@ const REJECT_REPLIES = {
   },
 };
 
-const escapeRegex = (value = "") =>
-  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const BLOCKED_WORD_PATTERN = new RegExp(
-  `\\b(${BLOCKED_WORDS.map((word) => escapeRegex(word)).join("|")})\\b`,
-  "i"
-);
 const GREETING_PATTERNS = [
   /\bhello\b/i,
   /\bhi\b/i,
@@ -971,19 +950,21 @@ export function validateChatbotInput(message = "") {
     };
   }
 
-  if (!ALLOWED_CHATBOT_MESSAGE_PATTERN.test(rawMessage)) {
+  // Check moderation before the character whitelist so obfuscated dataset
+  // variants receive the correct response instead of a generic format error.
+  if (containsModeratedContent(trimmedMessage)) {
     return {
       isValid: false,
-      reason: "invalid_characters",
+      reason: "profanity",
       message: trimmedMessage,
       maxLength: CHATBOT_MAX_INPUT_LENGTH,
     };
   }
 
-  if (BLOCKED_WORD_PATTERN.test(trimmedMessage)) {
+  if (!ALLOWED_CHATBOT_MESSAGE_PATTERN.test(rawMessage)) {
     return {
       isValid: false,
-      reason: "profanity",
+      reason: "invalid_characters",
       message: trimmedMessage,
       maxLength: CHATBOT_MAX_INPUT_LENGTH,
     };

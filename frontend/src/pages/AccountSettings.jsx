@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import {
-  Bot,
   Car,
   ShieldCheck,
   User,
@@ -914,7 +913,7 @@ const AccountSettings = ({
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="rp-renter-page min-h-screen">
       <Navbar
         activePage=""
         isLoggedIn={isLoggedIn}
@@ -931,10 +930,10 @@ const AccountSettings = ({
         onLogout={onLogout}
       />
 
-      <div className="pt-24 bg-gray-50 min-h-screen">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col lg:flex-row gap-6">
+      <div className="min-h-screen bg-transparent pt-24">
+        <div className="rp-page-shell mx-auto flex max-w-7xl flex-col gap-6 px-6 lg:flex-row">
           <aside className="w-full lg:w-72 space-y-6 lg:sticky top-24 self-start mt-4">
-            <div className="bg-white rounded-xl shadow p-5 space-y-1">
+            <div className="rp-minimal-card space-y-1 p-5">
               {[
                 { label: "Profile Settings", icon: User },
                 { label: "Change Password", icon: Lock },
@@ -961,7 +960,8 @@ const AccountSettings = ({
           </aside>
 
           <main className="flex-1 space-y-8 pb-12">
-            <div className="pb-6 mb-6 border-b">
+            <div className="rp-page-header mb-6">
+              <span className="rp-page-eyebrow">Personal workspace</span>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">Account Settings</h1>
               <p className="text-base text-gray-500 max-w-xl">
                 Manage your personal information and account preferences
@@ -986,7 +986,7 @@ const AccountSettings = ({
                   </div>
                 )}
 
-                <div className="bg-white rounded-xl shadow p-6 flex items-center gap-4">
+                <div className="rp-settings-card flex items-center gap-4 p-6">
                   <div className="relative">
                     <div className="relative">
                       <div className="w-24 h-24 rounded-full overflow-hidden bg-[#017FE6] flex items-center justify-center">
@@ -1287,7 +1287,7 @@ const AccountSettings = ({
                 ),
               },
             ].map((section) => (
-              <div key={section.key} className="bg-white rounded-xl shadow p-6">
+              <div key={section.key} className="rp-settings-card p-6">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-semibold">{section.title}</h3>
 
@@ -1311,7 +1311,7 @@ const AccountSettings = ({
             )}
 
             {activeTab === "Change Password" && (
-              <div className="bg-white rounded-xl shadow p-6 space-y-4">
+              <div className="rp-settings-card space-y-4 p-6">
                 <div className="space-y-1">
                   <h3 className="font-semibold text-lg">Change Password</h3>
                   <p className="text-sm text-gray-500">
@@ -1373,7 +1373,7 @@ const AccountSettings = ({
             )}
 
             {activeTab === "Notifications Settings" && (
-              <div className="bg-white rounded-xl shadow p-6 space-y-4">
+              <div className="rp-settings-card space-y-4 p-6">
                 <div className="space-y-1">
                   <h3 className="font-semibold text-lg">Notification Settings</h3>
                   <p className="text-sm text-gray-500">
@@ -1495,7 +1495,7 @@ const AccountSettings = ({
 
             {activeTab === "Verification" && (
               <div className="space-y-6">
-                <div className="bg-white rounded-xl shadow p-6 space-y-4">
+                <div className="rp-settings-card space-y-4 p-6">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                     <div>
                       <h3 className="font-semibold text-lg">Email Verification</h3>
@@ -1552,7 +1552,7 @@ const AccountSettings = ({
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow p-6 space-y-4">
+                <div className="rp-settings-card space-y-4 p-6">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                     <div>
                       <h3 className="font-semibold text-lg">ID & Selfie Verification</h3>
@@ -1598,7 +1598,7 @@ const AccountSettings = ({
             )}
 
             {activeTab === "Login Activity" && (
-              <div className="bg-white rounded-xl shadow p-6 space-y-4">
+              <div className="rp-settings-card space-y-4 p-6">
                 <div className="space-y-1">
                   <h3 className="font-semibold text-lg">Login Activity</h3>
                   <p className="text-sm text-gray-500">
@@ -1646,7 +1646,7 @@ const AccountSettings = ({
 
             {activeTab === "Become a Vehicle Owner" && (
               isOwner ? (
-                <div className="bg-white rounded-xl shadow p-6 space-y-2">
+                <div className="rp-settings-card space-y-2 p-6">
                   <h3 className="font-semibold text-lg">You are already a Vehicle Owner</h3>
                   <p className="text-sm text-gray-500">
                     Your account is already upgraded. You can list vehicles from your owner dashboard.
@@ -1654,7 +1654,7 @@ const AccountSettings = ({
                 </div>
               ) : (
                 <div className="space-y-6">
-                  <div className="bg-white rounded-xl shadow p-6 space-y-4">
+                  <div className="rp-settings-card space-y-4 p-6">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                     <div>
                       <h3 className="font-semibold text-lg">Become a Vehicle Owner</h3>
@@ -1702,7 +1702,7 @@ const AccountSettings = ({
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow p-6 space-y-4">
+                <div className="rp-settings-card space-y-4 p-6">
                   <div className="space-y-1">
                     <h4 className="font-semibold text-lg">Supporting Document</h4>
                     <p className="text-sm text-gray-500">
@@ -1749,7 +1749,7 @@ const AccountSettings = ({
                   )}
                 </div>
 
-                <div className="bg-white rounded-xl shadow p-6 space-y-4">
+                <div className="rp-settings-card space-y-4 p-6">
                   <div className="space-y-1">
                     <h4 className="font-semibold text-lg">Owner Details</h4>
                     <p className="text-sm text-gray-500">
@@ -1819,10 +1819,15 @@ const AccountSettings = ({
       {!showAI && (
         <button
           onClick={() => setShowAI(true)}
-          aria-label="AI Assistant"
-          className="fixed bottom-6 right-6 z-[70] w-14 h-14 flex items-center justify-center rounded-full bg-[#017FE6] hover:bg-[#0165B8] text-white shadow-2xl transition-all duration-300 hover:scale-105"
+          aria-label="Open Rentify AI"
+          className="fixed bottom-8 right-10 z-[70] flex h-16 w-16 items-center justify-center transition-all duration-300 hover:scale-105 hover:opacity-95"
         >
-          <Bot size={24} />
+          <img
+            src="/rentify-ai-logo-bubble.png"
+            alt=""
+            aria-hidden="true"
+            className="h-full w-full object-contain drop-shadow-xl"
+          />
           <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-white" />
         </button>
       )}

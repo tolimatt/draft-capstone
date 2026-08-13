@@ -3,8 +3,8 @@ import {
   ArrowLeft,
   MessageSquare,
   MoreHorizontal,
-  Paperclip,
   Pin,
+  Search,
   Send,
   Trash2,
 } from "lucide-react";
@@ -13,6 +13,10 @@ import { getSocket } from "../../utils/socket";
 import { formatDisplayName, getInitialsFromName } from "../../utils/dateUtils";
 import { resolveAssetUrl } from "../../utils/media";
 import { getSessionUser } from "../../utils/sessionStore";
+import {
+  REALTIME_CHAT_INPUT_MAX_LENGTH,
+  sanitizeRealtimeChatInput,
+} from "../../utils/realtimeChatInput";
 
 const getId = (value) => String(value?._id || value || "");
 
@@ -158,6 +162,7 @@ export default function Messages() {
   const [activeMessageActionId, setActiveMessageActionId] = useState("");
   const [showDeleteConversationConfirm, setShowDeleteConversationConfirm] = useState(false);
   const [deletingConversation, setDeletingConversation] = useState(false);
+  const [threadQuery, setThreadQuery] = useState("");
 
   const activeThread = useMemo(
     () => renterThreads.find((thread) => thread.partner._id === activeRenterId) || null,
@@ -167,6 +172,19 @@ export default function Messages() {
     () => renterThreads.find((thread) => thread.partner._id === actionThreadId) || null,
     [renterThreads, actionThreadId]
   );
+  const filteredRenterThreads = useMemo(() => {
+    const query = threadQuery.trim().toLowerCase();
+    if (!query) return renterThreads;
+
+    return renterThreads.filter((thread) =>
+      [
+        thread.partner?.name,
+        thread.partner?.email,
+        thread.vehicle?.name,
+        thread.lastMessage?.text,
+      ].some((value) => String(value || "").toLowerCase().includes(query))
+    );
+  }, [renterThreads, threadQuery]);
 
   const loadRenterThreads = async () => {
     setLoadingThreads(true);
@@ -414,7 +432,7 @@ export default function Messages() {
   const startEditMessage = (message) => {
     if (!message?._id || message.isDeleted) return;
     setEditingMessageId(message._id);
-    setEditingText(String(message.text || ""));
+    setEditingText(sanitizeRealtimeChatInput(message.text));
     setActiveMessageActionId("");
   };
 
@@ -510,16 +528,48 @@ export default function Messages() {
   const isShowingThread = !isMobileView || !showConversationList;
 
   return (
-    <div className="owner-messages-shell">
+    <div className="owner-messages-page">
+      <div className="rp-chat-page-header rp-surface owner-messages-page-header">
+        <div className="rp-chat-page-heading">
+          <span className="rp-chat-page-icon" aria-hidden="true">
+            <MessageSquare size={22} />
+          </span>
+          <div>
+            <p className="rp-chat-eyebrow">Owner inbox</p>
+            <h1>Messages</h1>
+            <p>Keep renter conversations, booking questions, and vehicle updates in one place.</p>
+          </div>
+        </div>
+        <span className="rp-chat-live-pill">
+          <span aria-hidden="true" />
+          Real-time messaging
+        </span>
+      </div>
+
+      <div className="owner-messages-shell">
       <aside
         className={`owner-messages-renters ${isShowingList ? "owner-messages-panel-visible" : "owner-messages-panel-hidden"
           }`}
       >
         <div className="owner-messages-renters-header">
-          <h2>Renters</h2>
+          <div>
+            <h2>Conversations</h2>
+            <p>{renterThreads.length} renters</p>
+          </div>
+          <span>{renterThreads.length > 99 ? "99+" : renterThreads.length}</span>
         </div>
 
         <div className="owner-messages-renters-body">
+          <div className="rp-chat-search owner-messages-search">
+            <Search size={16} aria-hidden="true" />
+            <input
+              value={threadQuery}
+              onChange={(event) => setThreadQuery(event.target.value)}
+              placeholder="Search conversations"
+              aria-label="Search renter conversations"
+            />
+          </div>
+
           {error && (
             <div className="mb-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
               {error}
@@ -534,8 +584,12 @@ export default function Messages() {
             <p className="px-1 py-2 text-sm text-slate-500">No renter conversations yet.</p>
           )}
 
+          {!loadingThreads && renterThreads.length > 0 && !filteredRenterThreads.length && (
+            <p className="px-1 py-2 text-sm text-slate-500">No conversations match your search.</p>
+          )}
+
           <div className="owner-messages-renter-list">
-            {renterThreads.map((thread) => (
+            {filteredRenterThreads.map((thread) => (
               <RenterCard
                 key={thread.partner._id}
                 thread={thread}
@@ -543,7 +597,6 @@ export default function Messages() {
                 pinning={pinningRenterId === thread.partner._id}
                 onSelect={() => handleSelectConversation(thread)}
                 onTogglePin={() => togglePinThread(thread)}
-                onOpenActions={() => setActionThreadId(thread.partner._id)}
               />
             ))}
           </div>
@@ -637,23 +690,19 @@ export default function Messages() {
                 <div className="owner-messages-input-wrap">
                   <input
                     value={text}
-                    onChange={(e) => setText(e.target.value)}
+                    onChange={(event) =>
+                      setText(sanitizeRealtimeChatInput(event.target.value))
+                    }
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
                         send();
                       }
                     }}
-                    placeholder="Type a message"
+                    placeholder="Write a message..."
+                    maxLength={REALTIME_CHAT_INPUT_MAX_LENGTH}
                     className="owner-messages-input"
                   />
-                  <span
-                    className="owner-messages-attach-icon"
-                    aria-hidden="true"
-                    title="Attach file"
-                  >
-                    <Paperclip size={17} />
-                  </span>
                 </div>
                 <button
                   type="button"
@@ -713,11 +762,12 @@ export default function Messages() {
       )}
 
       {pinNotice && <PinStatusToast key={pinNotice.id} message={pinNotice.message} />}
+      </div>
     </div>
   );
 }
 
-function RenterCard({ thread, selected, pinning, onSelect, onTogglePin, onOpenActions }) {
+function RenterCard({ thread, selected, pinning, onSelect, onTogglePin }) {
   const statusIsActive = thread.status === "active" || thread.isActive;
   const activityAt = thread.lastMessage?.createdAt || thread.latestActivityAt;
 
@@ -810,9 +860,9 @@ function MessageBubble({
       >
         <div
           title={formatDateTime(message.createdAt)}
-          className={`rounded-[10px] px-4 py-3 text-sm leading-5 shadow-sm ${isOwner
-              ? "bg-[#0188dc] text-white shadow-[0_8px_16px_rgba(1,127,230,0.16)]"
-              : "bg-[#e8ebef] text-[#111827] shadow-[0_8px_16px_rgba(15,23,42,0.04)]"
+          className={`rounded-[17px] px-4 py-3 text-sm leading-6 shadow-sm ${isOwner
+              ? "rounded-br-md bg-gradient-to-br from-[#0B75E7] to-[#045FC3] text-white shadow-[0_10px_24px_rgba(11,117,231,0.18)]"
+              : "rounded-bl-md border border-slate-200 bg-white text-slate-800 shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
             }`}
           onClick={(event) => {
             if (!isOwner || isEditing || message.isDeleted) return;
@@ -824,7 +874,9 @@ function MessageBubble({
             <div className="space-y-2 text-left">
               <input
                 value={editingText}
-                onChange={(event) => onEditingTextChange(event.target.value)}
+                onChange={(event) =>
+                  onEditingTextChange(sanitizeRealtimeChatInput(event.target.value))
+                }
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.preventDefault();
@@ -832,6 +884,7 @@ function MessageBubble({
                   }
                 }}
                 onClick={(event) => event.stopPropagation()}
+                maxLength={REALTIME_CHAT_INPUT_MAX_LENGTH}
                 className="w-full rounded-md border border-white/30 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none"
               />
               <div className="flex justify-end gap-2 text-[11px] font-medium">
@@ -858,6 +911,11 @@ function MessageBubble({
           )}
         </div>
 
+        <span className="mt-1 px-1 text-[10px] font-medium text-slate-400">
+          {formatDateTime(message.createdAt)}
+          {message.isEdited && !message.isDeleted ? " · edited" : ""}
+        </span>
+
         {showActions && isOwner && !isEditing && !message.isDeleted && (
           <div className="mt-2 flex justify-end gap-2 text-[11px] font-medium text-slate-500">
             <button type="button" onClick={onStartEdit} className="hover:text-[#017FE6]">
@@ -880,7 +938,7 @@ function MessageBubble({
 
 function EmptyConversationState({ showBackButton, onBack, error }) {
   return (
-    <div className="relative flex h-full flex-1 items-center justify-center bg-[#fbfcfe] px-6 text-center">
+    <div className="relative flex h-full flex-1 items-center justify-center bg-[#f8fbff] px-6 text-center">
       {showBackButton && (
         <button
           type="button"
@@ -1013,19 +1071,15 @@ function ConfirmModal({
 
 function AvatarCircle({ name, avatar, sizeClass = "h-8 w-8" }) {
   const image = String(avatar || "").trim();
-  const [failed, setFailed] = useState(false);
+  const [failedImage, setFailedImage] = useState("");
 
-  useEffect(() => {
-    setFailed(false);
-  }, [image]);
-
-  if (image && !failed) {
+  if (image && failedImage !== image) {
     return (
       <img
         src={image}
         alt={name}
         className={`${sizeClass} flex-shrink-0 rounded-full border border-slate-200 object-cover`}
-        onError={() => setFailed(true)}
+        onError={() => setFailedImage(image)}
       />
     );
   }

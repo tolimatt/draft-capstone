@@ -23,6 +23,7 @@ const createInitialForm = () => ({
   newImageFiles: [],
   coverImagePath: "",
   coverUploadIndex: "",
+  coverDisplayMode: "auto",
 });
 
 const formatCurrency = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
@@ -60,6 +61,20 @@ function VehicleModal({
       })),
     [form.newImageFiles]
   );
+
+  const coverPreviewUrl = useMemo(() => {
+    if (form.coverImagePath) {
+      const existingIndex = form.existingImagePaths.indexOf(form.coverImagePath);
+      if (existingIndex >= 0) return form.existingImages[existingIndex] || "";
+    }
+
+    const uploadIndex = Number.parseInt(String(form.coverUploadIndex), 10);
+    if (Number.isFinite(uploadIndex) && uploadIndex >= 0) {
+      return newImagePreviews[uploadIndex]?.url || "";
+    }
+
+    return form.existingImages[0] || newImagePreviews[0]?.url || "";
+  }, [form.coverImagePath, form.coverUploadIndex, form.existingImagePaths, form.existingImages, newImagePreviews]);
 
   useEffect(() => {
     return () => {
@@ -311,6 +326,58 @@ function VehicleModal({
               <p className="text-xs text-slate-500">
                 Choose one cover image for the renter and owner cards. The rest stay in the gallery.
               </p>
+
+              <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-[1fr_1.1fr]">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Cover presentation</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    Auto uses a full photo for opaque images and the RentifyPro background for transparent cutouts.
+                  </p>
+
+                  <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Cover presentation">
+                    {[
+                      { value: "auto", label: "Auto" },
+                      { value: "photo", label: "Photo" },
+                      { value: "cutout", label: "Cutout" },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={form.coverDisplayMode === option.value}
+                        onClick={() => setForm((prev) => ({ ...prev, coverDisplayMode: option.value }))}
+                        className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                          form.coverDisplayMode === option.value
+                            ? "border-[#017FE6] bg-blue-50 text-blue-700 ring-2 ring-blue-100"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <p className="mt-3 text-xs text-slate-500">
+                    Use Photo for regular JPGs. Use Cutout only when the image background is transparent.
+                  </p>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Card preview</p>
+                  {coverPreviewUrl ? (
+                    <VehicleCover
+                      src={coverPreviewUrl}
+                      alt="Selected vehicle cover preview"
+                      displayMode={form.coverDisplayMode}
+                      className="min-h-32"
+                      contentClassName="p-3"
+                    />
+                  ) : (
+                    <div className="flex min-h-32 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-4 text-center text-xs text-slate-500">
+                      Select a vehicle photo to preview its card presentation.
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <label className="group flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 transition hover:border-[#017FE6] hover:bg-blue-50/40">
                 <div className="flex items-center gap-3">
@@ -569,15 +636,6 @@ function Vehicles() {
     });
   }, [vehicles, search, statusFilter]);
 
-  const openCreateModal = () => {
-    setModalMode("create");
-    setEditingId(null);
-    setForm(createInitialForm());
-    setModalError("");
-    setLocationError("");
-    setModalOpen(true);
-  };
-
   const openEditModal = (vehicle) => {
     setModalMode("edit");
     setEditingId(vehicle._id);
@@ -600,6 +658,7 @@ function Vehicles() {
       newImageFiles: [],
       coverImagePath: vehicle.coverImagePath || vehicle.imagePaths?.[0] || "",
       coverUploadIndex: "",
+      coverDisplayMode: vehicle.coverDisplayMode || "auto",
     });
     setModalError("");
     setLocationError("");
@@ -631,6 +690,7 @@ function Vehicles() {
     body.append("existingImages", JSON.stringify(form.existingImagePaths || []));
     if (form.coverImagePath) body.append("coverImagePath", form.coverImagePath);
     if (form.coverUploadIndex !== "") body.append("coverUploadIndex", String(form.coverUploadIndex));
+    body.append("coverDisplayMode", form.coverDisplayMode || "auto");
 
     form.newImageFiles.forEach((file) => body.append("images", file));
     return body;

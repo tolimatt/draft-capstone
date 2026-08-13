@@ -88,6 +88,32 @@ const getTransporter = () => {
   return cachedTransporter;
 };
 
+const escapeHtml = (value) =>
+  toText(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+export const sendNotificationEmail = async ({ to, title, message, actionUrl = "" }) => {
+  const recipient = normalizeRecipient(to);
+  const safeTitle = escapeHtml(title).slice(0, 180);
+  const safeMessage = escapeHtml(message).slice(0, 1000);
+  const safeActionUrl = String(actionUrl || "").trim();
+  const hasSafeAction = /^https:\/\//i.test(safeActionUrl);
+  const transporter = getTransporter();
+  const result = await transporter.sendMail({
+    from: `"${getFromName()}" <${getFromAddress()}>`,
+    to: recipient,
+    subject: `RentifyPro: ${safeTitle}`,
+    text: `${title}\n\n${message}${hasSafeAction ? `\n\nView details: ${safeActionUrl}` : ""}`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px"><h1 style="color:#017FE6">RentifyPro</h1><div style="border:1px solid #e5e7eb;border-radius:12px;padding:24px"><h2>${safeTitle}</h2><p style="white-space:pre-wrap;color:#374151">${safeMessage}</p>${hasSafeAction ? `<p><a href="${escapeHtml(safeActionUrl)}" style="display:inline-block;padding:10px 16px;background:#017FE6;color:#fff;text-decoration:none;border-radius:8px">View details</a></p>` : ""}</div><p style="font-size:12px;color:#6b7280">Manage notification preferences in your RentifyPro account.</p></div>`,
+  });
+  auditLog.info("EMAIL", "Notification email sent", { messageId: result.messageId });
+  return result;
+};
+
 const sendEmail = async (to, otp, purpose = "verification") => {
   const recipient = normalizeRecipient(to);
   const { title, description, subject } = getMailContext(purpose);

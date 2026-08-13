@@ -17,6 +17,7 @@ import { authorize } from "../middleware/rbac.middleware.js";
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
 import { ensureChatbotServiceReady } from "../utils/chatbotServiceManager.js";
+import { censorProfanityInText } from "../utils/chatModeration.js";
 import {
   applyChatbotGuardrails,
   buildRejectedChatbotResponse,
@@ -38,7 +39,14 @@ router.post("/", async (req, res, next) => {
     const language = String(req.body?.language || "auto").trim().toLowerCase();
     const validation = validateChatbotInput(rawMessage);
     if (!validation.isValid) {
-      return res.json(buildRejectedChatbotResponse(language === "auto" ? rawMessage : language, validation.reason));
+      const rejectedResponse = buildRejectedChatbotResponse(
+        language === "auto" ? rawMessage : language,
+        validation.reason
+      );
+      if (validation.reason === "profanity") {
+        rejectedResponse.censoredMessage = censorProfanityInText(rawMessage.trim());
+      }
+      return res.json(rejectedResponse);
     }
     const message = validation.message;
 

@@ -48,6 +48,7 @@ export default function SignInPage({
 }) {
   const [form, setForm] = useState({ email: "", password: "", captchaAnswer: "" });
   const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState("");
   const [dirtyFields, setDirtyFields] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -103,6 +104,7 @@ export default function SignInPage({
     setForm(nextForm);
     setDirtyFields((prev) => ({ ...prev, [field]: true }));
     if (field === "email" && rateLimitSeconds > 0) return;
+    setFormError("");
     setErrors((prev) => ({ ...prev, [field]: "" }));
   };
 
@@ -194,6 +196,7 @@ export default function SignInPage({
 
     const newErrors = validateForm();
     setErrors(newErrors);
+    setFormError("");
     if (Object.keys(newErrors).length > 0) return;
     if (!captcha.id) {
       setErrors((prev) => ({
@@ -271,17 +274,29 @@ export default function SignInPage({
         const waitSeconds = retryAfterSeconds > 0 ? retryAfterSeconds : RATE_LIMIT_FALLBACK_SECONDS;
         activateRateLimit(waitSeconds, retryAfterAt);
         setErrors({});
+        setFormError("");
+      } else if (error?.details?.errors && typeof error.details.errors === "object") {
+        const fieldErrors = {};
+        if (error.details.errors.email) fieldErrors.email = error.details.errors.email;
+        if (error.details.errors.password) fieldErrors.password = error.details.errors.password;
+        if (error.details.errors.captchaAnswer || error.details.errors.captcha) {
+          fieldErrors.captchaAnswer =
+            error.details.errors.captchaAnswer || error.details.errors.captcha;
+        }
+        setErrors(fieldErrors);
+        setFormError(Object.keys(fieldErrors).length ? "" : msg || "Login failed. Please try again.");
       } else if (msg.includes("Invalid email or password")) {
-        setErrors({
-          email: "Invalid email or password.",
-          password: "Invalid email or password.",
-        });
+        setErrors({});
+        setFormError("Invalid email or password.");
       } else if (/captcha/i.test(msg)) {
         setErrors({ captchaAnswer: msg });
+        setFormError("");
       } else if (msg.includes("verify your email")) {
         setErrors({ email: "Please verify your email before logging in." });
+        setFormError("");
       } else {
-        setErrors({ email: "Login failed. Please try again." });
+        setErrors({});
+        setFormError("Login failed. Please try again.");
       }
       if (!isRateLimitError) {
         await loadCaptcha();
@@ -323,6 +338,15 @@ export default function SignInPage({
         )}
 
         <form onSubmit={handleSignIn} className="space-y-4" noValidate>
+          {formError && (
+            <div
+              role="alert"
+              className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700"
+            >
+              {formError}
+            </div>
+          )}
+
           <FormInput
             label="Enter Email"
             type="email"

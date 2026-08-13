@@ -1,5 +1,5 @@
 import React from "react";
-import { Users, Settings, Fuel } from "lucide-react";
+import { Fuel, Settings, Star, Users } from "lucide-react";
 import VehicleCover from "./VehicleCover";
 
 export default function FeaturedVehicles({ vehicles, isLoggedIn, onViewDetails, onSignIn }) {
@@ -30,7 +30,7 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
           </span>
         )}
         <span className="absolute top-4 right-4 bg-gray-900 text-white px-3 py-1 rounded-full text-sm font-semibold">
-          <span className="text-yellow-400">★ </span>
+          <Star size={14} className="inline-block text-yellow-400" fill="currentColor" aria-hidden="true" />
           {vehicle.rating}
         </span>
 

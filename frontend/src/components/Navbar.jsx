@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Bot, Car, Menu, MessageCircle, Settings, X } from "lucide-react";
+import { Bell, Car, Menu, MessageCircle, Settings, X } from "lucide-react";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../utils/liveCounters";
@@ -54,17 +54,12 @@ export default function Navbar({
 
     try {
       const [notificationResult, conversationResult] = await Promise.allSettled([
-        API.getNotifications(),
+        API.getUnreadNotificationCount(),
         API.getConversations(),
       ]);
 
       if (notificationResult.status === "fulfilled") {
-        const notifications = notificationResult.value.notifications || [];
-        const notificationsUnread = notifications.reduce(
-          (sum, notification) => sum + (isNotificationRead(notification) ? 0 : 1),
-          0
-        );
-        setUnreadNotifications(notificationsUnread);
+        setUnreadNotifications(Number(notificationResult.value.unreadCount || 0));
       }
 
       if (conversationResult.status === "fulfilled") {
@@ -220,7 +215,7 @@ export default function Navbar({
               <img
                 src={BRAND_LOGO_SRC}
                 alt="RentifyPro logo"
-                className="h-10 w-10 rounded-[0.95rem] object-cover"
+                className="h-10 w-10 rounded-full object-cover"
               />
               <span>
                 Rentify<span className="text-[#0B75E7]">Pro</span>
@@ -406,11 +401,16 @@ export default function Navbar({
       {onShowAI && !isAIOpen && (
         <button
           onClick={onShowAI}
-          aria-label="AI Assistant"
-          className="fixed bottom-6 right-6 z-[70] w-14 h-14 flex items-center justify-center rounded-2xl bg-gradient-to-br from-[#0B75E7] to-[#045FC3] hover:opacity-95 text-white shadow-2xl transition-all duration-300 hover:scale-105"
+          aria-label="Open Rentify AI"
+          className="fixed bottom-8 right-10 z-[70] flex h-16 w-16 items-center justify-center text-white transition-all duration-300 hover:scale-105 hover:opacity-95"
         >
-          <Bot size={22} />
-          <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-white" />
+          <img
+            src="/rentify-ai-logo-bubble.png"
+            alt=""
+            aria-hidden="true"
+            className="h-full w-full object-contain drop-shadow-xl"
+          />
+          <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-green-400" />
         </button>
       )}
     </>
@@ -459,11 +459,11 @@ function ProfileMenu({
           <img
             src={avatar}
             alt={displayName}
-            className="w-8 h-8 rounded-lg object-cover border border-slate-200"
+            className="h-8 w-8 shrink-0 rounded-full border border-slate-200 object-cover"
             onError={() => setAvatarError(true)}
           />
         ) : (
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#0B75E7] to-[#045FC3] text-white flex items-center justify-center text-sm font-bold">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0B75E7] to-[#045FC3] text-sm font-bold text-white">
             {displayInitials}
           </div>
         )}

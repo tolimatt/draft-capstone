@@ -255,7 +255,7 @@ export const getVehicles = async (req, res, next) => {
 
     const total = await Vehicle.countDocuments(vehicleQuery);
     const vehicles = await Vehicle.find(vehicleQuery)
-      .populate("owner", "name email avatar")
+      .populate("owner", "name avatar")
       .sort({ availabilityStatus: 1, createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -267,6 +267,7 @@ export const getVehicles = async (req, res, next) => {
       buildVehicleReviewInsights(vehicleIds, 3),
     ]);
 
+    res.setHeader("Cache-Control", "public, max-age=30, s-maxage=30, stale-while-revalidate=60");
     return res.json({
       success: true,
       vehicles: vehicles.map((vehicle) => {
@@ -300,7 +301,7 @@ export const getVehicles = async (req, res, next) => {
 export const getVehicleById = async (req, res, next) => {
   try {
     const now = new Date();
-    const vehicle = await Vehicle.findById(req.params.id).populate("owner", "name email avatar").lean();
+    const vehicle = await Vehicle.findById(req.params.id).populate("owner", "name avatar").lean();
 
     if (!vehicle) {
       return res.status(404).json({
@@ -317,6 +318,7 @@ export const getVehicleById = async (req, res, next) => {
 
     const vehicleWithReviews = applyVehicleReviewInsights(vehicle, reviewInsightsByVehicle);
 
+    res.setHeader("Cache-Control", "public, max-age=30, s-maxage=30, stale-while-revalidate=60");
     return res.json({
       success: true,
       vehicle: serializeVehicleForRenter(req, {

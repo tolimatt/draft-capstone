@@ -3,9 +3,7 @@
 ## 1. MongoDB Atlas setup
 
 1. Create a database user (Database Access) and save username/password.
-2. In Network Access, add:
-   - `0.0.0.0/0` (quick start), or
-   - your exact trusted IP ranges.
+2. In Network Access, allow only Render's documented egress addresses or private-network connectivity. Do not allow `0.0.0.0/0`.
 3. In Atlas "Connect" -> "Drivers" -> Node.js:
    - copy the SRV URI (`mongodb+srv://...`) for `MONGO_URI`
    - copy the standard URI (`mongodb://host1,host2,...`) for `MONGO_URI_DIRECT` fallback.
@@ -23,7 +21,13 @@ Set at least:
 - `FRONTEND_URL=https://<your-vercel-domain>` (or comma-separated origins)
 - `ALLOW_VERCEL_PREVIEW_ORIGINS=true` (optional, for Vercel preview links)
 - `JWT_SECRET=<strong-secret>`
-- `INTERNAL_API_KEY=<shared-secret>`
+- `INTERNAL_API_KEY=<long-random-shared-secret>` (must exactly match the face service; never use a default)
+- `MONGO_AUTO_INDEX=false` (run schema/index changes through reviewed migrations)
+- `KYC_UPLOAD_DIR=/var/data/rentifypro/private-kyc` (temporary local fallback only; not under public uploads)
+- `KYC_JSON_BODY_LIMIT=8mb`, `KYC_IMAGE_MAX_BYTES=4194304`, `KYC_MAX_FRAMES=5`
+- `KYC_FILE_RETENTION_HOURS=3`, `AUDIT_LOG_RETENTION_DAYS=30`
+- `NOTIFICATION_EMAIL_ENABLED=true` (enable only after SMTP delivery is tested)
+- `READ_NOTIFICATION_RETENTION_DAYS=30`, `NOTIFICATION_ARCHIVE_RETENTION_DAYS=90`
 - `SMTP_HOST=smtp.gmail.com` (or your SMTP host)
 - `SMTP_PORT=587`
 - `SMTP_SECURE=false` (`true` if using port 465)
@@ -44,6 +48,8 @@ If you deploy `face-service`, use the same Mongo variables there as well:
 - `MONGO_URI=<atlas-srv-uri>`
 - `MONGO_URI_DIRECT=<atlas-standard-uri>`
 - `MONGO_DB_NAME=rentifypro`
+- `INTERNAL_API_KEY=<the-same-long-random-shared-secret>`
+- `BIOMETRIC_TEMPLATE_TTL_HOURS=24`
 
 ## 3. Vercel frontend environment variables
 
@@ -78,8 +84,16 @@ If direct URI connects to hosts but returns Atlas `code 8000`, credentials are i
 1. Atlas -> Database Access -> select your database user -> reset password.
 2. Put the exact new credentials into both `MONGO_URI` and `MONGO_URI_DIRECT`.
 3. If password has special characters, URL-encode it before placing it in URI.
-4. Confirm the user has at least `readWriteAnyDatabase` (or required scoped role).
+4. Grant only the role needed for this application's database, ideally collection-scoped `readWrite` access. Do not use `readWriteAnyDatabase` for the web or face service.
 
 For local verification from backend folder:
 
 `npm run db:check`
+
+## 6. Required data operations before production
+
+1. Take and test an Atlas point-in-time restore before migrations. Keep an encrypted copy in a separate account/project according to your RPO/RTO.
+2. Run `npm run db:migrate:kyc` first (dry run), review counts, then run `npm run db:migrate:kyc -- --apply`. The legacy collection is retained for rollback.
+3. Use an object store with a private, SSE-KMS encrypted `kyc/` prefix and lifecycle rules for KYC evidence. The local private directory is a development fallback, not durable multi-instance storage.
+4. Configure Redis for shared rate limits, job leases, token revocation, and short public-response caching before scaling to multiple backend instances.
+5. Run `npm run db:migrate:notifications` first (dry run), then `npm run db:migrate:notifications -- --apply` after backup. Test one booking notification email before enabling it for all users.

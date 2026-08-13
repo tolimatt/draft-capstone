@@ -84,7 +84,9 @@ export default function RenterNotificationsModal({
     setNotificationsUpdating(true);
     setNotificationsError("");
     try {
-      await API.markAllNotificationsRead();
+      await API.markAllNotificationsRead(
+        dailyNotifications.filter((notification) => !isNotificationRead(notification)).map((notification) => notification._id)
+      );
       const now = new Date().toISOString();
       setDailyNotifications((prev) =>
         prev

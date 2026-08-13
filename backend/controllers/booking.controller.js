@@ -689,6 +689,140 @@ const bookingPopulate = [
   { path: "renter", select: "name email avatar role walletAddress" },
 ];
 
+// Booking history is an account ledger, not a TTL-managed resource.  These
+// list helpers deliberately page results so a long-lived account cannot turn a
+// normal page visit into an unbounded database query or response.
+const BOOKING_LIST_DEFAULT_LIMIT = 25;
+const BOOKING_LIST_MAX_LIMIT = 50;
+const LIST_ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
+const LIST_PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
+
+const parseBookingListLimit = (value) => {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return BOOKING_LIST_DEFAULT_LIMIT;
+  return Math.min(parsed, BOOKING_LIST_MAX_LIMIT);
+};
+
+const parseBookingListCursor = (value) => {
+  if (!value || typeof value !== "string") return null;
+
+  try {
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    const timestamp = toDate(decoded?.at);
+    const id = String(decoded?.id || "");
+    if (!timestamp || !Booking.base.Types.ObjectId.isValid(id)) return null;
+    return { at: timestamp, id };
+  } catch {
+    return null;
+  }
+};
+
+const createBookingListCursor = (booking, sortField) => {
+  const sortValue = toDate(booking?.[sortField]);
+  if (!sortValue || !booking?._id) return null;
+  return Buffer.from(
+    JSON.stringify({ at: sortValue.toISOString(), id: String(booking._id) })
+  ).toString("base64url");
+};
+
+const cursorFilter = (cursor, sortField, direction) => {
+  if (!cursor) return {};
+  const comparison = direction === "asc" ? "$gt" : "$lt";
+  return {
+    $or: [
+      { [sortField]: { [comparison]: cursor.at } },
+      { [sortField]: cursor.at, _id: { [comparison]: cursor.id } },
+    ],
+  };
+};
+
+const buildBookingListDefinition = ({ role, status, view }) => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const normalizedView = String(view || "").trim().toLowerCase();
+
+  if (normalizedStatus === "cancelled") {
+    return { filter: { status: { $in: ["cancelled", "rejected"] } }, sortField: "updatedAt", direction: "desc" };
+  }
+
+  if ([...LIST_ACTIVE_BOOKING_STATUSES, ...LIST_PAST_BOOKING_STATUSES].includes(normalizedStatus)) {
+    return {
+      filter: { status: normalizedStatus },
+      sortField: normalizedStatus === "confirmed" || normalizedStatus === "extended" ? "pickupAt" : "updatedAt",
+      direction: normalizedStatus === "confirmed" || normalizedStatus === "extended" ? "asc" : "desc",
+    };
+  }
+
+  if (normalizedView === "active") {
+    return { filter: { status: { $in: LIST_ACTIVE_BOOKING_STATUSES } }, sortField: "pickupAt", direction: "asc" };
+  }
+
+  if (normalizedView === "past") {
+    return { filter: { status: { $in: LIST_PAST_BOOKING_STATUSES } }, sortField: "updatedAt", direction: "desc" };
+  }
+
+  if (role === "owner" && normalizedView === "action") {
+    return {
+      filter: {
+        $or: [
+          { status: "pending" },
+          { extensionStatus: "requested" },
+          { cancellationStatus: "requested" },
+          { walkInPaymentStatus: "requested" },
+          { status: { $in: ["confirmed", "extended"] }, lateReturnIsOverdue: true },
+        ],
+      },
+      sortField: "updatedAt",
+      direction: "desc",
+    };
+  }
+
+  // Renters do not need declined/cancelled requests in their everyday booking
+  // list. Owners retain that history for operational and accounting purposes.
+  if (role === "renter" && normalizedView === "all") {
+    return { filter: { status: { $nin: ["cancelled", "rejected"] } }, sortField: "updatedAt", direction: "desc" };
+  }
+
+  return { filter: {}, sortField: "updatedAt", direction: "desc" };
+};
+
+const listBookingsForParty = async ({ req, partyField, role }) => {
+  const { filter, sortField, direction } = buildBookingListDefinition({
+    role,
+    status: req.query.status,
+    view: req.query.view,
+  });
+  const limit = parseBookingListLimit(req.query.limit);
+  const cursor = parseBookingListCursor(req.query.cursor);
+  const paginationFilter = cursorFilter(cursor, sortField, direction);
+  const query = {
+    [partyField]: req.user._id,
+    $and: [filter, paginationFilter],
+  };
+  const sortDirection = direction === "asc" ? 1 : -1;
+
+  const documents = await Booking.find(query)
+    .populate(bookingPopulate)
+    .sort({ [sortField]: sortDirection, _id: sortDirection })
+    .limit(limit + 1);
+
+  const hasMore = documents.length > limit;
+  const bookings = hasMore ? documents.slice(0, limit) : documents;
+  await autoSyncBookingLifecycles(req, bookings);
+  const autoSynced = await autoSyncBookingPayments(bookings);
+  for (const booking of autoSynced) {
+    emitBookingUpdateToParties(req, booking);
+  }
+
+  return {
+    bookings: bookings.map((booking) => serializeBooking(req, booking)),
+    page: {
+      hasMore,
+      nextCursor: hasMore ? createBookingListCursor(bookings[bookings.length - 1], sortField) : null,
+      limit,
+    },
+  };
+};
+
 export const createBooking = async (req, res) => {
   let lockAcquired = false;
   let lockedVehicleId = null;
@@ -889,21 +1023,8 @@ export const createBooking = async (req, res) => {
 
 export const getMyBookings = async (req, res) => {
   try {
-    const status = req.query.status;
-    const query = { renter: req.user._id };
-    if (status === "cancelled") {
-      query.status = { $in: ["cancelled", "rejected"] };
-    } else if (status && status !== "all") {
-      query.status = status;
-    }
-
-    const bookings = await Booking.find(query).populate(bookingPopulate).sort({ createdAt: -1 });
-    await autoSyncBookingLifecycles(req, bookings);
-    const autoSynced = await autoSyncBookingPayments(bookings);
-    for (const booking of autoSynced) {
-      emitBookingUpdateToParties(req, booking);
-    }
-    res.json({ success: true, bookings: bookings.map((booking) => serializeBooking(req, booking)) });
+    const result = await listBookingsForParty({ req, partyField: "renter", role: "renter" });
+    res.json({ success: true, ...result });
   } catch {
     res.status(500).json({ success: false, message: "Failed to fetch bookings." });
   }
@@ -911,21 +1032,8 @@ export const getMyBookings = async (req, res) => {
 
 export const getOwnerBookings = async (req, res) => {
   try {
-    const status = req.query.status;
-    const query = { owner: req.user._id };
-    if (status === "cancelled") {
-      query.status = { $in: ["cancelled", "rejected"] };
-    } else if (status && status !== "all") {
-      query.status = status;
-    }
-
-    const bookings = await Booking.find(query).populate(bookingPopulate).sort({ createdAt: -1 });
-    await autoSyncBookingLifecycles(req, bookings);
-    const autoSynced = await autoSyncBookingPayments(bookings);
-    for (const booking of autoSynced) {
-      emitBookingUpdateToParties(req, booking);
-    }
-    res.json({ success: true, bookings: bookings.map((booking) => serializeBooking(req, booking)) });
+    const result = await listBookingsForParty({ req, partyField: "owner", role: "owner" });
+    res.json({ success: true, ...result });
   } catch {
     res.status(500).json({ success: false, message: "Failed to fetch owner bookings." });
   }
