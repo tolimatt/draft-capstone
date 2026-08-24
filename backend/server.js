@@ -60,7 +60,9 @@ const chatbotUrl = process.env.CHATBOT_URL || "http://localhost:8001";
 const { isAllowedOrigin, allowedOrigins, allowVercelPreviewOrigins } = createOriginChecker();
 const corsOriginHandler = (origin, callback) => {
   if (isAllowedOrigin(origin)) return callback(null, true);
-  return callback(new Error(`Origin ${origin || "(unknown)"} is not allowed by CORS`));
+  const error = new Error(`Origin ${origin || "(unknown)"} is not allowed by CORS`);
+  error.status = 403;
+  return callback(error);
 };
 const allowPublicVehicleMedia = (_req, res, next) => {
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
@@ -81,7 +83,7 @@ app.use(cors({
   origin: corsOriginHandler,
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-internal-key"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-internal-key", "x-pre-kyc-token"],
   maxAge: 86400,
 }));
 console.log(

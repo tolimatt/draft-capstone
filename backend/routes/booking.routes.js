@@ -14,7 +14,7 @@ import {
   verifyBookingPayment,
 } from "../controllers/booking.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
-import { authorize } from "../middleware/rbac.middleware.js";
+import { authorize, requireKyc } from "../middleware/rbac.middleware.js";
 import { validateObjectIdParam } from "../middleware/validate.middleware.js";
 import {
   bookingCreateLimiter,
@@ -23,7 +23,7 @@ import {
 
 const router = express.Router();
 
-router.post("/", protect, authorize("user", "owner", "admin"), bookingCreateLimiter, createBooking);
+router.post("/", protect, authorize("user", "owner", "admin"), requireKyc, bookingCreateLimiter, createBooking);
 router.get("/me", protect, authorize("user", "owner", "admin"), getMyBookings);
 router.get("/owner", protect, authorize("owner", "admin"), getOwnerBookings);
 router.get("/:id", protect, authorize("user", "owner", "admin"), validateObjectIdParam("id"), getBookingById);

@@ -1,33 +1,28 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentTime, getTodayDate, getTomorrowDate } from "./utils/dateUtils";
 
 // Main pages
 import RentifyPro from "./pages/RentifyPro";
-import SignInPage from "./components/SignInPage";
-import VehiclesPage from "./pages/VehiclesPage";
-import VehicleDetailsPage from "./pages/VehicleDetailsPage";
-import BookingsPage from "./pages/BookingsPage";
-import RealtimeChatPage from "./pages/RealtimeChatPage";
-import NotificationsPage from "./pages/NotificationsPage";
-import AboutPage from "./pages/AboutPage";
-import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
-import TermsAndConditionsPage from "./pages/TermsAndConditionsPage";
-import AccountSettings from "./pages/AccountSettings";
-import ProceedVehicleOwner from "./pages/ProceedVehicleOwner";
-import VehicleOwnerVerification from "./pages/VehicleOwnerVerification";
-
-// Registration pages
-import RegisterPage from "./components/RegisterPage";
-import RegisterOwnerPage from "./pages/RegisterOwnerPage";
-
-// Verification pages
-import RegisterOTP from "./verification/RegisterOTP";
-import ForgotPasswordEmail from "./verification/ForgotPasswordEmail";
-import ForgotPasswordOTP from "./verification/ForgotPasswordOTP";
-import ResetPassword from "./verification/ResetPassword";
-
-// Owner pages
-import OwnerLayout from "./owner/OwnerLayout";
+const SignInPage = lazy(() => import("./components/SignInPage"));
+const VehiclesPage = lazy(() => import("./pages/VehiclesPage"));
+const VehicleDetailsPage = lazy(() => import("./pages/VehicleDetailsPage"));
+const BookingsPage = lazy(() => import("./pages/BookingsPage"));
+const RealtimeChatPage = lazy(() => import("./pages/RealtimeChatPage"));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage"));
+const TermsAndConditionsPage = lazy(() => import("./pages/TermsAndConditionsPage"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
+const AccountSettings = lazy(() => import("./pages/AccountSettings"));
+const ProceedVehicleOwner = lazy(() => import("./pages/ProceedVehicleOwner"));
+const VehicleOwnerVerification = lazy(() => import("./pages/VehicleOwnerVerification"));
+const RegisterPage = lazy(() => import("./components/RegisterPage"));
+const RegisterOwnerPage = lazy(() => import("./pages/RegisterOwnerPage"));
+const RegisterOTP = lazy(() => import("./verification/RegisterOTP"));
+const ForgotPasswordEmail = lazy(() => import("./verification/ForgotPasswordEmail"));
+const ForgotPasswordOTP = lazy(() => import("./verification/ForgotPasswordOTP"));
+const ResetPassword = lazy(() => import("./verification/ResetPassword"));
+const OwnerLayout = lazy(() => import("./owner/OwnerLayout"));
 
 // Shared parts
 import LogoutModal from "./components/LogoutModal";
@@ -68,6 +63,12 @@ const ROUTE_TO_PAGE = {
   "/owner-dashboard": "owner-dashboard",
 };
 
+const PageFallback = () => (
+  <div className="flex min-h-screen items-center justify-center bg-white text-sm text-slate-600" role="status">
+    Loading page...
+  </div>
+);
+
 const PAGE_TO_ROUTE = Object.entries(ROUTE_TO_PAGE).reduce((map, [route, page]) => {
   map[page] = route;
   return map;
@@ -76,7 +77,7 @@ const PAGE_TO_ROUTE = Object.entries(ROUTE_TO_PAGE).reduce((map, [route, page]) 
 const resolvePageFromPath = (pathname) => {
   const raw = String(pathname || "/").toLowerCase();
   const normalized = raw === "/" ? raw : raw.replace(/\/+$/, "");
-  return ROUTE_TO_PAGE[normalized] || "home";
+  return ROUTE_TO_PAGE[normalized] || "not-found";
 };
 
 const getVehicleIdFromSearch = (search) => {
@@ -809,6 +810,8 @@ const App = () => {
         onViewAllNotifications={handleViewAllRenterNotifications}
       />
 
+      <Suspense fallback={<PageFallback />}>
+
       {/* home */}
       {currentPage === "home" && (
         <RentifyPro
@@ -1174,6 +1177,13 @@ const App = () => {
         />
       )}
 
+      {currentPage === "not-found" && (
+        <NotFoundPage
+          onNavigateToHome={() => setCurrentPage("home")}
+          onNavigateToVehicles={() => setCurrentPage("vehicles")}
+        />
+      )}
+
       {/* owner upgrade */}
       {currentPage === "vehicle-owner-proceed" && (
         <ProceedVehicleOwner
@@ -1199,6 +1209,7 @@ const App = () => {
 
       {/* owner dashboard */}
       {currentPage === "owner-dashboard" && isOwnerLoggedIn && <OwnerLayout />}
+      </Suspense>
     </>
   );
 };

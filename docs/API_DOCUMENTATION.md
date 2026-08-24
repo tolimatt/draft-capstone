@@ -336,6 +336,7 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
 - Body:
   - `id_image_base64` (required)
   - `id_image_mime` (optional; default `image/jpeg`)
+  - `id_type` (required; must be one of the supported Philippine ID types)
 - Flow:
   - Verifies document validity.
   - If valid, registers ID face embedding via face service.
@@ -358,8 +359,13 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
 - Auth: Protected
 - Returns KYC record for current user, or `{ status: "not_started" }`.
 
+#### `POST /api/kyc/pre/session`
+- Auth: Public, rate limited
+- Body: `email`, `role` (`user|owner`), and optional `previousToken` for bounded renewal.
+- Returns a short-lived token bound to one email, role, and verification attempt.
+
 #### `POST /api/kyc/pre/id-register`
-- Auth: Public
+- Auth: Signed pre-KYC token in `x-pre-kyc-token`
 - Body:
   - `email`
   - `id_image_base64`
@@ -369,13 +375,13 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
 - Purpose: pre-registration ID verification and face ID registration.
 
 #### `POST /api/kyc/pre/selfie/challenge`
-- Auth: Public
+- Auth: Signed pre-KYC token in `x-pre-kyc-token`
 - Body:
   - `email`
   - `frames_base64` (array, min configured count)
 
 #### `POST /api/kyc/pre/selfie/verify`
-- Auth: Public
+- Auth: Signed pre-KYC token in `x-pre-kyc-token`
 - Body:
   - `email`
   - `challenge_id`
@@ -384,13 +390,26 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
 - Stores pre-registration face verification status.
 
 #### `POST /api/kyc/pre/supporting-doc/verify`
-- Auth: Public
+- Auth: Signed pre-KYC token in `x-pre-kyc-token`
 - Body:
   - `email`
   - `doc_image_base64`
   - `role` (optional)
   - `doc_image_mime` (optional)
 - Verifies owner supporting document.
+- Clear results are accepted or rejected automatically. Otherwise `reviewRequired: true` is returned and registration waits for an admin decision.
+
+#### `GET /api/kyc/admin/reviews`
+- Auth: Protected admin
+- Returns up to 200 pending document reviews, oldest first, without embedding file contents.
+
+#### `GET /api/kyc/admin/reviews/:id/file`
+- Auth: Protected admin
+- Streams private evidence with `Cache-Control: private, no-store`.
+
+#### `PATCH /api/kyc/admin/reviews/:id`
+- Auth: Protected admin
+- Body: `action` (`approve|reject`), optional `remarks`.
 
 #### `PATCH /api/kyc/internal/update-status`
 - Auth: Internal key
@@ -838,7 +857,7 @@ Internal service used by `POST /api/chat`.
   - `status`
   - `service`
   - `model`
-  - `dataset`
+  - `dataset` (always `rentifypro_chatbot_dataset_v6.json`)
 
 ### `GET /health`
 - Returns `{ "status": "ok" }`
@@ -906,4 +925,3 @@ Several booking/chat endpoints also emit socket events:
 - `chat:message` to sender/receiver on new messages.
 
 These are event side effects and not separate HTTP endpoints.
-

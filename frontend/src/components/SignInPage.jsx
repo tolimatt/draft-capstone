@@ -59,8 +59,25 @@ export default function SignInPage({
     getRemainingRateLimitSeconds(readStoredRateLimitUntil())
   );
   const lastSubmitRef = useRef(0);
+  const emailInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
+  const captchaInputRef = useRef(null);
   const isRateLimited = rateLimitSeconds > 0;
   const isFormLocked = isLoading || isRateLimited;
+
+  const focusFirstInvalidField = (fieldErrors) => {
+    const refs = {
+      email: emailInputRef,
+      password: passwordInputRef,
+      captchaAnswer: captchaInputRef,
+    };
+    const firstInvalidField = ["email", "password", "captchaAnswer"].find(
+      (field) => fieldErrors[field]
+    );
+    if (firstInvalidField) {
+      setTimeout(() => refs[firstInvalidField].current?.focus?.(), 0);
+    }
+  };
 
   const clearRateLimit = useCallback(() => {
     setRateLimitUntil(0);
@@ -285,15 +302,32 @@ export default function SignInPage({
         }
         setErrors(fieldErrors);
         setFormError(Object.keys(fieldErrors).length ? "" : msg || "Login failed. Please try again.");
-      } else if (msg.includes("Invalid email or password")) {
-        setErrors({});
-        setFormError("Invalid email or password.");
+        focusFirstInvalidField(fieldErrors);
+      } else if (error?.details?.code === "INVALID_EMAIL") {
+        const fieldErrors = { email: "Invalid email." };
+        setErrors(fieldErrors);
+        setFormError("");
+        focusFirstInvalidField(fieldErrors);
+      } else if (error?.details?.code === "INVALID_PASSWORD") {
+        const fieldErrors = { password: "Invalid password." };
+        setErrors(fieldErrors);
+        setFormError("");
+        focusFirstInvalidField(fieldErrors);
+      } else if (/invalid email or password/i.test(msg)) {
+        const fieldErrors = { password: "Invalid password." };
+        setErrors(fieldErrors);
+        setFormError("");
+        focusFirstInvalidField(fieldErrors);
       } else if (/captcha/i.test(msg)) {
-        setErrors({ captchaAnswer: msg });
+        const fieldErrors = { captchaAnswer: msg };
+        setErrors(fieldErrors);
         setFormError("");
+        focusFirstInvalidField(fieldErrors);
       } else if (msg.includes("verify your email")) {
-        setErrors({ email: "Please verify your email before logging in." });
+        const fieldErrors = { email: "Please verify your email before logging in." };
+        setErrors(fieldErrors);
         setFormError("");
+        focusFirstInvalidField(fieldErrors);
       } else {
         setErrors({});
         setFormError("Login failed. Please try again.");
@@ -358,6 +392,7 @@ export default function SignInPage({
             required
             icon={Mail}
             iconPosition="left"
+            inputRef={emailInputRef}
             showEmailHint
             maxLength={254}
             onBlur={() => handleFieldBlur("email")}
@@ -372,6 +407,7 @@ export default function SignInPage({
             placeholder="Enter Password"
             required
             maxLength={128}
+            inputRef={passwordInputRef}
             onBlur={() => handleFieldBlur("password")}
           />
 
@@ -393,6 +429,7 @@ export default function SignInPage({
                     </div>
                     <span className="text-lg font-semibold text-slate-500">=</span>
                     <input
+                      ref={captchaInputRef}
                       type="text"
                       value={form.captchaAnswer}
                       onChange={(e) => handleChange("captchaAnswer", e.target.value.replace(/[^0-9]/g, ""))}
@@ -402,7 +439,12 @@ export default function SignInPage({
                       inputMode="numeric"
                       pattern="[0-9]*"
                       maxLength={3}
-                      className="w-[72px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-lg font-semibold text-slate-800 shadow-sm outline-none transition focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400"
+                      aria-invalid={Boolean(errors.captchaAnswer)}
+                      className={`w-[72px] rounded-lg border px-3 py-2 text-center text-lg font-semibold shadow-sm outline-none transition disabled:bg-slate-100 disabled:text-slate-400 ${
+                        errors.captchaAnswer
+                          ? "border-red-300 bg-red-50/80 text-red-900 focus:border-red-400 focus:ring-4 focus:ring-red-100"
+                          : "border-slate-200 bg-white text-slate-800 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
+                      }`}
                     />
                   </div>
                   <button

@@ -31,6 +31,7 @@ import {
   preSelfieChallenge,
   preSelfieVerify,
   preVerifySupportingDocument,
+  getPreKycSessionToken,
 } from "../utils/kycApi";
 import AuthShell from "../components/AuthShell";
 import LegalPolicyModal from "../components/LegalPolicyModal";
@@ -44,8 +45,9 @@ const ACTION_COOLDOWN_MS = 2000;
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-const EMOJI_REGEX =
-  /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
+// The joined/variation-selector code points are intentionally included to reject complete emoji sequences.
+// eslint-disable-next-line no-misleading-character-class
+const EMOJI_REGEX = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
 const PH_LOCAL_MOBILE_REGEX = /^9\d{9}$/;
 
 const normalizeNameInput = (value = "") => {
@@ -926,7 +928,7 @@ export default function RegisterOwnerPage({
       setKyc((prev) => ({ ...prev, selfieDataUrl: lastDataUrl, selfieBase64Clean: lastClean }));
       setKycUi((prev) => ({ ...prev, statusText: "Checking selfie motion... please blink or move slightly." }));
 
-      const result = await preSelfieChallenge(form.businessEmail, cleanFrames);
+      const result = await preSelfieChallenge(form.businessEmail, cleanFrames, "owner");
       if (!result.passed) throw new Error(result.message || "Selfie challenge failed.");
 
       setKyc((prev) => ({ ...prev, challengeId: result.challenge_id }));
@@ -988,6 +990,7 @@ export default function RegisterOwnerPage({
     setFormError("");
 
     try {
+      const preKycToken = await getPreKycSessionToken(form.businessEmail, "owner");
       const response = await API.register({
         name: fullName,
         email: form.businessEmail,
@@ -1002,6 +1005,7 @@ export default function RegisterOwnerPage({
         ownerType: form.ownerType,
         businessName: form.businessName,
         permitNumber: form.permitNumber,
+        preKycToken,
       });
 
       const registeredEmail = String(response?.user?.email || form.businessEmail || "").trim().toLowerCase();

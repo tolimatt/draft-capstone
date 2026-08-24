@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
+import InfoModal from "../components/InfoModal";
 import API from "../utils/api";
 import VerificationStepper from "../verification/VerificationStepper";
 import {
@@ -20,7 +21,7 @@ import {
   persistUserProfile,
 } from "../utils/userProfile";
 import { fileToBase64, stripDataUrlPrefix, getMimeFromDataUrl } from "../utils/cameraKyc";
-import { preVerifySupportingDocument } from "../utils/kycApi";
+import { getPreKycSessionToken, preVerifySupportingDocument } from "../utils/kycApi";
 import { RELATIONSHIP_OPTIONS } from "../data/registerValidation";
 import { SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
@@ -288,7 +289,6 @@ const AccountSettings = ({
   onNavigateToChat,
   onNavigateToNotifications,
   onNavigateToAccountSettings,
-  onNavigateToVehicleOwnerProceed,
   isLoggedIn,
   user,
   onLogout,
@@ -310,6 +310,7 @@ const AccountSettings = ({
   const [savingSection, setSavingSection] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [statusError, setStatusError] = useState("");
+  const [showPhotoConfirmation, setShowPhotoConfirmation] = useState(false);
   const [isAddressEdited, setIsAddressEdited] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -391,10 +392,13 @@ const AccountSettings = ({
     return () => {
       mounted = false;
     };
-  }, [activeUserIdentity]);
+  }, [activeUserIdentity, user]);
 
   const syncAvatarAcrossApp = async (avatarValue = "") => {
     const normalizedAvatar = String(avatarValue || "").trim();
+    setStatusMessage("");
+    setStatusError("");
+
     const persisted = persistUserProfile({
       ...getStoredUser(),
       ...profile,
@@ -411,8 +415,11 @@ const AccountSettings = ({
       setProfile((prev) => ({ ...prev, ...synced }));
       setProfilePhoto(synced.avatar || null);
       window.dispatchEvent(new Event("user-profile-updated"));
-      setStatusMessage("Profile photo updated.");
-      setStatusError("");
+      if (normalizedAvatar) {
+        setShowPhotoConfirmation(true);
+      } else {
+        setStatusMessage("Profile photo removed.");
+      }
     } catch (error) {
       setStatusError(error.message || "Profile photo saved locally. Cloud sync failed.");
     }
@@ -757,11 +764,13 @@ const AccountSettings = ({
     setOwnerUpgradeError("");
     setOwnerUpgradeMessage("");
     try {
+      const preKycToken = await getPreKycSessionToken(profile.email, "owner");
       const response = await API.upgradeToOwner({
         ownerType: ownerForm.ownerType || "",
         businessName: ownerForm.businessName || "",
         licenseNumber: ownerForm.licenseNumber || "",
         permitNumber: ownerForm.permitNumber || "",
+        preKycToken,
       });
       const updated = persistUserProfile(
         response.user || {
@@ -986,8 +995,12 @@ const AccountSettings = ({
                   </div>
                 )}
 
-                <div className="rp-settings-card flex items-center gap-4 p-6">
-                  <div className="relative">
+                <div
+                  className={`rp-settings-card relative flex items-center gap-4 overflow-visible p-6 ${
+                    showPhotoMenu ? "z-[60]" : "z-10"
+                  }`}
+                >
+                  <div className="relative z-10">
                     <div className="relative">
                       <div className="w-24 h-24 rounded-full overflow-hidden bg-[#017FE6] flex items-center justify-center">
                         {profilePhoto ? (
@@ -1011,7 +1024,7 @@ const AccountSettings = ({
                       </button>
 
                       {showPhotoMenu && (
-                        <div className="absolute top-full left-0 mt-2 mr-1 w-40 bg-white rounded-lg shadow-lg border z-50 origin-top-right">
+                        <div className="absolute top-full left-0 z-[70] mt-2 mr-1 w-40 origin-top-right rounded-lg border bg-white shadow-lg">
                           <label className="block px-4 py-2 text-sm hover:bg-gray-100 cursor-pointer">
                             Upload Photo
                             <input
@@ -1823,7 +1836,7 @@ const AccountSettings = ({
           className="fixed bottom-8 right-10 z-[70] flex h-16 w-16 items-center justify-center transition-all duration-300 hover:scale-105 hover:opacity-95"
         >
           <img
-            src="/rentify-ai-logo-bubble.png"
+            src="/rentify-ai-logo-bubble-optimized.png"
             alt=""
             aria-hidden="true"
             className="h-full w-full object-contain drop-shadow-xl"
@@ -1836,6 +1849,14 @@ const AccountSettings = ({
         isOpen={showAI}
         onClose={() => setShowAI(false)}
         onViewAvailableVehicles={onNavigateToVehicles}
+      />
+
+      <InfoModal
+        isOpen={showPhotoConfirmation}
+        title="Profile Photo Updated"
+        message="Your new profile photo has been uploaded successfully."
+        confirmLabel="Done"
+        onClose={() => setShowPhotoConfirmation(false)}
       />
     </div>
   );

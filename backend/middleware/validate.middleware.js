@@ -235,6 +235,9 @@ export const validateLogin = (req, res, next) => {
   if (!email || !email.trim()) errors.email = "Email is required.";
   else if (/\s/.test(email.trim())) errors.email = "Email must not contain spaces.";
   else if (EMOJI_REGEX.test(email)) errors.email = "Email must not contain emoji.";
+  else if (email.trim().length > MAX_EMAIL_LENGTH)
+    errors.email = `Email is too long (max ${MAX_EMAIL_LENGTH} characters).`;
+  else if (!EMAIL_REGEX.test(email.trim())) errors.email = "Enter a valid email address.";
 
   if (!password) errors.password = "Password is required.";
   else if (/\s/.test(password)) errors.password = "Password must not contain spaces.";

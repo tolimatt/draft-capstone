@@ -31,6 +31,7 @@ import {
   getDurationMinutesBetween,
 } from "../../utils/dateUtils";
 import { resolveAssetUrl } from "../../utils/media";
+import { formatVehicleTypeLabel } from "../../utils/vehicleText";
 
 const money = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
@@ -1827,7 +1828,10 @@ function DashboardVehicleCard({ vehicle }) {
   const imageUrl = resolveAssetUrl(vehicle?.imageUrl || vehicle?.images?.[0] || "");
   const availability = String(vehicle?.availabilityStatus || "available").toLowerCase();
   const isAvailable = availability === "available";
-  const vehicleType = [vehicle?.specs?.type, vehicle?.specs?.subType].filter(Boolean).join(" • ");
+  const vehicleType = formatVehicleTypeLabel(vehicle?.specs?.type, vehicle?.specs?.subType, {
+    separator: " • ",
+    fallback: "",
+  });
   const details = [vehicleType || "Vehicle", vehicle?.location].filter(Boolean).join(" • ");
   const rate = Number(vehicle?.dailyRentalRate || 0);
   const rateUnit = vehicle?.pricingUnit === "daily" ? "day" : "hour";

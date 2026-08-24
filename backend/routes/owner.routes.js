@@ -13,7 +13,7 @@ import {
   updateOwnerVehicle,
 } from "../controllers/ownerVehicle.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
-import { authorize } from "../middleware/rbac.middleware.js";
+import { authorize, requireKyc } from "../middleware/rbac.middleware.js";
 import {
   uploadVehicleImages,
   validateUploadedVehicleImages,
@@ -50,6 +50,7 @@ router.post(
   "/vehicles",
   protect,
   authorize("owner"),
+  requireKyc,
   uploadVehicleImages.array("images", 8),
   validateUploadedVehicleImages,
   validateVehicleCreate,

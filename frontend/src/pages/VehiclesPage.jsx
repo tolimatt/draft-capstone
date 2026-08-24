@@ -8,6 +8,7 @@ import VehiclePreviewModal from "../components/VehiclePreviewModal";
 import { sanitizeBookingRange } from "../utils/dateUtils";
 import VehicleCover from "../components/VehicleCover";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
+import { formatVehicleType } from "../utils/vehicleText";
 
 const normalizeVehicleType = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -349,7 +350,7 @@ export default function VehiclesPage({
 
                       <div className="flex items-center gap-1 text-sm text-slate-500">
                         <CarFront size={14} className="text-[#0B75E7]" />
-                        <span className="capitalize">{vehicle.type}</span>
+                        <span>{formatVehicleType(vehicle.type, "Vehicle")}</span>
                       </div>
 
                       <div className="flex gap-4 text-sm text-slate-600">

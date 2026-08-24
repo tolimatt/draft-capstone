@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CarFront, Fuel, ImagePlus, MapPin, Settings, Settings2, UploadCloud, Users, X } from "lucide-react";
+import { CarFront, ChevronDown, Fuel, ImagePlus, MapPin, Settings, Settings2, UploadCloud, Users, X } from "lucide-react";
 import API from "../../utils/api";
 import { isPhilippineLocation } from "../../utils/locationValidation";
 import VehicleCover from "../../components/VehicleCover";
@@ -769,15 +769,20 @@ function Vehicles() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select
-          className="rounded-lg border px-3 py-2"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="all">All Vehicles</option>
-          <option value="available">Available</option>
-          <option value="unavailable">Unavailable</option>
-        </select>
+        <div className="group relative md:min-w-48">
+          <select
+            className="h-full w-full cursor-pointer appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 pr-11 text-slate-700 outline-none transition hover:border-slate-300 focus:border-[#0B75E7] focus:ring-4 focus:ring-[#0B75E7]/10"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Vehicles</option>
+            <option value="available">Available</option>
+            <option value="unavailable">Unavailable</option>
+          </select>
+          <span className="pointer-events-none absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition group-hover:bg-[#0B75E7]/10 group-hover:text-[#0B75E7] group-focus-within:bg-[#0B75E7]/10 group-focus-within:text-[#0B75E7]">
+            <ChevronDown size={16} strokeWidth={2.25} aria-hidden="true" />
+          </span>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

@@ -12,11 +12,18 @@ import {
   preSelfieChallenge,
   preSelfieVerify,
   preVerifySupportingDocument,
+  createPreKycSession,
+  listPendingKycReviews,
+  getKycReviewFile,
+  decideKycReview,
 } from "../controllers/kyc.controller.js";
 import {
   kycLimiter,
   preKycLimiter,
 } from "../middleware/security.middleware.js";
+import { requirePreKycSession } from "../middleware/preKycSession.middleware.js";
+import { authorize } from "../middleware/rbac.middleware.js";
+import { validateObjectIdParam } from "../middleware/validate.middleware.js";
 
 const router = express.Router();
 // Identity documents, face scores, and verification status must never enter browser/proxy caches.
@@ -34,12 +41,18 @@ router.post("/selfie/verify", protect, kycLimiter, selfieVerify);
 router.get("/me", protect, getMyKyc);
 
 // Pre-registration KYC routes
-router.post("/pre/id-register", preKycLimiter, preRegisterIdFace);
-router.post("/pre/selfie/challenge", preKycLimiter, preSelfieChallenge);
-router.post("/pre/selfie/verify", preKycLimiter, preSelfieVerify);
-router.post("/pre/supporting-doc/verify", preKycLimiter, preVerifySupportingDocument);
+router.post("/pre/session", preKycLimiter, createPreKycSession);
+router.post("/pre/id-register", preKycLimiter, requirePreKycSession, preRegisterIdFace);
+router.post("/pre/selfie/challenge", preKycLimiter, requirePreKycSession, preSelfieChallenge);
+router.post("/pre/selfie/verify", preKycLimiter, requirePreKycSession, preSelfieVerify);
+router.post("/pre/supporting-doc/verify", preKycLimiter, requirePreKycSession, preVerifySupportingDocument);
 
 // Internal callback from the Python service
 router.patch("/internal/update-status", internalUpdateStatus);
+
+// Manual review queue for uncertain automated document results.
+router.get("/admin/reviews", protect, authorize("admin"), listPendingKycReviews);
+router.get("/admin/reviews/:id/file", protect, authorize("admin"), validateObjectIdParam("id"), getKycReviewFile);
+router.patch("/admin/reviews/:id", protect, authorize("admin"), validateObjectIdParam("id"), decideKycReview);
 
 export default router;

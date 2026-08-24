@@ -8,6 +8,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../..");
 const chatbotServiceDir = path.resolve(repoRoot, "chatbot-service");
+const CHATBOT_DATASET_PATH = path.resolve(
+  chatbotServiceDir,
+  "rentifypro_chatbot_dataset_v6.json"
+);
+const CHATBOT_DATASET_SCHEMA_VERSION = "v6_intent_multilingual_conversational";
 
 const SUPPORTED_LANGUAGES = new Set(["english", "filipino", "taglish"]);
 const DEFAULT_LANGUAGE = "english";
@@ -527,20 +532,7 @@ function pickDeterministicText(options = [], key = "") {
 }
 
 function getDatasetPath() {
-  const configured = String(process.env.CHATBOT_DATASET_PATH || "").trim();
-  if (configured) {
-    return path.isAbsolute(configured)
-      ? configured
-      : path.resolve(chatbotServiceDir, configured);
-  }
-
-  const candidates = [
-    path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset_v5.json"),
-    path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset_v4.json"),
-    path.resolve(chatbotServiceDir, "rentifypro_chatbot_dataset.json"),
-  ];
-
-  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+  return CHATBOT_DATASET_PATH;
 }
 
 function loadDataset() {
@@ -557,11 +549,16 @@ function loadDataset() {
   }
 
   if (!datasetExists) {
-    datasetCache = { datasetPath, datasetMtimeMs, intentsById: {} };
-    return datasetCache;
+    throw new Error(`Required chatbot dataset v6 is missing: ${datasetPath}`);
   }
 
   const raw = JSON.parse(fs.readFileSync(datasetPath, "utf-8"));
+  if (raw?.schema_version !== CHATBOT_DATASET_SCHEMA_VERSION) {
+    throw new Error(
+      `Chatbot dataset must use schema ${CHATBOT_DATASET_SCHEMA_VERSION}: ${datasetPath}`
+    );
+  }
+
   const items = Array.isArray(raw?.items) ? raw.items : [];
   const intentsById = {};
   const normalizeAnswerList = (values = []) => {
@@ -579,36 +576,36 @@ function loadDataset() {
     return deduped;
   };
 
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const intentId = cleanText(item?.id);
-    if (!intentId) continue;
+    if (!intentId) {
+      throw new Error(`Invalid v6 chatbot intent at index ${index}: missing id`);
+    }
+    if (intentsById[intentId]) {
+      throw new Error(`Duplicate v6 chatbot intent id: ${intentId}`);
+    }
 
     const examples = Array.isArray(item?.examples) ? item.examples.map((example) => cleanText(example)).filter(Boolean) : [];
+    if (examples.length === 0) {
+      throw new Error(`Invalid v6 chatbot intent '${intentId}': missing examples`);
+    }
     const firstExample = examples[0] || "";
 
     const responses = item?.responses && typeof item.responses === "object" ? item.responses : {};
-    const responseEn = cleanText(responses?.en || item?.answer_en);
-    const responseFil = cleanText(responses?.fil || item?.answer_fil);
-    const responseTaglish = cleanText(responses?.taglish || item?.answer_taglish);
-
-    const englishLegacyAnswers = Array.isArray(item?.english?.answers) ? item.english.answers : [];
-    const filipinoLegacyAnswers = Array.isArray(item?.filipino?.answers) ? item.filipino.answers : [];
-
-    const englishAnswers = normalizeAnswerList(
-      englishLegacyAnswers.length > 0 ? englishLegacyAnswers : responseEn ? [responseEn] : []
-    );
-    const filipinoAnswers = normalizeAnswerList(
-      filipinoLegacyAnswers.length > 0 ? filipinoLegacyAnswers : responseFil ? [responseFil] : []
-    );
-    const taglishAnswers = normalizeAnswerList(responseTaglish ? [responseTaglish] : []);
+    const englishAnswers = normalizeAnswerList(responses.en);
+    const filipinoAnswers = normalizeAnswerList(responses.fil);
+    const taglishAnswers = normalizeAnswerList(responses.taglish);
+    if (englishAnswers.length === 0 || filipinoAnswers.length === 0 || taglishAnswers.length === 0) {
+      throw new Error(`Invalid v6 chatbot intent '${intentId}': incomplete multilingual responses`);
+    }
 
     intentsById[intentId] = {
       english: {
-        question: cleanText(item?.english?.question) || firstExample,
+        question: firstExample,
         answers: englishAnswers,
       },
       filipino: {
-        question: cleanText(item?.filipino?.question) || firstExample,
+        question: firstExample,
         answers: filipinoAnswers,
       },
       taglish: {

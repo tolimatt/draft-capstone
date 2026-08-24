@@ -1,5 +1,6 @@
 // Auth controller
 import User from "../models/User.js";
+import KycVerification from "../models/KycVerification.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -11,9 +12,14 @@ import LoginActivity from "../models/LoginActivity.js";
 import sendEmail from "../utils/sendEmail.js";
 import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { isValidWalletAddress, normalizeAddress } from "../utils/blockchainBooking.js";
-import { getMissingPreKycDocs, clearPreKycDocs } from "../utils/preKycDocs.js";
+import {
+  getMissingPreKycDocs,
+  getPendingPreKycDocs,
+  clearPreKycDocs,
+} from "../utils/preKycDocs.js";
 import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
 import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
+import { verifyPreKycSession } from "../utils/preKycSession.js";
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 45);
@@ -179,23 +185,36 @@ const validatePasswordStrength = (password) => {
   return "";
 };
 
-const buildDuplicateKeyMessage = (error) => {
+const sendFieldError = (res, status, field, message, details = {}) =>
+  res.status(status).json({
+    success: false,
+    message,
+    errors: { [field]: message },
+    ...details,
+  });
+
+const getDuplicateKeyDetails = (error) => {
   const duplicateField = Object.keys(error?.keyPattern || error?.keyValue || {})[0];
 
   if (duplicateField === "email") {
-    return "This email is already registered.";
+    return { field: "email", message: "This email is already registered." };
   }
 
   if (duplicateField === "phone") {
-    return "This phone number is already registered.";
+    return { field: "phone", message: "This phone number is already registered." };
   }
 
   if (duplicateField === "walletAddress") {
-    return "This wallet address is already linked to another account.";
+    return {
+      field: "walletAddress",
+      message: "This wallet address is already linked to another account.",
+    };
   }
 
-  return "A unique field already exists.";
+  return { field: "account", message: "A unique field already exists." };
 };
+
+const buildDuplicateKeyMessage = (error) => getDuplicateKeyDetails(error).message;
 
 const getPublicBaseUrl = (req) => {
   const configured = String(process.env.BACKEND_PUBLIC_URL || "").trim();
@@ -381,45 +400,68 @@ export const registerUser = async (req, res) => {
     } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide name, email, and password.",
-      });
+      const errors = {};
+      if (!name) errors.name = "Name is required.";
+      if (!email) errors.email = "Email is required.";
+      if (!password) errors.password = "Password is required.";
+      return res.status(400).json({ success: false, message: "Validation failed.", errors });
     }
 
     const normalizedEmail = normalizeEmail(email);
     const hasPhone = Object.prototype.hasOwnProperty.call(req.body, "phone");
     const normalizedPhone = normalizePhilippineMobile(phone);
     const requestedRole = role === "owner" ? "owner" : "user";
+    let preKycSession;
+    try {
+      preKycSession = verifyPreKycSession(req.body.preKycToken, {
+        email: normalizedEmail,
+        role: requestedRole,
+      });
+    } catch (error) {
+      return res.status(Number(error?.status) || 401).json({ success: false, message: error.message });
+    }
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
       auditLog.warn("AUTH", `Register with existing email: ${normalizedEmail}`, { ip: req.ip });
-      return res.status(400).json({
-        success: false,
-        message: "This email is already registered.",
-      });
+      return sendFieldError(res, 409, "email", "This email is already registered.");
     }
 
     if (hasPhone && !normalizedPhone) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone number must be exactly 10 digits and start with 9.",
-      });
+      return sendFieldError(
+        res,
+        400,
+        "phone",
+        "Phone number must be exactly 10 digits and start with 9."
+      );
     }
 
     if (normalizedPhone) {
       const existingPhone = await User.findOne({ phone: normalizedPhone }).select("_id");
       if (existingPhone) {
         auditLog.warn("AUTH", `Register with existing phone: ${normalizedPhone}`, { ip: req.ip });
-        return res.status(409).json({
-          success: false,
-          message: "This phone number is already registered.",
-        });
+        return sendFieldError(res, 409, "phone", "This phone number is already registered.");
       }
     }
 
     const requiredDocs = requestedRole === "owner" ? ["id", "supporting"] : ["id"];
-    const missingDocs = await getMissingPreKycDocs(normalizedEmail, requiredDocs);
+    const pendingDocs = await getPendingPreKycDocs(
+      normalizedEmail,
+      requiredDocs,
+      preKycSession.sessionId
+    );
+    if (pendingDocs.length) {
+      return res.status(409).json({
+        success: false,
+        message: "Your document is awaiting manual review. Please try registration again after it is approved.",
+        reviewRequired: true,
+        pendingDocuments: pendingDocs,
+      });
+    }
+    const missingDocs = await getMissingPreKycDocs(
+      normalizedEmail,
+      requiredDocs,
+      preKycSession.sessionId
+    );
     if (missingDocs.length) {
       const needsId = missingDocs.includes("id");
       const needsSupporting = missingDocs.includes("supporting");
@@ -432,7 +474,7 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ success: false, message });
     }
 
-    const faceVerified = await isPreKycFaceVerified(normalizedEmail);
+    const faceVerified = await isPreKycFaceVerified(normalizedEmail, preKycSession.sessionId);
     if (!faceVerified) {
       return res.status(400).json({
         success: false,
@@ -442,17 +484,14 @@ export const registerUser = async (req, res) => {
 
     const passwordMessage = validatePasswordStrength(password);
     if (passwordMessage) {
-      return res.status(400).json({ success: false, message: passwordMessage });
+      return sendFieldError(res, 400, "password", passwordMessage);
     }
 
     let normalizedWalletAddress;
     const walletAddressText = toText(walletAddress);
     if (walletAddressText) {
       if (!isValidWalletAddress(walletAddressText)) {
-        return res.status(400).json({
-          success: false,
-          message: "Wallet address is invalid.",
-        });
+        return sendFieldError(res, 400, "walletAddress", "Wallet address is invalid.");
       }
       normalizedWalletAddress = normalizeAddress(walletAddressText);
     }
@@ -464,6 +503,7 @@ export const registerUser = async (req, res) => {
       email: normalizedEmail,
       password: hashedPassword,
       role: requestedRole,
+      kycStatus: "approved",
       walletAddress: normalizedWalletAddress,
       phone: normalizedPhone || undefined,
       dateOfBirth: toText(dateOfBirth) || undefined,
@@ -482,6 +522,26 @@ export const registerUser = async (req, res) => {
       emergencyContactRelationship: toText(emergencyContactRelationship) || undefined,
     });
 
+    try {
+      await KycVerification.findOneAndUpdate(
+        { user: user._id },
+        {
+          user: user._id,
+          status: "approved",
+          verifiedAt: new Date(),
+          remarks: "Identity approved during signed pre-registration KYC.",
+        },
+        { upsert: true, new: true }
+      );
+    } catch (kycCaseError) {
+      // User.kycStatus remains the authorization source and /kyc/me fallback.
+      // Do not strand a fully created account if the secondary audit write fails.
+      auditLog.error("KYC", "Failed to create registration KYC case", {
+        userId: user._id.toString(),
+        detail: kycCaseError.message,
+      });
+    }
+
     clearAuthCookie(res);
 
     auditLog.info("AUTH", `Registered: ${normalizedEmail}`, { userId: user._id.toString() });
@@ -497,15 +557,15 @@ export const registerUser = async (req, res) => {
     });
   } catch (error) {
     if (error?.code === 11000) {
-      return res.status(409).json({
-        success: false,
-        message: buildDuplicateKeyMessage(error),
-      });
+      const duplicate = getDuplicateKeyDetails(error);
+      return sendFieldError(res, 409, duplicate.field, duplicate.message);
     }
 
     if (error?.name === "ValidationError") {
-      const messages = Object.values(error.errors).map((entry) => entry.message);
-      return res.status(400).json({ success: false, message: messages.join(", ") });
+      const errors = Object.fromEntries(
+        Object.entries(error.errors || {}).map(([field, entry]) => [field, entry.message])
+      );
+      return res.status(400).json({ success: false, message: "Validation failed.", errors });
     }
 
     auditLog.error("AUTH", "Register error", { detail: error.message });
@@ -523,43 +583,38 @@ export const loginUser = async (req, res) => {
     const captchaAnswer = String(req.body.captchaAnswer || "").trim();
 
     if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide email and password.",
-      });
+      const errors = {};
+      if (!email) errors.email = "Email is required.";
+      if (!password) errors.password = "Password is required.";
+      return res.status(400).json({ success: false, message: "Validation failed.", errors });
     }
 
     if (!captchaId || !captchaAnswer) {
-      return res.status(400).json({
-        success: false,
-        message: "Captcha is required.",
-      });
+      return sendFieldError(res, 400, "captchaAnswer", "Security check answer is required.");
     }
     if (!/^[0-9]+$/.test(captchaAnswer)) {
-      return res.status(400).json({
-        success: false,
-        message: "Captcha answer must be a number.",
-      });
+      return sendFieldError(res, 400, "captchaAnswer", "Security check answer must be a number.");
     }
     if (captchaAnswer.length > 3) {
-      return res.status(400).json({
-        success: false,
-        message: "Captcha answer must be at most 3 digits.",
-      });
+      return sendFieldError(res, 400, "captchaAnswer", "Security check answer must be at most 3 digits.");
     }
 
     const challenge = await LoginChallenge.findOne({ challengeId: captchaId }).select("+answerHash");
     if (!challenge) {
-      return res.status(400).json({
-        success: false,
-        message: "Captcha expired. Please refresh and try again.",
-      });
+      return sendFieldError(
+        res,
+        400,
+        "captchaAnswer",
+        "Security check expired. Please refresh and try again."
+      );
     }
     if (challenge.usedAt) {
-      return res.status(400).json({
-        success: false,
-        message: "Captcha expired. Please refresh and try again.",
-      });
+      return sendFieldError(
+        res,
+        400,
+        "captchaAnswer",
+        "Security check expired. Please refresh and try again."
+      );
     }
     if (challenge.attempts >= challenge.maxAttempts) {
       if (!challenge.usedAt) {
@@ -576,10 +631,7 @@ export const loginUser = async (req, res) => {
     challenge.attempts += 1;
     if (!captchaOk) {
       await challenge.save();
-      return res.status(400).json({
-        success: false,
-        message: "Captcha answer is incorrect.",
-      });
+      return sendFieldError(res, 400, "captchaAnswer", "Security check answer is incorrect.");
     }
     challenge.usedAt = new Date();
     await challenge.save();
@@ -589,10 +641,7 @@ export const loginUser = async (req, res) => {
 
     if (!user) {
       auditLog.security("AUTH", "Login failed: unknown email", { email: normalizedEmail, ip: req.ip });
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
+      return sendFieldError(res, 401, "email", "Invalid email.", { code: "INVALID_EMAIL" });
     }
 
     let isMatch = false;
@@ -604,18 +653,19 @@ export const loginUser = async (req, res) => {
 
     if (!isMatch) {
       auditLog.security("AUTH", "Login failed: wrong password", { email: normalizedEmail, ip: req.ip });
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
+      return sendFieldError(res, 401, "password", "Invalid password.", {
+        code: "INVALID_PASSWORD",
       });
     }
 
     if (!user.isVerified) {
       clearAuthCookie(res);
-      return res.status(403).json({
-        success: false,
-        message: "Please verify your email before logging in.",
-      });
+      return sendFieldError(
+        res,
+        403,
+        "email",
+        "Please verify your email before logging in."
+      );
     }
 
     const token = signToken(user);
@@ -1100,7 +1150,34 @@ export const upgradeToOwner = async (req, res) => {
       });
     }
 
-    const missingDocs = await getMissingPreKycDocs(user.email, ["supporting"]);
+    let preKycSession;
+    try {
+      preKycSession = verifyPreKycSession(req.body.preKycToken, {
+        email: user.email,
+        role: "owner",
+      });
+    } catch (error) {
+      return res.status(Number(error?.status) || 401).json({ success: false, message: error.message });
+    }
+
+    const pendingDocs = await getPendingPreKycDocs(
+      user.email,
+      ["supporting"],
+      preKycSession.sessionId
+    );
+    if (pendingDocs.length) {
+      return res.status(409).json({
+        success: false,
+        message: "Your supporting document is awaiting manual review.",
+        reviewRequired: true,
+      });
+    }
+
+    const missingDocs = await getMissingPreKycDocs(
+      user.email,
+      ["supporting"],
+      preKycSession.sessionId
+    );
     if (missingDocs.length) {
       return res.status(400).json({
         success: false,

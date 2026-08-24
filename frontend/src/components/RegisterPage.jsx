@@ -17,6 +17,7 @@ import {
   preRegisterIdFace,
   preSelfieChallenge,
   preSelfieVerify,
+  getPreKycSessionToken,
 } from "../utils/kycApi";
 
 import {
@@ -561,14 +562,20 @@ export default function RegisterPage({
   // Camera controls
 
   const closeCamera = useCallback(() => {
-    try { stopCamera(videoRef.current || cameraStream); } catch {}
+    try { stopCamera(videoRef.current || cameraStream); } catch {
+      // Camera may already be stopped or detached.
+    }
     setCameraStream(null);
     setKycUi((p) => ({ ...p, showCamera: false }));
     setCamError(""); setCamInfo("");
   }, [cameraStream]);
 
   useEffect(() => {
-    return () => { try { stopCamera(cameraStream); } catch {} };
+    return () => {
+      try { stopCamera(cameraStream); } catch {
+        // Camera may already be stopped during cleanup.
+      }
+    };
   }, [cameraStream]);
 
   const openCamera = async () => {
@@ -862,6 +869,7 @@ export default function RegisterPage({
     setSuccessMessage("");
     setFormError("");
     try {
+      const preKycToken = await getPreKycSessionToken(form.email, "user");
       const response = await API.register({
         name: fullName,
         email: form.email,
@@ -878,6 +886,7 @@ export default function RegisterPage({
         emergencyContactRelationship: form.emergencyContactRelationship,
         password: form.password,
         role: "user",
+        preKycToken,
       });
       const registeredEmail = String(response?.user?.email || form.email || "").trim().toLowerCase();
       setSuccessMessage(response?.message || "Registration successful! Redirecting to OTP verification...");

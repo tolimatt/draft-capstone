@@ -39,6 +39,7 @@ import {
   resolveAssetUrl,
 } from "../utils/media";
 import { getTransactionFee } from "../utils/fees";
+import { formatVehicleTypeLabel } from "../utils/vehicleText";
 import VehicleCover from "../components/VehicleCover";
 const DOWNPAYMENT_RATE = 0.3;
 const money = (value) => `P${Number(value || 0).toLocaleString()}`;
@@ -99,7 +100,7 @@ export default function VehicleDetailsPage({
   const [driverSelected, setDriverSelected] = useState(false);
   const [vehicleData, setVehicleData] = useState(vehicle || null);
   const vehicleId = vehicleData?._id || vehicleData?.id || vehicle?._id || vehicle?.id;
-  const currentVehicle = vehicleData || vehicle || {};
+  const currentVehicle = useMemo(() => vehicleData || vehicle || {}, [vehicleData, vehicle]);
 
   const { pickupDate, pickupTime, returnDate, returnTime } = bookingData;
 
@@ -283,8 +284,10 @@ export default function VehicleDetailsPage({
     setActiveImageIndex((prev) => (prev + 1) % galleryImages.length);
   };
 
-  const vehicleType = currentVehicle?.specs?.type || currentVehicle?.type || "Vehicle";
-  const vehicleSubType = currentVehicle?.specs?.subType || currentVehicle?.subType || "Standard";
+  const vehicleTypeLabel = formatVehicleTypeLabel(
+    currentVehicle?.specs?.type || currentVehicle?.type || "Vehicle",
+    currentVehicle?.specs?.subType || currentVehicle?.subType || "Standard"
+  );
   const seats = currentVehicle?.specs?.seats || currentVehicle?.seats || 4;
   const transmission = currentVehicle?.specs?.transmission || currentVehicle?.transmission || "Automatic";
   const fuel = currentVehicle?.specs?.fuel || currentVehicle?.fuel || "Gasoline";
@@ -457,7 +460,7 @@ export default function VehicleDetailsPage({
             <section className="rp-surface p-5 sm:p-6">
               <h2 className="rp-detail-section-title">Vehicle Specifications</h2>
               <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3">
-                <SpecItem icon={CarFront} label="Type" value={`${vehicleType} / ${vehicleSubType}`} />
+                <SpecItem icon={CarFront} label="Type" value={vehicleTypeLabel} />
                 <SpecItem icon={Users} label="Seats" value={`${seats}`} />
                 <SpecItem icon={Settings} label="Transmission" value={transmission} />
                 <SpecItem icon={Fuel} label="Fuel" value={fuel} />

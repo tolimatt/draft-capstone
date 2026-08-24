@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useImperativeHandle, useRef, useState } from "react";
 
 const normalizeNameInput = (value = "") => {
   let nextValue = String(value);
@@ -31,20 +31,18 @@ export default function FormInput({
   onFocus,
 }) {
   const [showEmailSuggestions, setShowEmailSuggestions] = useState(false);
-  const [savedEmails, setSavedEmails] = useState([]);
+  const [savedEmails] = useState(() => {
+    try {
+      const stored = localStorage.getItem("savedEmails");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const localInputRef = useRef(null);
   const isDateInput = type === "date";
 
-  useEffect(() => {
-    const stored = localStorage.getItem("savedEmails");
-    if (stored) {
-      try {
-        setSavedEmails(JSON.parse(stored));
-      } catch {
-        setSavedEmails([]);
-      }
-    }
-  }, []);
+  useImperativeHandle(inputRef, () => localInputRef.current);
 
   const handleEmailFocus = () => {
     if (typeof onFocus === "function") onFocus();
@@ -101,17 +99,6 @@ export default function FormInput({
     onChange({ target: { value: nextValue } });
   };
 
-  const setInputRefs = (node) => {
-    localInputRef.current = node;
-    if (typeof inputRef === "function") {
-      inputRef(node);
-      return;
-    }
-    if (inputRef && typeof inputRef === "object") {
-      inputRef.current = node;
-    }
-  };
-
   const handleIconClick = () => {
     if (disabled) return;
     const inputNode = localInputRef.current;
@@ -166,7 +153,7 @@ export default function FormInput({
         )}
 
         <input
-          ref={setInputRefs}
+          ref={localInputRef}
           type={type}
           value={value}
           onChange={handleChange}
@@ -181,6 +168,7 @@ export default function FormInput({
           pattern={pattern}
           maxLength={maxLength}
           autoComplete={type === "email" ? "email" : "off"}
+          aria-invalid={Boolean(error)}
           className={`w-full rounded-xl border bg-white px-4 py-3 text-[15px] text-slate-900 shadow-sm transition-all duration-200 placeholder:text-slate-400 focus:outline-none ${
             hasRightIcon ? "pr-12" : ""
           } ${

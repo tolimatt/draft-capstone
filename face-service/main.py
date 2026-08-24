@@ -1007,7 +1007,10 @@ async def post_kyc_selfie_verify(req: KycSelfieVerifyRequest):
             }},
         )
 
-        await notify_node_backend(req.user_id, verified, conf)
+        # Pre-registration attempts are finalized by the originating Node request,
+        # which owns the signed session id. Only durable user ids use the callback.
+        if not req.user_id.startswith("pre:"):
+            await notify_node_backend(req.user_id, verified, conf)
         if verified:
             # The Node KYC case is the durable status source. Retain no biometric template after approval.
             await kyc_col.delete_one({"user_id": req.user_id})

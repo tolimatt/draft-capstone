@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, CarFront, Clock3, CreditCard, MapPin, Users } from "lucide-react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
@@ -154,7 +154,7 @@ export default function Bookings() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [walkInActionBookingId, setWalkInActionBookingId] = useState("");
 
-  const loadBookings = async ({ cursor = null, append = false } = {}) => {
+  const loadBookings = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (append) setLoadingMore(true);
     else setLoading(true);
     setError("");
@@ -173,11 +173,11 @@ export default function Bookings() {
       if (append) setLoadingMore(false);
       else setLoading(false);
     }
-  };
+  }, [statusFilter]);
 
   useEffect(() => {
     loadBookings();
-  }, [statusFilter]);
+  }, [loadBookings]);
 
   useEffect(() => {
     const socket = getSocket();

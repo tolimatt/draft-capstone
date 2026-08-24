@@ -458,6 +458,14 @@ const GEMINI_LIMIT_MESSAGE =
 const GEMINI_UNAVAILABLE_MESSAGE =
   "Document verification is temporarily unavailable right now. Please try again later.";
 
+export const normalizeDocumentConfidence = (value) => {
+  const raw = Number.isFinite(Number(value)) ? Number(value) : 0;
+  return Math.max(0, Math.min(100, raw > 0 && raw <= 1 ? raw * 100 : raw));
+};
+
+export const requiresManualDocumentReview = (confidence, minimum = 70) =>
+  normalizeDocumentConfidence(confidence) < Math.max(0, Math.min(100, Number(minimum) || 0));
+
 const summarizeGeminiError = (error) => {
   const message = String(error?.message || "");
   const parts = [message];
@@ -526,7 +534,26 @@ export async function verifyPhilippinesDocument({
   const allowedList = allowedDocTypes.map((entry) => `- ${entry}`).join("\n");
   const selectedTypeRaw = toCleanString(selectedDocType, 140);
   const selectedTypeCanonical = resolveAllowedDocType(selectedTypeRaw, allowedDocTypes);
-  const sanitizedProfile = sanitizeUserProfile(userProfile);
+  const fullProfile = sanitizeUserProfile(userProfile);
+  // Send only fields needed for the particular comparison. Email and unrelated
+  // registration data are intentionally excluded from the external vision request.
+  const sanitizedProfile = isIdCheck
+    ? {
+        full_name: fullProfile.full_name,
+        first_name: fullProfile.first_name,
+        last_name: fullProfile.last_name,
+        date_of_birth: fullProfile.date_of_birth,
+        gender: fullProfile.gender,
+      }
+    : {
+        full_name: fullProfile.full_name,
+        first_name: fullProfile.first_name,
+        last_name: fullProfile.last_name,
+        owner_type: fullProfile.owner_type,
+        business_name: fullProfile.business_name,
+        permit_number: fullProfile.permit_number,
+        address: fullProfile.address,
+      };
   const hasProfileDetails = hasAnyProfileDetails(sanitizedProfile);
   const profilePrompt = formatProfileForPrompt(sanitizedProfile);
 
@@ -659,7 +686,11 @@ Return ONLY JSON:
     };
   }
 
-  const confidence = Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : 0;
+  const confidence = normalizeDocumentConfidence(parsed.confidence);
+  const configuredMinConfidence = Number(process.env.KYC_DOCUMENT_AUTO_APPROVE_MIN_CONFIDENCE || 70);
+  const autoApproveMinConfidence = Number.isFinite(configuredMinConfidence)
+    ? Math.max(0, Math.min(100, configuredMinConfidence))
+    : 70;
   const country = normalizeCountry(parsed.country) || "Unknown";
   const rawDocType = toCleanString(parsed.doc_type, 140);
   const detectedDocType = resolveAllowedDocType(rawDocType, allowedDocTypes);
@@ -743,9 +774,13 @@ Return ONLY JSON:
     return {
       passed: true,
       ...withBaseDetails,
+      review_required: requiresManualDocumentReview(confidence, autoApproveMinConfidence),
       has_face: true,
       face_count: faceCount,
-      reason: toCleanString(parsed.reason, 220) || "ID verified.",
+      reason:
+        requiresManualDocumentReview(confidence, autoApproveMinConfidence)
+          ? "The ID passed initial checks but requires manual review before registration can finish."
+          : toCleanString(parsed.reason, 220) || "ID verified.",
     };
   }
 
@@ -784,7 +819,11 @@ Return ONLY JSON:
   return {
     passed: true,
     ...withBaseDetails,
+    review_required: requiresManualDocumentReview(confidence, autoApproveMinConfidence),
     country: "PH",
-    reason: toCleanString(parsed.reason, 220) || "Document verified.",
+    reason:
+      requiresManualDocumentReview(confidence, autoApproveMinConfidence)
+        ? "The document passed initial checks but requires manual review before registration can finish."
+        : toCleanString(parsed.reason, 220) || "Document verified.",
   };
 }

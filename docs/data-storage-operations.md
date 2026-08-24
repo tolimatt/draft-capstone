@@ -7,6 +7,7 @@ The application now keeps public vehicle/avatar media separate from private KYC 
 | Data class | Hot retention | Action |
 | --- | --- | --- |
 | Pre-registration KYC file | 3 hours | private local cleanup in development; object-store lifecycle in production |
+| Pending manual-review KYC file | 72 hours | private review access only; delete after the review window |
 | Biometric template | 24 hours | Mongo TTL; deleted immediately after a successful match |
 | KYC status/case | policy-defined | retain only the application case, not the template |
 | Vehicle/avatar media | until replacement/deletion | public immutable media; safely delete managed local keys only |

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   CarFront,
@@ -295,7 +295,7 @@ export default function BookingsPage({
   const [showAI, setShowAI] = useState(false);
   const currentUserId = user?._id || getSessionUser()?._id || "";
 
-  const load = async ({ cursor = null, append = false } = {}) => {
+  const load = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (append) setLoadingMore(true);
     else setLoading(true);
     setError("");
@@ -317,7 +317,7 @@ export default function BookingsPage({
       if (append) setLoadingMore(false);
       else setLoading(false);
     }
-  };
+  }, [statusFilter]);
 
   const upsertBooking = (incomingBooking) => {
     if (!incomingBooking?._id) return;
@@ -352,7 +352,7 @@ export default function BookingsPage({
 
     setShowAuthPrompt(false);
     load();
-  }, [isLoggedIn, statusFilter]);
+  }, [isLoggedIn, load]);
 
   useEffect(() => {
     if (!isLoggedIn) return undefined;

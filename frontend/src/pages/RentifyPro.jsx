@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Bike,
   Car,
+  ChevronDown,
   Fuel,
   MapPin,
   Radio,
@@ -27,13 +28,14 @@ import {
 import InfoModal from "../components/InfoModal";
 import VehicleCover from "../components/VehicleCover";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
+import { formatVehicleTypeLabel } from "../utils/vehicleText";
 
 const categories = [
   {
     id: "premium-cars",
     title: "Premium Cars",
     icon: Car,
-    image: "/cars.png",
+    image: "/cars-optimized.jpg",
     tags: ["Sedan", "Hatchback", "SUV", "Luxury"],
     description: "Ideal for family trips, business meetings, and city drives.",
     vehicleType: "car",
@@ -42,7 +44,7 @@ const categories = [
     id: "motorcycles",
     title: "Motorcycles",
     icon: Bike,
-    image: "/motor.png",
+    image: "/motor-optimized.jpg",
     tags: ["Scooter", "Sport Bike", "Cruiser"],
     description: "Great for fast commutes and flexible urban travel.",
     vehicleType: "motorcycle",
@@ -51,7 +53,7 @@ const categories = [
     id: "vans",
     title: "Vans",
     icon: Van,
-    image: "/van.png",
+    image: "/van-optimized.jpg",
     tags: ["Passenger", "Mini Van", "Cargo", "Luxury"],
     description: "Spacious and reliable for group trips and transport runs.",
     vehicleType: "van",
@@ -60,7 +62,7 @@ const categories = [
     id: "trucks",
     title: "Trucks",
     icon: Truck,
-    image: "/trucks.png",
+    image: "/trucks-optimized.jpg",
     tags: ["Pick-up", "Cargo", "Refrigerated", "Flat Bed"],
     description: "Built for heavy-duty tasks and dependable hauling.",
     vehicleType: "truck",
@@ -85,7 +87,7 @@ const normalizeFeaturedVehicle = (vehicle) => ({
   image: vehicle.coverImageUrl || vehicle.imageUrl || vehicle.images?.[0] || DEFAULT_VEHICLE_IMAGE,
   coverDisplayMode: vehicle.coverDisplayMode || "auto",
   category: vehicle.specs?.subType
-    ? `${vehicle.specs?.type || "Vehicle"} · ${vehicle.specs.subType}`
+    ? formatVehicleTypeLabel(vehicle.specs?.type, vehicle.specs.subType, { separator: " · " })
     : "Owner-listed Vehicle",
   seats: vehicle.specs?.seats || 4,
   transmission: vehicle.specs?.transmission || "Automatic",
@@ -328,7 +330,7 @@ export default function RentifyPro({
 
       <section className="relative mx-auto max-w-7xl overflow-hidden pt-28 sm:rounded-b-[2rem] sm:pt-36 pb-28">
         <img
-          src="/hero-car1.png"
+          src="/hero-car1-optimized.jpg"
           alt="RentifyPro Hero"
           className="rp-home-hero-image absolute inset-0 h-full w-full object-cover"
         />
@@ -409,17 +411,22 @@ export default function RentifyPro({
 
             <div>
               <label className="text-xs font-semibold text-slate-500">Vehicle Type</label>
-              <select
-                className="rp-input mt-1.5"
-                value={vehicleType}
-                onChange={(event) => setVehicleType(event.target.value)}
-              >
-                <option value="">All Vehicles</option>
-                <option value="car">Car</option>
-                <option value="motorcycle">Motorcycle</option>
-                <option value="van">Van</option>
-                <option value="truck">Truck</option>
-              </select>
+              <div className="group relative mt-1.5">
+                <select
+                  className="rp-input cursor-pointer appearance-none pr-12"
+                  value={vehicleType}
+                  onChange={(event) => setVehicleType(event.target.value)}
+                >
+                  <option value="">All Vehicles</option>
+                  <option value="car">Car</option>
+                  <option value="motorcycle">Motorcycle</option>
+                  <option value="van">Van</option>
+                  <option value="truck">Truck</option>
+                </select>
+                <span className="pointer-events-none absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition group-hover:bg-[#0B75E7]/10 group-hover:text-[#0B75E7] group-focus-within:bg-[#0B75E7]/10 group-focus-within:text-[#0B75E7]">
+                  <ChevronDown size={16} strokeWidth={2.25} aria-hidden="true" />
+                </span>
+              </div>
             </div>
           </div>
 

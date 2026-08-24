@@ -25,7 +25,7 @@ import {
 } from "../../utils/sessionStore";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../../utils/liveCounters";
 
-const BRAND_LOGO_SRC = "/rentifypro%20logo.png";
+const BRAND_LOGO_SRC = "/rentifypro-logo-optimized.png";
 
 function Sidebar({
   activePage,
@@ -67,7 +67,7 @@ function Sidebar({
   }, []);
 
   useEffect(() => {
-    syncBadges();
+    const initialSyncTimer = window.setTimeout(syncBadges, 0);
 
     const refresh = () => syncBadges();
     const onVisibility = () => {
@@ -79,6 +79,7 @@ function Sidebar({
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
+      window.clearTimeout(initialSyncTimer);
       window.removeEventListener(LIVE_COUNTERS_REFRESH_EVENT, refresh);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVisibility);

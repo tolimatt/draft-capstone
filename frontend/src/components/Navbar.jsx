@@ -12,7 +12,7 @@ const linkClassName = (activePage, itemKey) =>
   }`;
 
 const formatBadgeCount = (value) => (value > 99 ? "99+" : String(value));
-const BRAND_LOGO_SRC = "/rentifypro%20logo.png";
+const BRAND_LOGO_SRC = "/rentifypro-logo-optimized.png";
 const isNotificationRead = (notification) =>
   Boolean(notification?.readAt);
 const getStoredUserId = () => {
@@ -177,6 +177,12 @@ export default function Navbar({
       label: "Notifications",
       onClick: () => handleMobileNavigate(handleNotificationClick),
     },
+    ...(!isLoggedIn
+      ? [
+          { key: "signin", label: "Sign In", onClick: () => handleMobileNavigate(onNavigateToSignIn) },
+          { key: "register", label: "Register", onClick: () => handleMobileNavigate(onNavigateToRegister) },
+        ]
+      : []),
   ];
 
   useEffect(() => {
@@ -187,10 +193,6 @@ export default function Navbar({
       document.body.style.overflow = originalOverflow;
     };
   }, [showMobileMenu]);
-
-  useEffect(() => {
-    setShowMobileMenu(false);
-  }, [activePage]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -207,15 +209,15 @@ export default function Navbar({
       <>
       <nav className="fixed inset-x-0 top-0 z-50 px-3 sm:px-5 pt-3">
         <div className="rp-glass mx-auto max-w-7xl rounded-[1.35rem] border border-white/70 shadow-[0_18px_40px_rgba(2,20,46,0.12)]">
-          <div className="flex min-h-[4.25rem] items-center justify-between gap-4 px-4 py-2 sm:px-6">
+          <div className="flex min-h-[4.25rem] items-center justify-between gap-2 px-3 py-2 sm:gap-4 sm:px-6">
             <button
               onClick={handleHomeClick}
-              className="flex items-center gap-3 text-lg font-extrabold tracking-[-0.03em] text-slate-900 transition-opacity hover:opacity-85 sm:text-[1.35rem]"
+              className="flex min-w-0 items-center gap-2 text-base font-extrabold tracking-[-0.03em] text-slate-900 transition-opacity hover:opacity-85 sm:gap-3 sm:text-[1.35rem]"
             >
               <img
                 src={BRAND_LOGO_SRC}
                 alt="RentifyPro logo"
-                className="h-10 w-10 rounded-full object-cover"
+                className="h-9 w-9 shrink-0 rounded-full object-cover sm:h-10 sm:w-10"
               />
               <span>
                 Rentify<span className="text-[#0B75E7]">Pro</span>
@@ -300,15 +302,18 @@ export default function Navbar({
                   >
                     Sign In
                   </button>
-                  <button
-                    onClick={onNavigateToRegister}
-                    className="rp-btn-primary px-4 py-2.5 text-sm sm:px-5"
-                  >
-                    Register
-                  </button>
+                  <div className="hidden sm:block">
+                    <button
+                      onClick={onNavigateToRegister}
+                      className="rp-btn-primary px-4 py-2.5 text-sm sm:px-5"
+                    >
+                      Register
+                    </button>
+                  </div>
                 </>
               ) : (
                 <ProfileMenu
+                  key={`${user?._id || "user"}-${user?.avatar || "no-avatar"}`}
                   user={user}
                   isOpen={showProfileMenu}
                   onToggle={() => setShowProfileMenu(!showProfileMenu)}
@@ -405,7 +410,7 @@ export default function Navbar({
           className="fixed bottom-8 right-10 z-[70] flex h-16 w-16 items-center justify-center text-white transition-all duration-300 hover:scale-105 hover:opacity-95"
         >
           <img
-            src="/rentify-ai-logo-bubble.png"
+            src="/rentify-ai-logo-bubble-optimized.png"
             alt=""
             aria-hidden="true"
             className="h-full w-full object-contain drop-shadow-xl"
@@ -431,10 +436,6 @@ function ProfileMenu({
   const displayInitials = getInitialsFromName(displayName);
   const [avatarError, setAvatarError] = useState(false);
   const avatar = String(user?.avatar || "").trim();
-
-  useEffect(() => {
-    setAvatarError(false);
-  }, [avatar]);
 
   useEffect(() => {
     if (!isOpen) return undefined;

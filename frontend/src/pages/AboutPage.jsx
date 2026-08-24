@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Users, Wrench, ShieldCheck } from "lucide-react";
 import Navbar from "../components/Navbar";
 
@@ -22,19 +22,10 @@ import Navbar from "../components/Navbar";
 
   const [showAI, setShowAI] = useState(false);
   const [userMessage, setUserMessage] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([
+    { sender: "ai", text: "Hi! This is Rentify AI. How can I assist you today?" },
+  ]);
   const [isTyping, setIsTyping] = useState(false);
-
-  useEffect(() => {
-    if (!showAI) return;
-
-    setMessages([
-      {
-        sender: "ai",
-        text: "Hi! This is Rentify AI. How can I assist you today?"
-      }
-    ]);
-  }, [showAI]);
 
   return (
     <div className="min-h-screen bg-white">
@@ -281,7 +272,7 @@ import Navbar from "../components/Navbar";
           }`}
         >
           {msg.sender === "ai" && (
-            <img src="/rentify-ai-logo-bubble.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
+            <img src="/rentify-ai-logo-bubble-optimized.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
           )}
 
           <div
@@ -304,7 +295,7 @@ import Navbar from "../components/Navbar";
 
       {isTyping && (
         <div className="flex items-center gap-2">
-          <img src="/rentify-ai-logo-bubble.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
+          <img src="/rentify-ai-logo-bubble-optimized.png" alt="Rentify AI" className="h-8 w-8 object-contain" />
           <div className="bg-white px-4 py-2 rounded-2xl shadow text-sm text-gray-500 flex gap-1">
             <span className="animate-bounce">.</span>
             <span className="animate-bounce delay-150">.</span>

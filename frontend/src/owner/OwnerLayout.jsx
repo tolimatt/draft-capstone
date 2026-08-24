@@ -44,11 +44,18 @@ export default function OwnerLayout() {
     return normalizeOwnerPage(tabFromStorage);
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const navigateToPage = (page) => {
+    setActivePage(normalizeOwnerPage(page));
+    setIsSidebarOpen(false);
+  };
 
   useEffect(() => {
     const handler = (event) => {
       const page = event?.detail;
-      if (typeof page === "string") setActivePage(normalizeOwnerPage(page));
+      if (typeof page === "string") {
+        setActivePage(normalizeOwnerPage(page));
+        setIsSidebarOpen(false);
+      }
     };
     window.addEventListener("navigate", handler);
     return () => window.removeEventListener("navigate", handler);
@@ -88,10 +95,6 @@ export default function OwnerLayout() {
   }, []);
 
   useEffect(() => {
-    setIsSidebarOpen(false);
-  }, [activePage]);
-
-  useEffect(() => {
     try {
       sessionStorage.setItem(OWNER_ACTIVE_PAGE_STORAGE_KEY, activePage);
     } catch {
@@ -120,7 +123,7 @@ export default function OwnerLayout() {
       {/* sidebar */}
       <Sidebar
         activePage={activePage}
-        setActivePage={setActivePage}
+        setActivePage={navigateToPage}
         isMobileOpen={isSidebarOpen}
         onCloseMobile={() => setIsSidebarOpen(false)}
       />
@@ -130,7 +133,7 @@ export default function OwnerLayout() {
         {/* top bar */}
         <Topbar
           onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
-          onNavigateToNotifications={() => setActivePage("Notifications")}
+          onNavigateToNotifications={() => navigateToPage("Notifications")}
         />
 
         {/* page content */}

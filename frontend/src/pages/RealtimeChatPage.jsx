@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, MessageSquare, Search, Send, Trash2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import API from "../utils/api";
@@ -137,7 +137,7 @@ export default function RealtimeChatPage({
     );
   }, [conversationQuery, conversations]);
 
-  const mergeInitialPartnerConversation = (list = []) => {
+  const mergeInitialPartnerConversation = useCallback((list = []) => {
     const initialPartner = normalizeInitialPartner(initialChatContext);
     if (!initialPartner?._id) return list;
     if (list.some((conversation) => getId(conversation.partner) === initialPartner._id)) return list;
@@ -149,9 +149,9 @@ export default function RealtimeChatPage({
       },
       ...list,
     ];
-  };
+  }, [initialChatContext]);
 
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     setLoadingConversations(true);
     setError("");
     try {
@@ -174,9 +174,9 @@ export default function RealtimeChatPage({
     } finally {
       setLoadingConversations(false);
     }
-  };
+  }, [mergeInitialPartnerConversation]);
 
-  const loadMessages = async (partnerId, context = {}) => {
+  const loadMessages = useCallback(async (partnerId, context = {}) => {
     if (!partnerId) return;
 
     setLoadingMessages(true);
@@ -197,11 +197,11 @@ export default function RealtimeChatPage({
     } finally {
       setLoadingMessages(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadConversations();
-  }, []);
+  }, [loadConversations]);
 
   useEffect(() => {
     const handleResize = () => setIsMobileView(window.innerWidth < 768);
@@ -218,11 +218,11 @@ export default function RealtimeChatPage({
     setActiveChatContext(normalizeChatContext(initialChatContext));
     setShowConversationList(false);
     onChatContextHandled?.();
-  }, [initialChatContext, onChatContextHandled]);
+  }, [initialChatContext, mergeInitialPartnerConversation, onChatContextHandled]);
 
   useEffect(() => {
     loadMessages(activePartnerId, activeChatContext);
-  }, [activePartnerId, activeChatContext.bookingId, activeChatContext.vehicleId]);
+  }, [activePartnerId, activeChatContext, loadMessages]);
 
   useEffect(() => {
     setEditingMessageId("");
@@ -332,7 +332,7 @@ export default function RealtimeChatPage({
       socket.off("chat:message:update", handleMessageUpdate);
       socket.off("chat:conversation:deleted", handleConversationDeleted);
     };
-  }, [activePartnerId, activeChatContext, currentUserId]);
+  }, [activePartnerId, activeChatContext, currentUserId, loadConversations, loadMessages]);
 
   const sendMessage = async () => {
     const text = messageText.trim();

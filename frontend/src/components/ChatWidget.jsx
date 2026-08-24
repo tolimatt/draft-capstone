@@ -1,13 +1,16 @@
-import React, { useEffect, useRef, useState } from "react";
-import { LoaderCircle, Send, X } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { LoaderCircle, MessageSquarePlus, Send, X } from "lucide-react";
 import API from "../utils/api";
 import { getSessionUser, SESSION_USER_UPDATED_EVENT } from "../utils/sessionStore";
+import { formatVehicleType } from "../utils/vehicleText";
 
-const CHAT_WIDGET_STORAGE_KEY_PREFIX = "rentifypro.chatWidget.v1";
+const CHAT_WIDGET_STORAGE_KEY_PREFIX = "rentifypro.chatWidget.v2";
 const LEGACY_CHAT_WIDGET_STORAGE_KEY = "rentifypro.chatWidget.v1";
 const CHAT_INPUT_MAX_LENGTH = 500;
 const DISALLOWED_CHAT_INPUT_REGEX = /[^A-Za-z?,. ]+/g;
 const MAX_STORED_MESSAGES = 40;
+const CONVERSATION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const MIN_THINKING_DISPLAY_MS = 800;
 const WELCOME_MESSAGE_ID_PREFIX = "welcome-";
 
 const BLOCKED_WORDS = [
@@ -49,11 +52,49 @@ const getWelcomeText = (date = new Date()) => {
   return `${greeting}, I am Rentify AI. I automatically reply in English, Filipino, or Taglish based on how you ask your question. What can I help you with today?`;
 };
 
-const QUICK_PROMPTS = [
-  "Show available vehicles",
-  "How does booking work?",
+const SUGGESTED_QUESTION_COUNT = 3;
+const SUGGESTED_QUESTION_POOL = [
+  "What vehicles are available?",
+  "How do I book a vehicle?",
   "What are the rental requirements?",
+  "What payment methods are accepted?",
+  "Is insurance included?",
+  "Is there a security deposit?",
+  "Can I extend my rental?",
+  "Can I cancel my booking?",
+  "Can I rent with a driver?",
+  "How do I message the owner?",
+  "How is my account verified?",
+  "What is the blockchain record?",
+  "Do you have automatic cars?",
+  "Can I choose a specific vehicle model?",
+  "What is the minimum age to rent?",
 ];
+
+const createSuggestedQuestions = () => {
+  const shuffled = [...SUGGESTED_QUESTION_POOL];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+  }
+  return shuffled.slice(0, SUGGESTED_QUESTION_COUNT);
+};
+
+const normalizeSuggestedQuestions = (questions) => {
+  if (!Array.isArray(questions)) return createSuggestedQuestions();
+
+  const normalized = Array.from(
+    new Set(
+      questions
+        .map((question) => String(question || "").trim())
+        .filter((question) => SUGGESTED_QUESTION_POOL.includes(question))
+    )
+  );
+
+  return normalized.length === SUGGESTED_QUESTION_COUNT
+    ? normalized
+    : createSuggestedQuestions();
+};
 
 const createWelcomeMessage = (language, date = new Date()) => ({
   id: `${WELCOME_MESSAGE_ID_PREFIX}${language}-${getGreetingPeriod(date)}`,
@@ -129,11 +170,61 @@ const ensureConversation = (messages, language, date = new Date()) => {
   return [createWelcomeMessage(language, date), ...normalized];
 };
 
-const getDefaultChatState = () => ({
+const createConversationId = (date = new Date()) => {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `chat-${date.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const createConversationMetadata = (date = new Date()) => ({
+  id: createConversationId(date),
+  startedAt: date.toISOString(),
+  lastActivityAt: date.toISOString(),
+});
+
+const normalizeConversationMetadata = (conversation) => {
+  const id = String(conversation?.id || "").trim();
+  const startedAtMs = Date.parse(conversation?.startedAt);
+  const lastActivityAtMs = Date.parse(conversation?.lastActivityAt);
+
+  if (!id || !Number.isFinite(startedAtMs) || !Number.isFinite(lastActivityAtMs)) {
+    return null;
+  }
+
+  return {
+    id,
+    startedAt: new Date(startedAtMs).toISOString(),
+    lastActivityAt: new Date(lastActivityAtMs).toISOString(),
+  };
+};
+
+const isSameLocalDay = (left, right) =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+const isConversationExpired = (conversation, date = new Date()) => {
+  const normalized = normalizeConversationMetadata(conversation);
+  if (!normalized) return true;
+
+  const lastActivity = new Date(normalized.lastActivityAt);
+  const idleTime = date.getTime() - lastActivity.getTime();
+  return (
+    idleTime < 0 ||
+    idleTime >= CONVERSATION_IDLE_TIMEOUT_MS ||
+    !isSameLocalDay(lastActivity, date)
+  );
+};
+
+const getDefaultChatState = (date = new Date()) => ({
   language: "english",
+  conversation: createConversationMetadata(date),
+  suggestedQuestions: createSuggestedQuestions(),
   conversations: {
-    english: [createWelcomeMessage("english")],
-    filipino: [createWelcomeMessage("filipino")],
+    english: [createWelcomeMessage("english", date)],
+    filipino: [createWelcomeMessage("filipino", date)],
   },
   drafts: {
     english: "",
@@ -148,23 +239,32 @@ const resolveStorageScope = () => {
 
 const getStorageKey = (scope) => `${CHAT_WIDGET_STORAGE_KEY_PREFIX}:${scope}`;
 
-const readStoredChatState = (scope) => {
+const readStoredChatState = (scope, date = new Date()) => {
   if (typeof window === "undefined") {
-    return getDefaultChatState();
+    return getDefaultChatState(date);
   }
 
   try {
-    const raw = window.localStorage.getItem(getStorageKey(scope));
+    const storageKey = getStorageKey(scope);
+    const raw = window.sessionStorage.getItem(storageKey);
     if (!raw) {
-      return getDefaultChatState();
+      return getDefaultChatState(date);
     }
 
     const parsed = JSON.parse(raw);
+    const conversation = normalizeConversationMetadata(parsed?.conversation);
+    if (!conversation || isConversationExpired(conversation, date)) {
+      window.sessionStorage.removeItem(storageKey);
+      return getDefaultChatState(date);
+    }
+
     return {
       language: "english",
+      conversation,
+      suggestedQuestions: normalizeSuggestedQuestions(parsed?.suggestedQuestions),
       conversations: {
-        english: ensureConversation(parsed?.conversations?.english, "english"),
-        filipino: ensureConversation(parsed?.conversations?.filipino, "filipino"),
+        english: ensureConversation(parsed?.conversations?.english, "english", date),
+        filipino: ensureConversation(parsed?.conversations?.filipino, "filipino", date),
       },
       drafts: {
         english: sanitizeDraftInput(parsed?.drafts?.english || ""),
@@ -172,7 +272,18 @@ const readStoredChatState = (scope) => {
       },
     };
   } catch {
-    return getDefaultChatState();
+    return getDefaultChatState(date);
+  }
+};
+
+const removeLegacyChatStorage = () => {
+  if (typeof window === "undefined") return;
+
+  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.localStorage.key(index);
+    if (key === LEGACY_CHAT_WIDGET_STORAGE_KEY || key?.startsWith(`${LEGACY_CHAT_WIDGET_STORAGE_KEY}:`)) {
+      window.localStorage.removeItem(key);
+    }
   }
 };
 
@@ -181,10 +292,13 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
   const initialState = readStoredChatState(initialStorageScope);
   const [storageScope, setStorageScope] = useState(initialStorageScope);
   const [language, setLanguage] = useState(initialState.language);
+  const [conversation, setConversation] = useState(initialState.conversation);
+  const [suggestedQuestions, setSuggestedQuestions] = useState(initialState.suggestedQuestions);
   const [messagesByLanguage, setMessagesByLanguage] = useState(initialState.conversations);
   const [draftByLanguage, setDraftByLanguage] = useState(initialState.drafts);
   const [isSending, setIsSending] = useState(false);
   const bottomRef = useRef(null);
+  const conversationIdRef = useRef(initialState.conversation.id);
 
   const messages = ensureConversation(messagesByLanguage[language], language);
   const draft = String(draftByLanguage[language] || "");
@@ -194,10 +308,12 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
       return;
     }
 
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       getStorageKey(storageScope),
       JSON.stringify({
         language,
+        conversation,
+        suggestedQuestions,
         conversations: {
           english: ensureConversation(messagesByLanguage.english, "english"),
           filipino: ensureConversation(messagesByLanguage.filipino, "filipino"),
@@ -208,36 +324,69 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
         },
       })
     );
-  }, [draftByLanguage, language, messagesByLanguage, storageScope]);
+  }, [conversation, draftByLanguage, language, messagesByLanguage, storageScope, suggestedQuestions]);
+
+  const replaceChatState = useCallback((nextState) => {
+    conversationIdRef.current = nextState.conversation.id;
+    setLanguage(nextState.language);
+    setConversation(nextState.conversation);
+    setSuggestedQuestions(nextState.suggestedQuestions);
+    setMessagesByLanguage(nextState.conversations);
+    setDraftByLanguage(nextState.drafts);
+    setIsSending(false);
+  }, []);
+
+  const startNewConversation = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(getStorageKey(storageScope));
+    }
+    replaceChatState(getDefaultChatState());
+  }, [replaceChatState, storageScope]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return undefined;
     }
 
-    window.localStorage.removeItem(LEGACY_CHAT_WIDGET_STORAGE_KEY);
+    removeLegacyChatStorage();
 
     const syncChatStateToCurrentSessionUser = () => {
       const nextScope = resolveStorageScope();
+      if (storageScope === nextScope) return;
 
-      setStorageScope((currentScope) => {
-        if (currentScope === nextScope) {
-          return currentScope;
-        }
-
-        const nextState = readStoredChatState(nextScope);
-        setLanguage("english");
-        setMessagesByLanguage(nextState.conversations);
-        setDraftByLanguage(nextState.drafts);
-        return nextScope;
-      });
+      window.sessionStorage.removeItem(getStorageKey(storageScope));
+      window.sessionStorage.removeItem(getStorageKey(nextScope));
+      replaceChatState(getDefaultChatState());
+      setStorageScope(nextScope);
     };
 
     window.addEventListener(SESSION_USER_UPDATED_EVENT, syncChatStateToCurrentSessionUser);
     return () => {
       window.removeEventListener(SESSION_USER_UPDATED_EVENT, syncChatStateToCurrentSessionUser);
     };
-  }, []);
+  }, [replaceChatState, storageScope]);
+
+  useEffect(() => {
+    if (!isOpen || isSending) return undefined;
+
+    if (isConversationExpired(conversation)) {
+      startNewConversation();
+      return undefined;
+    }
+
+    const lastActivityAtMs = Date.parse(conversation.lastActivityAt);
+    const now = new Date();
+    const idleExpiryAt = lastActivityAtMs + CONVERSATION_IDLE_TIMEOUT_MS;
+    const nextDayAt = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1
+    ).getTime();
+    const expiryDelay = Math.max(0, Math.min(idleExpiryAt, nextDayAt) - now.getTime());
+    const expiryTimer = window.setTimeout(startNewConversation, expiryDelay + 50);
+
+    return () => window.clearTimeout(expiryTimer);
+  }, [conversation, isOpen, isSending, startNewConversation]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -264,18 +413,30 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
     }));
   };
 
-  const sendMessage = async () => {
+  const markConversationActive = () => {
+    const now = new Date().toISOString();
+    setConversation((current) => ({
+      ...current,
+      lastActivityAt: now,
+    }));
+  };
+
+  const sendMessage = async (messageOverride = "") => {
     const activeLanguage = language;
-    const rawDraft = String(draftByLanguage[activeLanguage] || "");
+    const hasMessageOverride = typeof messageOverride === "string" && messageOverride.trim();
+    const rawDraft = hasMessageOverride
+      ? messageOverride
+      : String(draftByLanguage[activeLanguage] || "");
     const sanitizedDraft = sanitizeDraftInput(rawDraft);
     const message = sanitizedDraft.trim();
 
-    if (sanitizedDraft !== rawDraft) {
+    if (!hasMessageOverride && sanitizedDraft !== rawDraft) {
       updateDraftForLanguage(activeLanguage, sanitizedDraft);
     }
 
     if (!message || isSending) return;
 
+    const requestConversationId = conversationIdRef.current;
     const userMessageId = `user-${Date.now()}`;
     updateMessagesForLanguage(activeLanguage, (current) => [
       ...current,
@@ -288,10 +449,21 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
       },
     ]);
     updateDraftForLanguage(activeLanguage, "");
+    markConversationActive();
     setIsSending(true);
+    const thinkingStartedAt = Date.now();
 
     try {
       const response = await API.chatWithBot({ message, language: "auto" });
+      const remainingThinkingTime = Math.max(
+        0,
+        MIN_THINKING_DISPLAY_MS - (Date.now() - thinkingStartedAt)
+      );
+      if (remainingThinkingTime > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, remainingThinkingTime));
+      }
+      if (conversationIdRef.current !== requestConversationId) return;
+
       updateMessagesForLanguage(activeLanguage, (current) => {
         const updatedMessages = response.censoredMessage
           ? current.map((item) =>
@@ -322,6 +494,8 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
         ];
       });
     } catch (error) {
+      if (conversationIdRef.current !== requestConversationId) return;
+
       updateMessagesForLanguage(activeLanguage, (current) => [
         ...current,
         {
@@ -337,7 +511,9 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
         },
       ]);
     } finally {
-      setIsSending(false);
+      if (conversationIdRef.current === requestConversationId) {
+        setIsSending(false);
+      }
     }
   };
 
@@ -356,7 +532,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/25 bg-white/15 p-1 shadow-lg shadow-blue-950/15 backdrop-blur-sm">
               <img
-                src="/rentify-ai-logo-bubble.png"
+                src="/rentify-ai-logo-bubble-optimized.png"
                 alt="Rentify AI"
                 className="h-full w-full rounded-full object-contain"
               />
@@ -372,13 +548,27 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 transition hover:rotate-3 hover:bg-white/20"
-            aria-label="Close Rentify AI"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={startNewConversation}
+              disabled={isSending || messages.length === 1}
+              className="inline-flex h-10 items-center justify-center gap-1.5 rounded-2xl border border-white/15 bg-white/10 px-3 text-xs font-semibold transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Start a new chatbot conversation"
+              title="Start a new chat"
+            >
+              <MessageSquarePlus size={16} />
+              <span>New chat</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/10 transition hover:rotate-3 hover:bg-white/20"
+              aria-label="Close Rentify AI"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -391,7 +581,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
             {message.sender === "bot" && (
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white p-0.5 shadow-sm">
                 <img
-                  src="/rentify-ai-logo-bubble.png"
+                  src="/rentify-ai-logo-bubble-optimized.png"
                   alt=""
                   aria-hidden="true"
                   className="h-full w-full rounded-full object-contain"
@@ -418,7 +608,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
                         {vehicle.name || "Vehicle"}
                       </h4>
                       <p className="mt-1 text-xs text-slate-600">
-                        {vehicle.type || "N/A"} | {vehicle.transmission || "N/A"} |{" "}
+                        {formatVehicleType(vehicle.type, "N/A")} | {vehicle.transmission || "N/A"} |{" "}
                         {vehicle.seats || 0} seats
                       </p>
                       <p className="mt-2 text-sm font-semibold text-[#0B75E7]">
@@ -449,11 +639,12 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
               Suggested questions
             </p>
             <div className="flex flex-wrap gap-2">
-              {QUICK_PROMPTS.map((prompt) => (
+              {suggestedQuestions.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
-                  onClick={() => updateDraftForLanguage(language, prompt)}
+                  onClick={() => sendMessage(prompt)}
+                  disabled={isSending}
                   className="rounded-full border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-[#0B75E7] shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50"
                 >
                   {prompt}
@@ -466,11 +657,16 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
         {isSending && (
           <div className="flex items-end gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-white p-0.5 shadow-sm">
-              <img src="/rentify-ai-logo-bubble.png" alt="" aria-hidden="true" className="h-full w-full rounded-full object-contain" />
+              <img src="/rentify-ai-logo-bubble-optimized.png" alt="" aria-hidden="true" className="h-full w-full rounded-full object-contain" />
             </div>
             <div className="inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
               <LoaderCircle size={16} className="animate-spin" />
-              {language === "filipino" ? "Nag-iisip..." : "Thinking..."}
+              <span>
+                {language === "filipino" ? "Nag-iisip ang Rentify AI" : "Rentify AI is thinking"}
+              </span>
+              <span className="animate-pulse font-bold tracking-widest" aria-hidden="true">
+                ...
+              </span>
             </div>
           </div>
         )}
@@ -501,7 +697,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
             maxLength={CHAT_INPUT_MAX_LENGTH}
           />
           <button
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={isSending}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#0B75E7,#045FC3)] text-white shadow-[0_8px_18px_rgba(11,117,231,0.24)] transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Send message"

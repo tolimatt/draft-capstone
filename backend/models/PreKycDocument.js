@@ -10,6 +10,7 @@ const preKycDocumentSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    sessionId: { type: String, required: true, index: true },
     role: {
       type: String,
       enum: ["user", "owner"],
@@ -22,7 +23,7 @@ const preKycDocumentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["verified", "rejected"],
+      enum: ["verified", "pending_review", "rejected"],
       default: "rejected",
     },
     country: { type: String, default: "" },
@@ -42,6 +43,8 @@ const preKycDocumentSchema = new mongoose.Schema(
     fileSize: { type: Number, default: 0 },
     fileHash: { type: String, default: "" },
     verifiedAt: { type: Date },
+    reviewedAt: { type: Date },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     expiresAt: { type: Date },
   },
   { timestamps: true }

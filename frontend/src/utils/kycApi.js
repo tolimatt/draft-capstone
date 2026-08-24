@@ -3,15 +3,85 @@
 
 import { API_BASE_URL } from "./runtimeConfig";
 
-async function postJson(url, body) {
+const memorySessions = new Map();
+const normalizeRole = (role) => (String(role || "").toLowerCase() === "owner" ? "owner" : "user");
+const sessionKey = (email, role) => `rentify:pre-kyc:${normalizeRole(role)}:${String(email || "").trim().toLowerCase()}`;
+
+const readSessionToken = (key) => {
+  try {
+    return sessionStorage.getItem(key) || memorySessions.get(key) || "";
+  } catch {
+    return memorySessions.get(key) || "";
+  }
+};
+
+const writeSessionToken = (key, token) => {
+  memorySessions.set(key, token);
+  try {
+    sessionStorage.setItem(key, token);
+  } catch {
+    // In-memory storage still keeps the current registration attempt working.
+  }
+};
+
+const tokenNeedsRenewal = (token) => {
+  try {
+    const payloadPart = String(token || "").split(".")[1] || "";
+    const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(padded));
+    return Number(payload?.exp || 0) * 1000 <= Date.now() + 30_000;
+  } catch {
+    return true;
+  }
+};
+
+async function postJson(url, body, headers = {}) {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
+    credentials: "include",
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || data.detail || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const error = new Error(data.message || data.detail || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
   return data;
+}
+
+export async function getPreKycSessionToken(email, role = "user", { refresh = false } = {}) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedRole = normalizeRole(role);
+  const key = sessionKey(normalizedEmail, normalizedRole);
+  const existing = readSessionToken(key);
+  const shouldRefresh = refresh || (existing && tokenNeedsRenewal(existing));
+  if (existing && !shouldRefresh) return existing;
+
+  const previousToken = shouldRefresh ? existing : "";
+  const result = await postJson(`${API_BASE_URL}/kyc/pre/session`, {
+    email: normalizedEmail,
+    role: normalizedRole,
+    ...(previousToken ? { previousToken } : {}),
+  });
+  const token = String(result?.preKycToken || "").trim();
+  if (!token) throw new Error("Could not start a secure verification session.");
+  writeSessionToken(key, token);
+  return token;
+}
+
+async function postPreKyc(path, email, role, body) {
+  const normalizedRole = normalizeRole(role);
+  let token = await getPreKycSessionToken(email, normalizedRole);
+  try {
+    return await postJson(`${API_BASE_URL}${path}`, body, { "x-pre-kyc-token": token });
+  } catch (error) {
+    if (error?.status !== 401) throw error;
+    token = await getPreKycSessionToken(email, normalizedRole, { refresh: true });
+    return postJson(`${API_BASE_URL}${path}`, body, { "x-pre-kyc-token": token });
+  }
 }
 
 // Step 1: save the ID face
@@ -24,7 +94,7 @@ export async function preRegisterIdFace(
   options = {}
 ) {
   const { idType = "", userProfile = {} } = options || {};
-  return postJson(`${API_BASE_URL}/kyc/pre/id-register`, {
+  return postPreKyc("/kyc/pre/id-register", email, role, {
     email,
     full_name: fullName,
     role,
@@ -36,8 +106,8 @@ export async function preRegisterIdFace(
 }
 
 // Step 2: run the blink check
-export async function preSelfieChallenge(email, framesBase64) {
-  return postJson(`${API_BASE_URL}/kyc/pre/selfie/challenge`, {
+export async function preSelfieChallenge(email, framesBase64, role = "user") {
+  return postPreKyc("/kyc/pre/selfie/challenge", email, role, {
     email,
     frames_base64: framesBase64,
   });
@@ -45,7 +115,7 @@ export async function preSelfieChallenge(email, framesBase64) {
 
 // Step 3: match the selfie with the ID
 export async function preSelfieVerify(email, challengeId, selfieImageBase64, role) {
-  return postJson(`${API_BASE_URL}/kyc/pre/selfie/verify`, {
+  return postPreKyc("/kyc/pre/selfie/verify", email, role, {
     email,
     challenge_id: challengeId,
     selfie_image_base64: selfieImageBase64,
@@ -62,7 +132,7 @@ export async function preVerifySupportingDocument(
   options = {}
 ) {
   const { documentType = "", userProfile = {} } = options || {};
-  return postJson(`${API_BASE_URL}/kyc/pre/supporting-doc/verify`, {
+  return postPreKyc("/kyc/pre/supporting-doc/verify", email, role, {
     email,
     role,
     doc_image_base64: docImageBase64,

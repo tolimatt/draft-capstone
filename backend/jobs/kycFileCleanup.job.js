@@ -3,6 +3,7 @@ import path from "node:path";
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_RETENTION_HOURS = 3;
+const DEFAULT_REVIEW_RETENTION_HOURS = 72;
 let cleanupTimer = null;
 
 const parsePositiveNumber = (value, fallback) => {
@@ -13,6 +14,11 @@ const parsePositiveNumber = (value, fallback) => {
 const getKycRoot = () => path.resolve(process.env.KYC_UPLOAD_DIR || path.join(process.cwd(), "private_uploads", "kyc"));
 const getCutoff = () =>
   Date.now() - parsePositiveNumber(process.env.KYC_FILE_RETENTION_HOURS, DEFAULT_RETENTION_HOURS) * 60 * 60 * 1000;
+const getReviewCutoff = () =>
+  Date.now() - parsePositiveNumber(
+    process.env.KYC_PENDING_REVIEW_RETENTION_HOURS,
+    DEFAULT_REVIEW_RETENTION_HOURS
+  ) * 60 * 60 * 1000;
 
 const walkFiles = async (directory) => {
   let entries = [];
@@ -35,13 +41,15 @@ const walkFiles = async (directory) => {
 export const purgeExpiredKycFiles = async () => {
   const root = getKycRoot();
   const cutoff = getCutoff();
+  const reviewCutoff = getReviewCutoff();
   const files = await walkFiles(root);
   let deleted = 0;
 
   for (const file of files) {
     try {
       const stats = await fs.stat(file);
-      if (stats.mtimeMs > cutoff) continue;
+      const effectiveCutoff = path.basename(file).startsWith("review-") ? reviewCutoff : cutoff;
+      if (stats.mtimeMs > effectiveCutoff) continue;
       await fs.unlink(file);
       deleted += 1;
     } catch (error) {

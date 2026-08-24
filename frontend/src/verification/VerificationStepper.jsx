@@ -4,6 +4,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Check, CircleCheck, CircleX, IdCard } from "lucide-react";
 import API from "../utils/api";
+import { ID_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
 const STEPS = [
   { id: 1, label: "Upload ID" },
@@ -35,6 +36,7 @@ export default function VerificationStepper() {
   // ID state
   const [idPreview, setIdPreview] = useState(null);
   const [idBase64, setIdBase64] = useState("");
+  const [idType, setIdType] = useState("");
 
   // Blink check state
   const [challengeId, setChallengeId] = useState("");
@@ -74,17 +76,28 @@ export default function VerificationStepper() {
     const file = e.target.files?.[0];
     if (!file) return;
     setError("");
+    if (file.size > 4 * 1024 * 1024) {
+      setError("ID image must be no larger than 4 MB.");
+      e.target.value = "";
+      return;
+    }
     const b64 = await fileToBase64(file);
     setIdPreview(b64);
     setIdBase64(b64);
   };
 
   const submitId = async () => {
+    if (!idType) { setError("Select your ID type first."); return; }
     if (!idBase64) { setError("Upload your ID card first."); return; }
     setLoading(true);
     setError("");
     try {
-      const data = await API.kycRegisterFace({ id_image_base64: idBase64 });
+      const mimeMatch = idBase64.match(/^data:([^;,]+)[;,]/i);
+      const data = await API.kycRegisterFace({
+        id_image_base64: idBase64,
+        id_image_mime: mimeMatch?.[1] || "image/jpeg",
+        id_type: idType,
+      });
       if (!data.success) { setError(data.message); return; }
       setStep(2);
     } catch (err) {
@@ -113,7 +126,7 @@ export default function VerificationStepper() {
       framesRef.current.push(canvasToBase64(canvas));
       setFrameCount(framesRef.current.length);
 
-      if (framesRef.current.length >= 20) {
+      if (framesRef.current.length >= 5) {
         clearInterval(intervalRef.current);
         closeCamera();
         setBlinkStatus("done");
@@ -175,6 +188,7 @@ export default function VerificationStepper() {
     setStep(1);
     setIdBase64("");
     setIdPreview(null);
+    setIdType("");
     setSelfieBase64("");
     setSelfiePreview(null);
     setResult(null);
@@ -232,6 +246,20 @@ export default function VerificationStepper() {
           <p className="text-gray-500 text-sm mb-4">
             Clear photo of the front of your government ID.
           </p>
+          <label className="block text-sm font-medium text-gray-700 mb-2" htmlFor="kyc-id-type">
+            ID type
+          </label>
+          <select
+            id="kyc-id-type"
+            value={idType}
+            onChange={(event) => setIdType(event.target.value)}
+            className="w-full mb-4 rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-[#017FE6] focus:outline-none"
+          >
+            <option value="">Select the uploaded ID type</option>
+            {ID_DOCUMENT_TYPES.map((entry) => (
+              <option key={entry} value={entry}>{entry}</option>
+            ))}
+          </select>
           <label className="block w-full border-2 border-dashed border-gray-300 rounded-2xl p-6 text-center cursor-pointer hover:border-[#017FE6] transition">
             {idPreview ? (
               <img src={idPreview} alt="ID" className="max-h-48 mx-auto rounded-xl object-contain" />
@@ -239,14 +267,14 @@ export default function VerificationStepper() {
               <div className="text-gray-400">
                 <IdCard size={36} className="mx-auto mb-2" aria-hidden="true" />
                 <p className="text-sm">Click to upload</p>
-                <p className="text-xs text-gray-400">JPG, PNG — max 10MB</p>
+                <p className="text-xs text-gray-400">JPG, PNG — max 4MB</p>
               </div>
             )}
             <input type="file" accept="image/*" className="hidden" onChange={handleIdUpload} />
           </label>
           <button
             onClick={submitId}
-            disabled={!idBase64 || loading}
+            disabled={!idType || !idBase64 || loading}
             className="mt-4 w-full py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-[#017FE6] to-[#0165B8] hover:opacity-95 transition disabled:opacity-50"
           >
             {loading ? "Registering..." : "Register ID & Continue"}

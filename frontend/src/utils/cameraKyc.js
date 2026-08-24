@@ -91,7 +91,9 @@ export function stopCamera(streamOrVideo) {
 
   try {
     stream.getTracks().forEach((t) => t.stop());
-  } catch {}
+  } catch {
+    // Stopping an already-ended media track is safe to ignore.
+  }
 }
 
 /**

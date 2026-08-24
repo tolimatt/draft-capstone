@@ -12,11 +12,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 BASE_DIR = Path(__file__).parent
-DEFAULT_DATASET_CANDIDATES = [
-    BASE_DIR / "rentifypro_chatbot_dataset_v5.json",
-    BASE_DIR / "rentifypro_chatbot_dataset_v4.json",
-    BASE_DIR / "rentifypro_chatbot_dataset.json",
-]
+DATASET_PATH = BASE_DIR / "rentifypro_chatbot_dataset_v6.json"
+DATASET_SCHEMA_VERSION = "v6_intent_multilingual_conversational"
 
 MODEL_NAME = os.getenv("CHATBOT_MODEL_NAME", "paraphrase-multilingual-MiniLM-L12-v2")
 CONFIDENCE_THRESHOLD = float(os.getenv("CHATBOT_CONFIDENCE_THRESHOLD", "0.58"))
@@ -254,30 +251,6 @@ RECO_NO_MATCH = {
     "taglish": "Wala akong mahanap na available na sasakyan na tugma sa request mo. Try mong baguhin ang passengers, budget, o transmission.",
 }
 
-LEGACY_TAGLISH_RESPONSE_OVERRIDES = {
-    "chat_greeting": "Hello! Ako si Rentify AI. I can help you sa booking, requirements, payments, at available vehicles.",
-    "chat_wellbeing": "Okay ako and ready akong tumulong sa booking, payment, at vehicle questions mo.",
-    "chat_identity": "Ako si Rentify AI assistant mo for rentals, booking steps, payment, at recommendations.",
-    "chat_capabilities": "Matutulungan kita sa vehicle availability, booking process, payment methods, requirements, at recommendations.",
-    "chat_gratitude": "You're welcome! Sabihin mo lang if may tanong ka pa about booking o rentals.",
-    "rental_rate": "Depende ang rental rate sa vehicle at duration. Sabihin mo lang anong unit at ilang oras o araw.",
-    "insurance_included": "Yes, included ang insurance sa lahat ng vehicle rentals.",
-    "security_deposit": "Yes, may refundable security deposit na PHP 1,000.",
-    "payment_methods": "Pwede kang magbayad via Cash, GCash, at Bank Transfer.",
-    "rental_requirements": "Kailangan mo ng at least one valid ID, preferably Driver's License.",
-    "minimum_age": "Minimum age requirement is 18 years old.",
-    "id_or_proof_of_address": "Yes, kailangan ng valid ID or proof of address for verification.",
-    "available_vehicles": "Available options natin are Sedan, Van, SUV, at Pickup Truck.",
-    "available_transmission": "May Automatic at Manual transmission options tayo.",
-    "full_tank_return": "Yes, kailangan ibalik ang sasakyan na full tank.",
-    "passenger_capacity": "Depende sa vehicle, around 5 to 15 passengers ang capacity.",
-    "choose_specific_model": "Yes, pwede kang pumili ng specific model depende sa availability.",
-    "how_to_book": "To book, i-verify muna ang account mo, submit requirements, then confirm your booking.",
-    "same_day_rental": "Yes, pwede ang same-day rental depende sa vehicle availability.",
-    "advance_booking_discount": "Sa ngayon, wala pang advance booking discount.",
-}
-
-
 class ChatRequest(BaseModel):
     message: str
     vehicles: Optional[List[Dict[str, Any]]] = None
@@ -314,74 +287,17 @@ def dedupe_keep_order(values: List[str]) -> List[str]:
     return deduped
 
 
-def resolve_dataset_path() -> Path:
-    configured = clean_text(os.getenv("CHATBOT_DATASET_PATH", ""))
-    if configured:
-        configured_path = Path(configured)
-        if not configured_path.is_absolute():
-            configured_path = BASE_DIR / configured_path
-        return configured_path
-
-    for candidate in DEFAULT_DATASET_CANDIDATES:
-        if candidate.exists():
-            return candidate
-
-    return DEFAULT_DATASET_CANDIDATES[0]
+def normalize_response_options(value: Any) -> List[str]:
+    values = value if isinstance(value, list) else [value]
+    return dedupe_keep_order([clean_text(option) for option in values if clean_text(option)])
 
 
-def parse_legacy_item(item: Dict[str, Any]) -> Tuple[List[str], Dict[str, str]]:
-    english_block = item.get("english", {})
-    filipino_block = item.get("filipino", {})
-
-    examples = dedupe_keep_order([
-        english_block.get("question", ""),
-        filipino_block.get("question", ""),
-    ])
-
-    en_answers = [clean_text(ans) for ans in english_block.get("answers", []) if clean_text(ans)]
-    fil_answers = [clean_text(ans) for ans in filipino_block.get("answers", []) if clean_text(ans)]
-
-    response_en = en_answers[0] if en_answers else ""
-    response_fil = fil_answers[0] if fil_answers else ""
-    response_taglish = LEGACY_TAGLISH_RESPONSE_OVERRIDES.get(clean_text(item.get("id", "")), "")
-
-    if not response_taglish:
-        if response_en and response_fil:
-            response_taglish = f"{response_en} Kung may tanong ka pa, sabihin mo lang."
-        else:
-            response_taglish = response_en or response_fil
-
-    responses = {
-        "en": response_en,
-        "fil": response_fil,
-        "taglish": response_taglish,
+def normalize_responses(responses: Dict[str, Any]) -> Dict[str, List[str]]:
+    return {
+        "en": normalize_response_options(responses.get("en", "")),
+        "fil": normalize_response_options(responses.get("fil", "")),
+        "taglish": normalize_response_options(responses.get("taglish", "")),
     }
-
-    return examples, responses
-
-
-def normalize_responses(intent_id: str, responses: Dict[str, Any]) -> Dict[str, str]:
-    normalized = {
-        "en": clean_text(responses.get("en", "")),
-        "fil": clean_text(responses.get("fil", "")),
-        "taglish": clean_text(responses.get("taglish", "")),
-    }
-
-    if not normalized["taglish"]:
-        normalized["taglish"] = LEGACY_TAGLISH_RESPONSE_OVERRIDES.get(intent_id, "")
-
-    if not normalized["taglish"]:
-        if normalized["en"] and normalized["fil"]:
-            normalized["taglish"] = f"{normalized['en']} Kung may tanong ka pa, sabihin mo lang."
-        else:
-            normalized["taglish"] = normalized["en"] or normalized["fil"]
-
-    if not normalized["en"]:
-        normalized["en"] = normalized["taglish"] or normalized["fil"]
-    if not normalized["fil"]:
-        normalized["fil"] = normalized["taglish"] or normalized["en"]
-
-    return normalized
 
 
 def parse_dataset_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -389,23 +305,17 @@ def parse_dataset_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not intent_id:
         return None
 
-    examples = [clean_text(x) for x in item.get("examples", []) if clean_text(x)]
-    responses: Dict[str, Any] = {}
-    if isinstance(item.get("responses", {}), dict):
-        responses = item.get("responses", {})
-    elif any(key in item for key in ("answer_en", "answer_fil", "answer_taglish")):
-        responses = {
-            "en": item.get("answer_en", ""),
-            "fil": item.get("answer_fil", ""),
-            "taglish": item.get("answer_taglish", ""),
-        }
+    raw_examples = item.get("examples")
+    responses = item.get("responses")
+    if not isinstance(raw_examples, list) or not isinstance(responses, dict):
+        return None
 
-    if examples and responses:
-        normalized_responses = normalize_responses(intent_id, responses)
-    else:
-        examples, normalized_responses = parse_legacy_item(item)
-
+    examples = dedupe_keep_order(raw_examples)
     if not examples:
+        return None
+
+    normalized_responses = normalize_responses(responses)
+    if any(not normalized_responses[style] for style in SUPPORTED_STYLES):
         return None
 
     return {
@@ -417,13 +327,23 @@ def parse_dataset_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def load_dataset(dataset_path: Path) -> List[Dict[str, Any]]:
     raw = json.loads(dataset_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema_version") != DATASET_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Chatbot dataset must use schema {DATASET_SCHEMA_VERSION}: {dataset_path}"
+        )
+
     raw_items = raw.get("items", []) if isinstance(raw, dict) else []
     intents: List[Dict[str, Any]] = []
+    intent_ids = set()
 
-    for item in raw_items:
+    for index, item in enumerate(raw_items):
         parsed = parse_dataset_item(item)
-        if parsed:
-            intents.append(parsed)
+        if not parsed:
+            raise RuntimeError(f"Invalid v6 chatbot intent at index {index}: {dataset_path}")
+        if parsed["id"] in intent_ids:
+            raise RuntimeError(f"Duplicate v6 chatbot intent id '{parsed['id']}': {dataset_path}")
+        intent_ids.add(parsed["id"])
+        intents.append(parsed)
 
     if not intents:
         raise RuntimeError(f"No valid intents loaded from dataset: {dataset_path}")
@@ -618,7 +538,7 @@ def has_vehicle_availability_signal(text: str) -> bool:
     )
 
 
-def pick_canonical_response(intent_id: str, style: str) -> str:
+def pick_canonical_response(intent_id: str, style: str, seed: str = "") -> str:
     intent = INTENTS_BY_ID.get(intent_id)
     if not intent:
         return CLARIFICATION_REPLIES.get(style, CLARIFICATION_REPLIES["en"])
@@ -631,9 +551,13 @@ def pick_canonical_response(intent_id: str, style: str) -> str:
     }.get(style, ["en", "fil", "taglish"])
 
     for key in order:
-        candidate = clean_text(responses.get(key, ""))
-        if candidate:
-            return candidate
+        candidates = normalize_response_options(responses.get(key, ""))
+        if candidates:
+            selection_key = f"{intent_id}:{style}:{seed}"
+            selection_index = sum(
+                (index + 1) * ord(char) for index, char in enumerate(selection_key)
+            ) % len(candidates)
+            return candidates[selection_index]
 
     return CLARIFICATION_REPLIES.get(style, CLARIFICATION_REPLIES["en"])
 
@@ -868,7 +792,7 @@ def chatbot_reply(message: str) -> Dict[str, Any]:
         if not top_preds:
             decision_reason = "no_prediction"
     else:
-        reply = pick_canonical_response(intent_id, style)
+        reply = pick_canonical_response(intent_id, style, message_ctx["primary"])
         decision_reason = "accepted"
 
     return {
@@ -895,8 +819,11 @@ def chatbot_reply(message: str) -> Dict[str, Any]:
     }
 
 
-dataset_path = resolve_dataset_path()
-intent_items = load_dataset(dataset_path)
+if not DATASET_PATH.is_file():
+    raise RuntimeError(f"Required chatbot dataset v6 is missing: {DATASET_PATH}")
+
+dataset_path = DATASET_PATH
+intent_items = load_dataset(DATASET_PATH)
 INTENTS_BY_ID: Dict[str, Dict[str, Any]] = {item["id"]: item for item in intent_items}
 
 embedder = SentenceTransformer(MODEL_NAME)

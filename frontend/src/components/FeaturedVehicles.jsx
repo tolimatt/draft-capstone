@@ -1,6 +1,7 @@
 import React from "react";
 import { Fuel, Settings, Star, Users } from "lucide-react";
 import VehicleCover from "./VehicleCover";
+import { formatVehicleType } from "../utils/vehicleText";
 
 export default function FeaturedVehicles({ vehicles, isLoggedIn, onViewDetails, onSignIn }) {
   return (
@@ -39,7 +40,7 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
 
       <div className="p-6">
         <h3 className="text-2xl font-bold mb-2">{vehicle.name}</h3>
-        <p className="text-gray-600 mb-4">{vehicle.category}</p>
+        <p className="text-gray-600 mb-4">{formatVehicleType(vehicle.category)}</p>
 
         <div className="flex items-center gap-5 mb-4 text-sm text-gray-600">
           <span className="flex items-center gap-1">

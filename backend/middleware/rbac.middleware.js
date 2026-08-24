@@ -19,8 +19,13 @@ export const authorize = (...roles) => {
 
 export const requireKyc = (req, res, next) => {
   if (!req.user) return res.status(401).json({ success: false, message: "Please log in." });
+  if (req.user.role === "admin") return next();
   if (req.user.kycStatus !== "approved") {
-    return res.status(403).json({ success: false, message: "KYC verification required." });
+    return res.status(403).json({
+      success: false,
+      message: "Identity verification is required before using this feature.",
+      kycStatus: req.user.kycStatus || "not_started",
+    });
   }
   next();
 };

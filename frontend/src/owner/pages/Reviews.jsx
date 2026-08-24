@@ -66,7 +66,7 @@ export default function Reviews() {
           <p className="text-sm text-gray-600">Renter feedback from completed bookings.</p>
         </div>
         <div className="flex gap-2">
-          {["all", "positive", "negative"].map((item) => (
+          {["All", "Positive", "Negative"].map((item) => (
             <button
               key={item}
               onClick={() => setRatingFilter(item)}
@@ -104,7 +104,7 @@ export default function Reviews() {
             <article key={review._id} className="bg-white rounded-xl border p-4">
               <div className="flex justify-between items-start gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <RenterAvatar profile={renter} />
+                  <RenterAvatar key={`${renter._id || renter.email || "renter"}-${renter.avatar || "no-avatar"}`} profile={renter} />
                   <div className="min-w-0">
                     <p className="font-semibold truncate">{renter.displayName}</p>
                     <p className="text-xs text-gray-500 truncate">{renter.email || "No email provided"}</p>
@@ -130,10 +130,6 @@ export default function Reviews() {
 function RenterAvatar({ profile }) {
   const avatar = String(profile?.avatar || "").trim();
   const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [avatar]);
 
   if (avatar && !failed) {
     return (

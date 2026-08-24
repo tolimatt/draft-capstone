@@ -12,6 +12,7 @@ import PreKycFace from "../models/PreKycFace.js";
 import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { ensureFaceServiceReady, isFaceServiceConnectionError } from "../utils/faceServiceManager.js";
 import { verifyPhilippinesDocument } from "../services/geminiDocument.service.js";
+import { issuePreKycSession, renewPreKycSession } from "../utils/preKycSession.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 const getFaceServiceUrl = () => {
@@ -76,20 +77,34 @@ const splitFirstLastName = (fullName = "") => {
   };
 };
 
-const recordPreKycDocument = async ({ email, role, docType, result }) => {
+const recordPreKycDocument = async ({ email, role, sessionId, docType, result }) => {
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  if (!normalizedEmail || !docType) return;
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedEmail || !normalizedSessionId || !docType) return;
 
-  const expiresAt = new Date(Date.now() + PRE_KYC_DOC_TTL_HOURS * 60 * 60 * 1000);
+  const requestedRetentionHours = result?.review_required
+    ? Number(process.env.KYC_PENDING_REVIEW_RETENTION_HOURS || 72)
+    : PRE_KYC_DOC_TTL_HOURS;
+  const retentionHours = Number.isFinite(requestedRetentionHours) && requestedRetentionHours > 0
+    ? requestedRetentionHours
+    : result?.review_required
+    ? 72
+    : 3;
+  const expiresAt = new Date(Date.now() + retentionHours * 60 * 60 * 1000);
 
   await PreKycDocument.findOneAndUpdate(
     { email: normalizedEmail, docType },
     {
       $set: {
         email: normalizedEmail,
+        sessionId: normalizedSessionId,
         role: role || "user",
         docType,
-        status: result?.passed ? "verified" : "rejected",
+        status: result?.review_required
+          ? "pending_review"
+          : result?.passed
+          ? "verified"
+          : "rejected",
         country: result?.country || "",
         docCategory: result?.doc_type || "",
         selectedDocCategory: result?.selected_doc_type || "",
@@ -110,7 +125,7 @@ const recordPreKycDocument = async ({ email, role, docType, result }) => {
         mimeType: result?.mimeType || "",
         fileSize: result?.fileSize || 0,
         fileHash: result?.fileHash || "",
-        verifiedAt: result?.passed ? new Date() : undefined,
+        verifiedAt: result?.passed && !result?.review_required ? new Date() : undefined,
         expiresAt,
       },
     },
@@ -186,9 +201,10 @@ const formatIdValidationFailure = (docResult = {}) => ({
   confidence: Number(docResult.confidence || 0),
 });
 
-const recordPreKycFace = async ({ email, role, result }) => {
+const recordPreKycFace = async ({ email, role, sessionId, result }) => {
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  if (!normalizedEmail) return;
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedEmail || !normalizedSessionId) return;
 
   const expiresAt = new Date(Date.now() + PRE_KYC_FACE_TTL_HOURS * 60 * 60 * 1000);
   const verified = Boolean(result?.verified);
@@ -198,6 +214,7 @@ const recordPreKycFace = async ({ email, role, result }) => {
     {
       $set: {
         email: normalizedEmail,
+        sessionId: normalizedSessionId,
         role: role || "user",
         status: verified ? "approved" : "rejected",
         confidence: Number(result?.confidence || 0),
@@ -211,6 +228,31 @@ const recordPreKycFace = async ({ email, role, result }) => {
     },
     { upsert: true, new: true }
   );
+};
+
+export const createPreKycSession = async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const role = req.body?.role === "owner" ? "owner" : "user";
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Enter a valid email address." });
+    }
+    const previousToken = String(req.body?.previousToken || "").trim();
+    const session = previousToken
+      ? renewPreKycSession(previousToken, { email, role })
+      : issuePreKycSession({ email, role });
+    return res.status(201).json({
+      success: true,
+      preKycToken: session.token,
+      email: session.email,
+      role: session.role,
+    });
+  } catch (error) {
+    return sendKycError(res, error, {
+      logMessage: "Pre-KYC session creation failed",
+      fallbackMessage: "We couldn't start document verification right now.",
+    });
+  }
 };
 
 // Send a request to the face service
@@ -287,6 +329,11 @@ export const registerIdFace = async (req, res) => {
     const { id_image_base64, id_image_mime, id_type, user_profile } = req.body;
     if (!id_image_base64) return res.status(400).json({ message: "id_image_base64 is required" });
     validateKycImage(id_image_base64);
+    if (!id_type) return res.status(400).json({ message: "Please select the ID type before verifying." });
+
+    const sessionId = `user:${req.user._id.toString()}`;
+    const imageBuffer = decodeKycBase64(id_image_base64);
+    const imageHash = crypto.createHash("sha256").update(imageBuffer).digest("hex");
 
     const fallbackName = splitFirstLastName(req.user?.name || user_profile?.full_name);
     const profileContext = {
@@ -302,17 +349,52 @@ export const registerIdFace = async (req, res) => {
       address: req.user?.address || user_profile?.address,
     };
 
-    const docResult = await verifyPhilippinesDocument({
-      base64: id_image_base64,
-      mimeType: id_image_mime || "image/jpeg",
+    const manuallyApproved = await PreKycDocument.findOne({
+      email: req.user.email,
+      sessionId,
       docType: "id",
-      selectedDocType: id_type || "",
-      userProfile: profileContext,
-    });
+      status: "verified",
+      fileHash: imageHash,
+    }).select("_id");
+    const docResult = manuallyApproved
+      ? {
+          passed: true,
+          confidence: 100,
+          reason: "ID approved through manual review.",
+          selected_doc_type: id_type,
+          doc_type: id_type,
+        }
+      : await verifyPhilippinesDocument({
+          base64: id_image_base64,
+          mimeType: id_image_mime || "image/jpeg",
+          docType: "id",
+          selectedDocType: id_type,
+          userProfile: profileContext,
+        });
+    if (docResult.review_required) {
+      const fileMeta = await saveKycBase64File({
+        base64: id_image_base64,
+        mimeType: id_image_mime || "image/jpeg",
+        prefix: "review-user-id",
+      });
+      await recordPreKycDocument({
+        email: req.user.email,
+        role: req.user.role,
+        sessionId,
+        docType: "id",
+        result: { ...docResult, ...fileMeta, fileHash: imageHash },
+      });
+      return res.status(202).json({
+        success: false,
+        reviewRequired: true,
+        message: docResult.reason,
+      });
+    }
     if (!docResult.passed) {
       await recordPreKycDocument({
         email: req.user?.email,
         role: req.user?.role,
+        sessionId,
         docType: "id",
         result: docResult,
       });
@@ -330,6 +412,7 @@ export const registerIdFace = async (req, res) => {
     await recordPreKycDocument({
       email: req.user?.email,
       role: req.user?.role,
+      sessionId,
       docType: "id",
       result: result?.success
         ? {
@@ -447,27 +530,9 @@ export const internalUpdateStatus = async (req, res) => {
     }
 
     if (looksLikeEmail && !isObjectId) {
-      const expiresAt = new Date(Date.now() + PRE_KYC_FACE_TTL_HOURS * 60 * 60 * 1000);
-      await PreKycFace.findOneAndUpdate(
-        { email: normalizedId.toLowerCase() },
-        {
-          $set: {
-            email: normalizedId.toLowerCase(),
-            status,
-            confidence: confidence || 0,
-            reason:
-              status === "approved"
-                ? `Face verified with ${confidence}% confidence.`
-                : "Face did not match ID photo.",
-            verifiedAt: status === "approved" ? new Date() : undefined,
-            expiresAt,
-          },
-          $setOnInsert: { provider: "face-service" },
-        },
-        { upsert: true, new: true }
-      );
-
-      return res.json({ message: `Pre-KYC status updated to ${status} for ${normalizedId}` });
+      // Pre-registration status is written by the originating Node request with its
+      // signed session id. An email-only callback cannot safely identify that attempt.
+      return res.status(202).json({ message: "Pre-KYC callback acknowledged." });
     }
 
     // kyc_cases is the durable record; User.kycStatus is its denormalized summary for authorization/UI.
@@ -520,7 +585,8 @@ export const getMyKyc = async (req, res) => {
 // Pre-registration ID upload
 export const preRegisterIdFace = async (req, res) => {
   try {
-    const { email, full_name, role, id_image_base64, id_image_mime, id_type, user_profile } = req.body;
+    const { full_name, id_image_base64, id_image_mime, id_type, user_profile } = req.body;
+    const { email, role, sessionId } = req.preKyc;
 
     if (!email || !id_image_base64) {
       return res.status(400).json({ success: false, message: "email and id_image_base64 are required" });
@@ -556,6 +622,7 @@ export const preRegisterIdFace = async (req, res) => {
       await recordPreKycDocument({
         email,
         role,
+        sessionId,
         docType: "id",
         result: docResult,
       });
@@ -563,8 +630,8 @@ export const preRegisterIdFace = async (req, res) => {
     }
 
     const payload = {
-      user_id: email.toLowerCase().trim(),
-      role: role || "user",
+      user_id: `pre:${sessionId}`,
+      role,
       full_name: full_name || "",
       id_image_base64,
     };
@@ -574,7 +641,7 @@ export const preRegisterIdFace = async (req, res) => {
       fileMeta = await saveKycBase64File({
         base64: id_image_base64,
         mimeType: id_image_mime || "image/jpeg",
-        prefix: "pre-id",
+        prefix: docResult.review_required ? "review-pre-id" : "pre-id",
       });
     } catch (saveErr) {
       return sendKycError(res, saveErr, {
@@ -587,6 +654,7 @@ export const preRegisterIdFace = async (req, res) => {
     await recordPreKycDocument({
       email,
       role,
+      sessionId,
       docType: "id",
       result: result?.success
         ? {
@@ -597,7 +665,11 @@ export const preRegisterIdFace = async (req, res) => {
           }
         : { ...docResult, ...fileMeta },
     });
-    res.json(result);
+    res.json({
+      ...result,
+      reviewRequired: Boolean(docResult.review_required),
+      message: docResult.review_required ? docResult.reason : result?.message,
+    });
   } catch (err) {
     return sendKycError(res, err, {
       logMessage: "Pre-reg ID registration failed",
@@ -609,7 +681,8 @@ export const preRegisterIdFace = async (req, res) => {
 // Pre-registration selfie challenge
 export const preSelfieChallenge = async (req, res) => {
   try {
-    const { email, frames_base64 } = req.body;
+    const { frames_base64 } = req.body;
+    const { email, sessionId } = req.preKyc;
 
     if (!email || !frames_base64 || !Array.isArray(frames_base64)) {
       return res.status(400).json({ success: false, message: "email and frames_base64 array are required" });
@@ -626,7 +699,7 @@ export const preSelfieChallenge = async (req, res) => {
     frames_base64.forEach(validateKycImage);
 
     const payload = {
-      user_id: email.toLowerCase().trim(),
+      user_id: `pre:${sessionId}`,
       frames_base64,
     };
 
@@ -644,7 +717,8 @@ export const preSelfieChallenge = async (req, res) => {
 // Pre-registration selfie check
 export const preSelfieVerify = async (req, res) => {
   try {
-    const { email, challenge_id, selfie_image_base64, role } = req.body;
+    const { challenge_id, selfie_image_base64 } = req.body;
+    const { email, role, sessionId } = req.preKyc;
 
     if (!email || !challenge_id || !selfie_image_base64) {
       return res.status(400).json({ success: false, message: "email, challenge_id, and selfie_image_base64 are required" });
@@ -652,14 +726,14 @@ export const preSelfieVerify = async (req, res) => {
     validateKycImage(selfie_image_base64);
 
     const payload = {
-      user_id: email.toLowerCase().trim(),
+      user_id: `pre:${sessionId}`,
       challenge_id,
       selfie_image_base64,
     };
 
     auditLog.info("KYC", "Pre-registration selfie verify requested");
     const result = await proxyToFaceService("/api/kyc/selfie/verify", payload);
-    await recordPreKycFace({ email, role, result });
+    await recordPreKycFace({ email, role, sessionId, result });
     res.json(result);
   } catch (err) {
     return sendKycError(res, err, {
@@ -672,7 +746,8 @@ export const preSelfieVerify = async (req, res) => {
 // Pre-registration supporting document verification (owner)
 export const preVerifySupportingDocument = async (req, res) => {
   try {
-    const { email, role, doc_image_base64, doc_image_mime, supporting_doc_type, user_profile } = req.body;
+    const { doc_image_base64, doc_image_mime, supporting_doc_type, user_profile } = req.body;
+    const { email, role, sessionId } = req.preKyc;
 
     if (!email || !doc_image_base64) {
       return res.status(400).json({
@@ -713,7 +788,7 @@ export const preVerifySupportingDocument = async (req, res) => {
         fileMeta = await saveKycBase64File({
           base64: doc_image_base64,
           mimeType: doc_image_mime || "image/jpeg",
-          prefix: "pre-supporting",
+          prefix: docResult.review_required ? "review-pre-supporting" : "pre-supporting",
         });
       } catch (saveErr) {
         auditLog.warn("KYC", "Failed to store pre-reg supporting document", { detail: saveErr.message });
@@ -723,6 +798,7 @@ export const preVerifySupportingDocument = async (req, res) => {
     await recordPreKycDocument({
       email,
       role,
+      sessionId,
       docType: "supporting",
       result: { ...docResult, ...fileMeta },
     });
@@ -743,6 +819,7 @@ export const preVerifySupportingDocument = async (req, res) => {
     return res.json({
       success: true,
       message: docResult.reason || "Supporting document verified.",
+      reviewRequired: Boolean(docResult.review_required),
       docType: docResult.doc_type,
       selectedDocType: docResult.selected_doc_type,
       country: docResult.country,
@@ -752,6 +829,77 @@ export const preVerifySupportingDocument = async (req, res) => {
     return sendKycError(res, err, {
       logMessage: "Pre-reg supporting doc verify failed",
       fallbackMessage: "We couldn't verify your document right now. Please try again.",
+    });
+  }
+};
+
+export const listPendingKycReviews = async (_req, res) => {
+  try {
+    const reviews = await PreKycDocument.find({ status: "pending_review" })
+      .select("email role sessionId docType docCategory selectedDocCategory detailsMatched mismatchFields suspectedTampering confidence reason fileName mimeType fileSize fileHash createdAt expiresAt")
+      .sort({ createdAt: 1 })
+      .limit(200)
+      .lean();
+    return res.json({ success: true, reviews });
+  } catch (error) {
+    return sendKycError(res, error, {
+      logMessage: "List pending KYC reviews failed",
+      fallbackMessage: "Could not load pending KYC reviews.",
+    });
+  }
+};
+
+export const getKycReviewFile = async (req, res) => {
+  try {
+    const review = await PreKycDocument.findById(req.params.id).select("fileKey mimeType fileName");
+    if (!review?.fileKey) return res.status(404).json({ success: false, message: "Review file not found." });
+
+    const root = path.resolve(KYC_UPLOAD_DIR);
+    const filePath = path.resolve(root, review.fileKey);
+    if (path.dirname(filePath) !== root) {
+      return res.status(400).json({ success: false, message: "Invalid review file." });
+    }
+    res.setHeader("Cache-Control", "private, no-store");
+    res.type(review.mimeType || "application/octet-stream");
+    return res.sendFile(filePath);
+  } catch (error) {
+    return sendKycError(res, error, {
+      logMessage: "Get KYC review file failed",
+      fallbackMessage: "Could not load the review file.",
+    });
+  }
+};
+
+export const decideKycReview = async (req, res) => {
+  try {
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    const remarks = String(req.body?.remarks || "").trim().slice(0, 500);
+    if (!["approve", "reject"].includes(action)) {
+      return res.status(400).json({ success: false, message: "Action must be approve or reject." });
+    }
+
+    const review = await PreKycDocument.findOne({ _id: req.params.id, status: "pending_review" });
+    if (!review) {
+      return res.status(404).json({ success: false, message: "Pending review not found." });
+    }
+
+    review.status = action === "approve" ? "verified" : "rejected";
+    review.reason = remarks || (action === "approve" ? "Approved by an administrator." : "Rejected by an administrator.");
+    review.reviewedAt = new Date();
+    review.reviewedBy = req.user._id;
+    review.verifiedAt = action === "approve" ? new Date() : undefined;
+    await review.save();
+
+    auditLog.info("KYC", `Manual document review ${action}d`, {
+      userId: req.user._id.toString(),
+      reviewId: review._id.toString(),
+      docType: review.docType,
+    });
+    return res.json({ success: true, review });
+  } catch (error) {
+    return sendKycError(res, error, {
+      logMessage: "KYC review decision failed",
+      fallbackMessage: "Could not save the KYC review decision.",
     });
   }
 };

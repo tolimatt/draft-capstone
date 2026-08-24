@@ -46,7 +46,7 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar }) {
   }, []);
 
   useEffect(() => {
-    syncUnreadNotifications();
+    const initialSyncTimer = window.setTimeout(syncUnreadNotifications, 0);
 
     const refresh = () => syncUnreadNotifications();
     const onVisibilityChange = () => {
@@ -60,6 +60,7 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar }) {
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
+      window.clearTimeout(initialSyncTimer);
       window.removeEventListener(LIVE_COUNTERS_REFRESH_EVENT, refresh);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVisibilityChange);

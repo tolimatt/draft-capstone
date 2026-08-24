@@ -18,7 +18,6 @@ const rawApiBase = configuredApiBase || inferDefaultApiBase();
 if (!configuredApiBase && typeof window !== "undefined") {
   const hostname = String(window.location.hostname || "").toLowerCase();
   if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1") {
-    // eslint-disable-next-line no-console
     console.warn(
       "[RentifyPro] VITE_API_BASE_URL is not set. Falling back to the current origin.",
     );
