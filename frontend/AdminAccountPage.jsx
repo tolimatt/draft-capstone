@@ -13,6 +13,8 @@ import CustomersView from "./src/admin/pages/CustomersView";
 import DashboardView from "./src/admin/pages/DashboardView";
 import DocumentsView from "./src/admin/pages/DocumentsView";
 import VehiclesView from "./src/admin/pages/VehiclesView";
+import TransactionRecords from "./src/admin/pages/TransactionRecords";
+import AuditLogsView from "./src/admin/pages/AuditLogsView";
 
 const pageMeta = {
   dashboard: {
@@ -35,6 +37,14 @@ const pageMeta = {
     title: "Documents",
     description: "Review customer verification files, permits, and IDs in one organized workspace.",
   },
+  transactions: {
+    title: "Transaction Records",
+    description: "Review payment activity across every renter, operator, and booking.",
+  },
+  audit: {
+    title: "Audit Logs",
+    description: "Review Super Admin security events and sensitive management decisions.",
+  },
 };
 
 export default function AdminAccountPage({ user, onLogout }) {
@@ -45,6 +55,7 @@ export default function AdminAccountPage({ user, onLogout }) {
   const [vehicles, setVehicles] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [operationalAlerts, setOperationalAlerts] = useState([]);
   const [loadState, setLoadState] = useState("loading");
   const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -91,6 +102,7 @@ export default function AdminAccountPage({ user, onLogout }) {
       setVehicles(Array.isArray(payload.vehicles) ? payload.vehicles : []);
       setDocuments(Array.isArray(payload.documents) ? payload.documents : []);
       setBookings(Array.isArray(payload.bookings) ? payload.bookings : []);
+      setOperationalAlerts(Array.isArray(payload.operationalAlerts) ? payload.operationalAlerts : []);
       setSyncedAt(payload.syncedAt || new Date().toISOString());
       setLoadState("ready");
       if (background) showFeedback("Dashboard data refreshed from RentifyPro.");
@@ -134,14 +146,14 @@ export default function AdminAccountPage({ user, onLogout }) {
     if (!actionLoading) setConfirmation(config);
   };
 
-  const confirmAction = async () => {
+  const confirmAction = async (values = {}) => {
     if (!confirmation || actionLoading || actionLockRef.current) return;
     const pendingAction = confirmation;
     actionLockRef.current = true;
     setActionLoading(true);
 
     try {
-      await pendingAction.onConfirm();
+      await pendingAction.onConfirm(values);
       setConfirmation(null);
     } catch (error) {
       showFeedback(error.message || "The action could not be completed.");
@@ -164,6 +176,47 @@ export default function AdminAccountPage({ user, onLogout }) {
     title: customer.name,
     subtitle: `${customer.role} account using ${customer.email} and ${customer.phone}. Joined ${customer.created}.`,
   });
+
+  const updateCustomer = async (customer, changes) => {
+    const payload = await adminDataApi.updateCustomer(customer.id, changes);
+    setCustomers((current) => current.map((item) => item.id === customer.id ? payload.customer : item));
+    showFeedback("Customer account updated.");
+  };
+
+  const requestCustomerStatusChange = (customer) => {
+    const disabling = !customer.disabled;
+    requestConfirmation({
+      tone: disabling ? "danger" : "primary",
+      title: `${disabling ? "Disable" : "Enable"} ${customer.name}?`,
+      description: disabling
+        ? "This customer will be signed out and blocked from logging in until an administrator enables the account."
+        : "This customer will be allowed to log in and use RentifyPro again.",
+      confirmLabel: `${disabling ? "Disable" : "Enable"} account`,
+      requireReason: true,
+      requirePassword: true,
+      onConfirm: async ({ reason, adminPassword }) => {
+        const payload = await adminDataApi.setCustomerDisabled(customer.id, { disabled: disabling, reason, adminPassword });
+        setCustomers((current) => current.map((item) => item.id === customer.id ? payload.customer : item));
+        showFeedback(payload.message);
+      },
+    });
+  };
+
+  const requestCustomerDeletion = (customer) => {
+    requestConfirmation({
+      tone: "danger",
+      title: `Archive and anonymize ${customer.name}?`,
+      description: "This blocks access, removes identity and verification data, and preserves anonymized booking history for operational records. Active bookings must be resolved first.",
+      confirmLabel: "Archive account",
+      requireReason: true,
+      requirePassword: true,
+      onConfirm: async ({ reason, adminPassword }) => {
+        const payload = await adminDataApi.archiveCustomer(customer.id, { reason, adminPassword });
+        setCustomers((current) => current.filter((item) => item.id !== customer.id));
+        showFeedback(payload.message);
+      },
+    });
+  };
 
   const viewDocument = (document) => setViewerItem({
     type: document.document,
@@ -237,16 +290,18 @@ export default function AdminAccountPage({ user, onLogout }) {
           <AdminPageHeader
             {...pageMeta[activeView]}
             onMenuOpen={() => setMobileNavOpen(true)}
-            actions={headerActions}
+            actions={["transactions", "audit"].includes(activeView) ? null : headerActions}
           />
 
           <div className="mx-auto max-w-[1600px] p-4 sm:p-5 lg:p-5">
-            {loadState === "loading" ? <DataLoadingState /> : null}
-            {loadState === "error" ? <DataErrorState message={loadError} onRetry={() => void loadAdminData()} onLogout={onLogout} /> : null}
-            {loadState === "ready" && activeView === "dashboard" ? <DashboardView vehicles={vehicles} customers={customers} documents={documents} bookings={bookings} period={dashboardPeriod} onSelect={selectView} /> : null}
+            {activeView === "transactions" ? <TransactionRecords /> : null}
+            {activeView === "audit" ? <AuditLogsView key={`audit-${viewContext.outcome || "all"}`} initialOutcome={viewContext.outcome || "all"} /> : null}
+            {!["transactions", "audit"].includes(activeView) && loadState === "loading" ? <DataLoadingState /> : null}
+            {!["transactions", "audit"].includes(activeView) && loadState === "error" ? <DataErrorState message={loadError} onRetry={() => void loadAdminData()} onLogout={onLogout} /> : null}
+            {loadState === "ready" && activeView === "dashboard" ? <DashboardView vehicles={vehicles} customers={customers} documents={documents} bookings={bookings} alerts={operationalAlerts} period={dashboardPeriod} onSelect={selectView} /> : null}
             {loadState === "ready" && activeView === "bookings" ? <BookingsView key={`bookings-${viewContext.status || "all"}`} bookings={bookings} initialStatus={viewContext.status} onView={viewBooking} /> : null}
             {loadState === "ready" && activeView === "vehicles" ? <VehiclesView vehicles={vehicles} onView={viewVehicle} /> : null}
-            {loadState === "ready" && activeView === "customers" ? <CustomersView key={`customers-${viewContext.role || "all"}`} customers={customers} adminEmail={displayEmail} initialRole={viewContext.role} onView={viewCustomer} /> : null}
+            {loadState === "ready" && activeView === "customers" ? <CustomersView key={`customers-${viewContext.role || "all"}-${viewContext.status || "all"}`} customers={customers} adminEmail={displayEmail} initialRole={viewContext.role} initialStatus={viewContext.status} onView={viewCustomer} onEdit={updateCustomer} onToggleDisabled={requestCustomerStatusChange} onDelete={requestCustomerDeletion} /> : null}
             {loadState === "ready" && activeView === "documents" ? <DocumentsView key={`documents-${viewContext.status || "all"}`} documents={documents} initialStatus={viewContext.status} onView={viewDocument} onReview={setReviewDocument} /> : null}
           </div>
         </main>

@@ -1,13 +1,17 @@
-import { CalendarCheck2, Car, FileCheck2, LayoutDashboard, LogOut, Menu, UserRound, Users, X } from "lucide-react";
+import { CalendarCheck2, Car, FileCheck2, LayoutDashboard, LogOut, Menu, ReceiptText, ScrollText, UserRound, Users, X } from "lucide-react";
 
 const groups = [
   { label: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard }] },
-  { label: "Operations", items: [{ id: "bookings", label: "Bookings", icon: CalendarCheck2 }] },
+  { label: "Operations", items: [
+    { id: "bookings", label: "Bookings", icon: CalendarCheck2 },
+    { id: "transactions", label: "Transaction Records", icon: ReceiptText },
+  ] },
   { label: "Fleet", items: [{ id: "vehicles", label: "Vehicles", icon: Car }] },
   { label: "Customers", items: [
     { id: "customers", label: "Customers", icon: Users },
     { id: "documents", label: "Documents", icon: FileCheck2 },
   ] },
+  { label: "Governance", items: [{ id: "audit", label: "Audit Logs", icon: ScrollText }] },
 ];
 
 export function AdminSidebar({ activeView, displayName, displayEmail, mobileOpen, onClose, onSelect, onLogout }) {

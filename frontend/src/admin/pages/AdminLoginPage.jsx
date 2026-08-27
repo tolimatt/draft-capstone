@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   Mail,
+  ArrowLeft,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -30,6 +31,8 @@ export default function AdminLoginPage({ onLogin }) {
   const [fieldErrors, setFieldErrors] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [mfaChallenge, setMfaChallenge] = useState(null);
+  const [mfaCode, setMfaCode] = useState("");
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -50,6 +53,11 @@ export default function AdminLoginPage({ onLogin }) {
     setError("");
     try {
       const response = await adminAuthApi.login({ ...form, email });
+      if (response.requiresMfa) {
+        setMfaChallenge(response);
+        setMfaCode("");
+        return;
+      }
       onLogin(response.user);
     } catch (requestError) {
       if (requestError.errors && Object.keys(requestError.errors).length) {
@@ -65,8 +73,46 @@ export default function AdminLoginPage({ onLogin }) {
     }
   };
 
+  const handleMfaSubmit = async (event) => {
+    event.preventDefault();
+    if (loading || !/^\d{6}$/.test(mfaCode)) {
+      if (!/^\d{6}$/.test(mfaCode)) setError("Enter the complete 6-digit verification code.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const response = await adminAuthApi.verifyMfa(mfaChallenge.challengeId, mfaCode);
+      onLogin(response.user);
+    } catch (requestError) {
+      if (requestError.status === 429) setError("Too many verification attempts. Please log in again to request a new code.");
+      else setError(requestError.message || "The verification code could not be confirmed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (recoveryOpen) {
     return <AdminPasswordRecovery onBackToLogin={() => { setRecoveryOpen(false); setError(""); setFieldErrors({ email: "", password: "" }); setForm((current) => ({ ...current, password: "" })); }} />;
+  }
+
+  if (mfaChallenge) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#eef3f9] p-4">
+        <section className="w-full max-w-md rounded-[26px] border border-slate-200 bg-white p-7 shadow-[0_24px_70px_rgba(15,23,42,0.14)] sm:p-9">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><ShieldCheck size={28} /></div>
+          <h1 className="mt-6 text-2xl font-bold text-slate-950">Verify it’s you</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">Enter the six-digit security code sent to <span className="font-semibold text-slate-800">{mfaChallenge.maskedEmail}</span>. The code expires in five minutes.</p>
+          {mfaChallenge.developmentCode ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Development code: <span className="font-mono font-bold tracking-widest">{mfaChallenge.developmentCode}</span></div> : null}
+          <form onSubmit={handleMfaSubmit} className="mt-6">
+            <label className="block"><span className="mb-2 block text-sm font-semibold text-slate-800">Verification code</span><input autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={mfaCode} onChange={(event) => { setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }} disabled={loading} placeholder="000000" className="h-14 w-full rounded-xl border border-slate-300 text-center font-mono text-2xl font-bold tracking-[0.45em] text-slate-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50" /></label>
+            {error ? <div role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</div> : null}
+            <button type="submit" disabled={loading || mfaCode.length !== 6} className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60">{loading ? <><LoaderCircle size={19} className="animate-spin" />Verifying...</> : <><ShieldCheck size={19} />Verify and continue</>}</button>
+            <button type="button" disabled={loading} onClick={() => { setMfaChallenge(null); setMfaCode(""); setError(""); setForm((current) => ({ ...current, password: "" })); }} className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50"><ArrowLeft size={17} />Back to login</button>
+          </form>
+        </section>
+      </main>
+    );
   }
 
   return (

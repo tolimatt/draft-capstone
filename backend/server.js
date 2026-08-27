@@ -1,5 +1,5 @@
 import path from "node:path";
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import cookieParser from "cookie-parser";
@@ -12,9 +12,11 @@ import hpp from "hpp";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import AdminCredential from "./models/AdminCredential.js";
+import AdminMfaChallenge from "./models/AdminMfaChallenge.js";
 import AdminPasswordReset from "./models/AdminPasswordReset.js";
 import { createAdminDataRouter } from "./routes/adminData.routes.js";
-import { sendAdminPasswordResetEmail } from "./services/adminEmail.service.js";
+import { recordAdminAudit } from "./services/adminAudit.service.js";
+import { sendAdminMfaCodeEmail, sendAdminPasswordResetEmail } from "./services/adminEmail.service.js";
 
 const backendDirectory = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(backendDirectory, ".env"), quiet: true });
@@ -39,13 +41,21 @@ const resetCodeLifetimeMs = 5 * 60 * 1000;
 const resetCodeCooldownMs = 60 * 1000;
 const resetTokenLifetime = "15m";
 const developmentResetCodeEnabled = !isProduction && String(process.env.ADMIN_PASSWORD_RESET_DEV_MODE || "").toLowerCase() === "true";
+const mfaCodeLifetimeMs = 5 * 60 * 1000;
+const developmentMfaCodeEnabled = !isProduction && String(
+  process.env.ADMIN_MFA_DEV_MODE || process.env.ADMIN_PASSWORD_RESET_DEV_MODE || "",
+).toLowerCase() === "true";
 const allowedEmailDomains = new Set(["gmail.com", "yahoo.com", "outlook.com", "hotmail.com"]);
 const emailPattern = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 const emojiPattern = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
 let databaseConnectionAttempt = null;
 
 app.use(helmet());
-app.use(cors({ origin: clientOrigin, credentials: true }));
+app.use(cors({
+  origin: clientOrigin,
+  credentials: true,
+  exposedHeaders: ["X-RentifyPro-Admin-Contract"],
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -69,6 +79,11 @@ const passwordRecoveryLimiter = rateLimit({
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const isLoopbackRequest = (request) => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(String(request.ip || ""));
+const maskEmail = (value) => {
+  const [local, domain] = normalizeEmail(value).split("@");
+  if (!local || !domain) return "your administrator email";
+  return `${local.slice(0, 2)}${"*".repeat(Math.max(local.length - 2, 3))}@${domain}`;
+};
 
 const validateEmail = (value) => {
   const email = normalizeEmail(value);
@@ -113,6 +128,21 @@ const cookieOptions = (rememberMe = false) => ({
 
 const clearSessionCookie = (response) => response.clearCookie(sessionCookieName, cookieOptions(false));
 
+const createAdminSession = (response, account, rememberMe) => {
+  const token = jwt.sign(
+    { role: "admin", email: account.email, name: account.name, sessionVersion: account.sessionVersion, mfa: true },
+    jwtSecret,
+    {
+      algorithm: "HS256",
+      subject: "system-admin",
+      issuer: "rentifypro-admin-api",
+      audience: "rentifypro-admin",
+      expiresIn: rememberMe ? rememberedSessionSeconds : shortSessionSeconds,
+    },
+  );
+  response.cookie(sessionCookieName, token, cookieOptions(rememberMe));
+};
+
 const readAdminSession = (request) => {
   const token = request.cookies?.[sessionCookieName];
   if (!token || !jwtSecret) return null;
@@ -122,7 +152,7 @@ const readAdminSession = (request) => {
       issuer: "rentifypro-admin-api",
       audience: "rentifypro-admin",
     });
-    return payload?.role === "admin" && payload?.sub === "system-admin" ? payload : null;
+    return payload?.role === "admin" && payload?.sub === "system-admin" && payload?.mfa === true ? payload : null;
   } catch {
     return null;
   }
@@ -212,25 +242,122 @@ app.post("/api/admin/auth/login", adminLoginLimiter, async (request, response) =
     await connectDatabase();
     const account = await ensureAdminAccount();
     const passwordMatches = email === account.email && await bcrypt.compare(password, account.passwordHash);
-    if (!passwordMatches) return response.status(401).json({ message: "Invalid email or password." });
+    if (!passwordMatches) {
+      await recordAdminAudit({
+        request,
+        admin: { email: email || "unknown@rentifypro.invalid" },
+        action: "admin.login.failed",
+        outcome: "failure",
+        targetType: "admin_session",
+        summary: "Super Admin password sign-in failed.",
+      });
+      return response.status(401).json({ message: "Invalid email or password." });
+    }
 
     const rememberMe = request.body?.rememberMe === true;
-    const token = jwt.sign(
-      { role: "admin", email: account.email, name: account.name, sessionVersion: account.sessionVersion },
-      jwtSecret,
-      {
-        algorithm: "HS256",
-        subject: "system-admin",
-        issuer: "rentifypro-admin-api",
-        audience: "rentifypro-admin",
-        expiresIn: rememberMe ? rememberedSessionSeconds : shortSessionSeconds,
-      },
-    );
-    response.cookie(sessionCookieName, token, cookieOptions(rememberMe));
-    return response.json({ message: "Login successful.", user: publicAdmin(account) });
+    const otp = String(randomInt(100000, 1000000));
+    const challengeId = randomUUID();
+    await AdminMfaChallenge.deleteMany({ email: account.email });
+    await AdminMfaChallenge.create({
+      challengeId,
+      email: account.email,
+      otpHash: await bcrypt.hash(otp, 10),
+      rememberMe,
+      attempts: 0,
+      maxAttempts: 5,
+      requestedIp: String(request.ip || ""),
+      expiresAt: new Date(Date.now() + mfaCodeLifetimeMs),
+    });
+
+    let delivery = "email";
+    let developmentCode;
+    try {
+      await sendAdminMfaCodeEmail(account.email, otp, {
+        requestedAt: new Date().toISOString(),
+        location: String(request.ip || "unknown source"),
+      });
+    } catch (error) {
+      console.error("Admin MFA email failed:", error.message);
+      if (developmentMfaCodeEnabled && isLoopbackRequest(request)) {
+        delivery = "development";
+        developmentCode = otp;
+      } else {
+        await AdminMfaChallenge.deleteOne({ challengeId });
+        return response.status(503).json({ message: "The sign-in code could not be delivered. Check the administrator SMTP configuration." });
+      }
+    }
+
+    await recordAdminAudit({
+      request,
+      admin: account,
+      action: "admin.mfa.requested",
+      targetType: "admin_session",
+      summary: "Super Admin password accepted; MFA verification requested.",
+      metadata: { delivery },
+    });
+    return response.status(202).json({
+      message: "Enter the six-digit code sent to your administrator email.",
+      requiresMfa: true,
+      challengeId,
+      maskedEmail: maskEmail(account.email),
+      delivery,
+      ...(developmentCode ? { developmentCode } : {}),
+    });
   } catch (error) {
     console.error("Admin login failed:", error.message);
     return response.status(503).json({ message: "Admin authentication is temporarily unavailable." });
+  }
+});
+
+app.post("/api/admin/auth/mfa/verify", adminLoginLimiter, async (request, response) => {
+  const challengeId = String(request.body?.challengeId || "").trim();
+  const otp = String(request.body?.otp || "").trim();
+  if (!challengeId || !/^\d{6}$/.test(otp)) {
+    return response.status(400).json({ message: "Enter the complete six-digit sign-in code." });
+  }
+
+  try {
+    await connectDatabase();
+    const record = await AdminMfaChallenge.findOne({ challengeId }).select("+otpHash");
+    if (!record || record.expiresAt.getTime() <= Date.now()) {
+      if (record) await AdminMfaChallenge.deleteOne({ _id: record._id });
+      return response.status(400).json({ message: "The sign-in code is invalid or expired. Return to login and request a new code." });
+    }
+    if (record.attempts >= record.maxAttempts) {
+      await AdminMfaChallenge.deleteOne({ _id: record._id });
+      return response.status(429).json({ message: "Too many incorrect codes. Return to login and request a new code." });
+    }
+
+    const account = await getAdminAccount();
+    const matches = account?.email === record.email && await bcrypt.compare(otp, record.otpHash);
+    if (!matches) {
+      record.attempts += 1;
+      await record.save();
+      await recordAdminAudit({
+        request,
+        admin: account || { email: record.email },
+        action: "admin.mfa.failed",
+        outcome: "failure",
+        targetType: "admin_session",
+        summary: "Super Admin MFA verification failed.",
+        metadata: { remainingAttempts: Math.max(record.maxAttempts - record.attempts, 0) },
+      });
+      return response.status(400).json({ message: "The sign-in code is invalid or expired." });
+    }
+
+    await AdminMfaChallenge.deleteMany({ email: record.email });
+    createAdminSession(response, account, record.rememberMe);
+    await recordAdminAudit({
+      request,
+      admin: account,
+      action: "admin.login.succeeded",
+      targetType: "admin_session",
+      summary: "Super Admin completed password and MFA authentication.",
+    });
+    return response.json({ message: "Login successful.", user: publicAdmin(account) });
+  } catch (error) {
+    console.error("Admin MFA verification failed:", error.message);
+    return response.status(503).json({ message: "MFA verification is temporarily unavailable." });
   }
 });
 
@@ -249,8 +376,26 @@ app.get("/api/admin/auth/session", async (request, response) => {
   }
 });
 
-app.post("/api/admin/auth/logout", (_request, response) => {
+app.post("/api/admin/auth/logout", async (request, response) => {
+  const session = readAdminSession(request);
   clearSessionCookie(response);
+  if (session) {
+    try {
+      await connectDatabase();
+      const account = await getAuthenticatedAccount(session);
+      if (account) {
+        await recordAdminAudit({
+          request,
+          admin: account,
+          action: "admin.logout",
+          targetType: "admin_session",
+          summary: "Super Admin signed out.",
+        });
+      }
+    } catch {
+      // Logout must still succeed when audit storage is unavailable.
+    }
+  }
   return response.json({ message: "Logged out successfully." });
 });
 
@@ -387,6 +532,16 @@ app.post("/api/admin/auth/reset-password", passwordRecoveryLimiter, async (reque
     await account.save();
     await AdminPasswordReset.deleteMany({ email });
     clearSessionCookie(response);
+    await AdminMfaChallenge.deleteMany({ email });
+    await recordAdminAudit({
+      request,
+      admin: account,
+      action: "admin.password.changed",
+      targetType: "admin_account",
+      targetId: account.key,
+      targetLabel: account.email,
+      summary: "Super Admin password was reset and all prior sessions were revoked.",
+    });
     return response.json({ message: "Password reset successful. You can now log in with your new password." });
   } catch (error) {
     console.error("Admin password reset failed:", error.message);

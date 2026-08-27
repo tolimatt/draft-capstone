@@ -56,3 +56,27 @@ export async function sendAdminPasswordResetEmail(to, otp) {
       </div>`,
   });
 }
+
+export async function sendAdminMfaCodeEmail(to, otp, details = {}) {
+  const fromAddress = asText(process.env.EMAIL_FROM || process.env.SMTP_USER || process.env.EMAIL_USER);
+  const fromName = asText(process.env.EMAIL_FROM_NAME) || "RentifyPro";
+  const location = asText(details.location) || "an unrecognized location";
+  const requestedAt = asText(details.requestedAt) || new Date().toISOString();
+  await getTransporter().sendMail({
+    from: `"${fromName}" <${fromAddress}>`,
+    to,
+    subject: "Your RentifyPro Admin Sign-In Code",
+    text: `Your RentifyPro Admin sign-in code is ${otp}. It expires in 5 minutes. Request: ${requestedAt}; source: ${location}.`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#f8fafc;border-radius:16px">
+        <h1 style="margin:0 0 22px;color:#017FE6;font-size:24px">RentifyPro Admin</h1>
+        <div style="background:#fff;padding:28px;border:1px solid #e2e8f0;border-radius:12px">
+          <h2 style="margin:0 0 8px;color:#0f172a;font-size:20px">Confirm Your Sign-In</h2>
+          <p style="margin:0 0 22px;color:#64748b;font-size:14px">Enter this code to finish signing in. It expires in 5 minutes.</p>
+          <div style="padding:16px;text-align:center;background:#eff6ff;border-radius:10px;color:#1d4ed8;font-size:32px;font-weight:700;letter-spacing:8px">${otp}</div>
+          <p style="margin:22px 0 0;color:#64748b;font-size:12px">Requested ${requestedAt} from ${location}.</p>
+          <p style="margin:8px 0 0;color:#94a3b8;font-size:12px">If this was not you, change the Super Admin password immediately.</p>
+        </div>
+      </div>`,
+  });
+}

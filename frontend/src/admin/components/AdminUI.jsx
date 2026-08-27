@@ -6,6 +6,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { useState } from "react";
 
 export function StatusBadge({ value }) {
   const status = String(value || "").toLowerCase();
@@ -118,7 +119,15 @@ export function Toast({ message }) {
 
 export function ConfirmationDialog({ confirmation, loading, onCancel, onConfirm }) {
   if (!confirmation) return null;
+  return <ConfirmationForm key={confirmation.key || confirmation.title} confirmation={confirmation} loading={loading} onCancel={onCancel} onConfirm={onConfirm} />;
+}
+
+function ConfirmationForm({ confirmation, loading, onCancel, onConfirm }) {
   const danger = confirmation.tone === "danger";
+  const [reason, setReason] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const reasonValid = !confirmation.requireReason || (reason.trim().length >= 10 && reason.trim().length <= 500);
+  const passwordValid = !confirmation.requirePassword || adminPassword.length > 0;
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 px-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && !loading && onCancel()}>
       <div role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
@@ -127,9 +136,11 @@ export function ConfirmationDialog({ confirmation, loading, onCancel, onConfirm 
         </div>
         <h3 id="confirmation-title" className="mt-5 text-xl font-bold text-slate-950">{confirmation.title}</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">{confirmation.description}</p>
+        {confirmation.requireReason ? <label className="mt-5 block"><span className="mb-1.5 block text-sm font-semibold text-slate-800">Reason</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value.slice(0, 500))} disabled={loading} rows={3} placeholder="Explain why this action is necessary (at least 10 characters)" className="w-full resize-none rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50" /><span className={`mt-1 block text-xs ${reason.length && !reasonValid ? "text-rose-600" : "text-slate-500"}`}>{reason.trim().length}/500 characters</span></label> : null}
+        {confirmation.requirePassword ? <label className="mt-4 block"><span className="mb-1.5 block text-sm font-semibold text-slate-800">Confirm Super Admin password</span><input type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} disabled={loading} placeholder="Enter your current password" className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50" /></label> : null}
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button type="button" disabled={loading} onClick={onCancel} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:opacity-50">Cancel</button>
-          <button type="button" autoFocus disabled={loading} onClick={onConfirm} className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-4 disabled:opacity-70 ${danger ? "bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-100" : "bg-blue-600 hover:bg-blue-700 focus-visible:ring-blue-100"}`}>
+          <button type="button" autoFocus={!confirmation.requireReason} disabled={loading || !reasonValid || !passwordValid} onClick={() => onConfirm({ reason: reason.trim(), adminPassword })} className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-4 disabled:cursor-not-allowed disabled:opacity-60 ${danger ? "bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-100" : "bg-blue-600 hover:bg-blue-700 focus-visible:ring-blue-100"}`}>
             {loading ? <LoaderCircle size={17} className="animate-spin" /> : null}
             {loading ? "Working..." : confirmation.confirmLabel}
           </button>

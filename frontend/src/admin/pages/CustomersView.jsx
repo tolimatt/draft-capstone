@@ -1,14 +1,26 @@
-import { UserRound, Users } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Eye, LoaderCircle, MoreVertical, Pencil, Power, PowerOff, Trash2, UserRound, Users, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { EmptyState, FilterSelect, SearchField, StatCard, StatusBadge, TableFooter } from "../components/AdminUI";
 
 const avatarTones = ["bg-blue-50 text-blue-600", "bg-orange-50 text-orange-600", "bg-violet-50 text-violet-600", "bg-cyan-50 text-cyan-700"];
 
-export default function CustomersView({ customers, adminEmail, initialRole = "All Roles", onView }) {
+export default function CustomersView({
+  customers,
+  adminEmail,
+  initialRole = "All Roles",
+  initialStatus = "All Statuses",
+  onView,
+  onEdit,
+  onToggleDisabled,
+  onDelete,
+}) {
   const [search, setSearch] = useState("");
   const [role, setRole] = useState(initialRole);
-  const [status, setStatus] = useState("All Statuses");
+  const [status, setStatus] = useState(initialStatus);
   const [joined, setJoined] = useState("");
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  const [actionMenu, setActionMenu] = useState(null);
   const visibleCustomers = useMemo(
     () => customers.filter((customer) => customer.role !== "Admin" && String(customer.email || "").toLowerCase() !== String(adminEmail || "").toLowerCase()),
     [adminEmail, customers],
@@ -30,8 +42,67 @@ export default function CustomersView({ customers, adminEmail, initialRole = "Al
 
   const clearFilters = () => { setSearch(""); setRole("All Roles"); setStatus("All Statuses"); setJoined(""); };
 
+  useEffect(() => {
+    if (!actionMenu) return undefined;
+    const closeMenu = (event) => {
+      if (event.type === "keydown" && event.key !== "Escape") return;
+      if (event.type === "pointerdown" && event.target.closest?.("[data-customer-action-menu]")) return;
+      setActionMenu(null);
+    };
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("keydown", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("keydown", closeMenu);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [actionMenu]);
+
+  const openActionMenu = (event, customer) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuHeight = 148;
+    const belowTop = rect.bottom + 6;
+    setActionMenu((current) => current?.customer.id === customer.id ? null : {
+      customer,
+      top: belowTop + menuHeight > window.innerHeight ? Math.max(8, rect.top - menuHeight - 6) : belowTop,
+      left: Math.max(8, rect.right - 184),
+    });
+  };
+
   return (
     <div className="space-y-5">
+      <CustomerEditDialog
+        customer={editingCustomer}
+        onClose={() => setEditingCustomer(null)}
+        onSave={async (changes) => {
+          await onEdit(editingCustomer, changes);
+          setEditingCustomer(null);
+        }}
+      />
+      {actionMenu ? createPortal(
+        <div
+          data-customer-action-menu
+          role="menu"
+          aria-label={`Manage ${actionMenu.customer.name}`}
+          style={{ top: actionMenu.top, left: actionMenu.left }}
+          className="fixed z-[85] w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl"
+        >
+          <MenuAction icon={Pencil} label="Edit customer" onClick={() => { setActionMenu(null); setEditingCustomer(actionMenu.customer); }} />
+          <MenuAction
+            icon={actionMenu.customer.disabled ? Power : PowerOff}
+            label={actionMenu.customer.disabled ? "Enable account" : "Disable account"}
+            tone={actionMenu.customer.disabled ? "success" : "warning"}
+            onClick={() => { const customer = actionMenu.customer; setActionMenu(null); onToggleDisabled(customer); }}
+          />
+          <div className="my-1 border-t border-slate-100" />
+          <MenuAction icon={Trash2} label="Delete customer" tone="danger" onClick={() => { const customer = actionMenu.customer; setActionMenu(null); onDelete(customer); }} />
+        </div>,
+        document.body,
+      ) : null}
+
       <section aria-label="Customer statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total Customers" value={visibleCustomers.length} description="All customer accounts" icon={Users} />
         <StatCard label="Active Customers" value={active} description="Verified and active" icon={UserRound} tone="green" />
@@ -49,7 +120,7 @@ export default function CustomersView({ customers, adminEmail, initialRole = "Al
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] border-collapse">
+          <table className="w-full min-w-[1180px] border-collapse">
             <caption className="sr-only">RentifyPro customer accounts</caption>
             <thead className="bg-slate-50"><tr>{["Customer", "Email", "Phone", "Role", "Status", "Joined", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
@@ -61,7 +132,22 @@ export default function CustomersView({ customers, adminEmail, initialRole = "Al
                   <td className="px-4 py-3.5 text-sm text-slate-600">{customer.role}</td>
                   <td className="px-4 py-3.5"><StatusBadge value={customer.status} /></td>
                   <td className="whitespace-nowrap px-4 py-3.5 text-sm tabular-nums text-slate-600"><time dateTime={customer.created}>{customer.created}</time></td>
-                  <td className="px-4 py-3.5"><button type="button" onClick={() => onView(customer)} className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">View</button></td>
+                  <td className="px-4 py-3.5">
+                    <div className="flex items-center gap-1.5">
+                      <ActionButton label="View" icon={Eye} onClick={() => onView(customer)} />
+                      <button
+                        type="button"
+                        data-customer-action-menu
+                        aria-label={`More actions for ${customer.name}`}
+                        aria-haspopup="menu"
+                        aria-expanded={actionMenu?.customer.id === customer.id}
+                        onClick={(event) => openActionMenu(event, customer)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"
+                      >
+                        <MoreVertical size={17} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -72,6 +158,96 @@ export default function CustomersView({ customers, adminEmail, initialRole = "Al
       </section>
     </div>
   );
+}
+
+function ActionButton({ label, icon: Icon, onClick, tone = "default" }) {
+  const tones = {
+    default: "border-slate-300 text-slate-700 hover:bg-slate-50",
+    success: "border-emerald-200 text-emerald-700 hover:bg-emerald-50",
+    warning: "border-amber-200 text-amber-700 hover:bg-amber-50",
+    danger: "border-rose-200 text-rose-700 hover:bg-rose-50",
+  };
+  return (
+    <button type="button" onClick={onClick} title={label} aria-label={label} className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 ${tones[tone] || tones.default}`}>
+      <Icon size={14} aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
+
+function MenuAction({ icon: Icon, label, onClick, tone = "default" }) {
+  const tones = {
+    default: "text-slate-700 hover:bg-slate-50",
+    success: "text-emerald-700 hover:bg-emerald-50",
+    warning: "text-amber-700 hover:bg-amber-50",
+    danger: "text-rose-700 hover:bg-rose-50",
+  };
+  return (
+    <button type="button" role="menuitem" onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-semibold ${tones[tone] || tones.default}`}>
+      <Icon size={16} aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
+
+function CustomerEditDialog({ customer, onClose, onSave }) {
+  if (!customer) return null;
+  return <CustomerEditForm key={customer.id} customer={customer} onClose={onClose} onSave={onSave} />;
+}
+
+function CustomerEditForm({ customer, onClose, onSave }) {
+  const [form, setForm] = useState({
+    name: String(customer.name || ""),
+    email: String(customer.email || ""),
+    phone: ["—", "â€”"].includes(String(customer.phone || "")) ? "" : String(customer.phone || ""),
+    role: customer.role === "Operator" ? "Operator" : "Renter",
+    adminPassword: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const update = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    if (form.name.trim().length < 2) return setError("Name must contain at least 2 characters.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return setError("Enter a valid email address.");
+    if (!form.adminPassword) return setError("Enter your Super Admin password to save these changes.");
+    setSaving(true);
+    try {
+      await onSave({ ...form, name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: form.phone.trim() });
+    } catch (requestError) {
+      setError(requestError.message || "The customer could not be updated.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/55 px-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
+      <form onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="customer-edit-title" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-slate-200 p-5">
+          <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">Customer management</p><h3 id="customer-edit-title" className="mt-1.5 text-xl font-bold text-slate-950">Edit customer</h3></div>
+          <button type="button" onClick={onClose} disabled={saving} aria-label="Close edit dialog" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"><X size={19} /></button>
+        </div>
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <EditField label="Full name" value={form.name} onChange={update("name")} maxLength={100} />
+          <EditField label="Email address" type="email" value={form.email} onChange={update("email")} maxLength={254} />
+          <EditField label="Phone number" value={form.phone} onChange={update("phone")} maxLength={32} placeholder="Optional" />
+          <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-700">Role</span><select value={form.role} onChange={update("role")} className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"><option>Renter</option><option>Operator</option></select></label>
+          <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-semibold text-slate-700">Confirm Super Admin password</span><input type="password" autoComplete="current-password" value={form.adminPassword} onChange={update("adminPassword")} required placeholder="Required for sensitive customer changes" className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>
+          {error ? <p role="alert" className="sm:col-span-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{error}</p> : null}
+        </div>
+        <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} disabled={saving} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-white disabled:opacity-50">Cancel</button>
+          <button type="submit" disabled={saving} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-70">{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Pencil size={16} />}{saving ? "Saving..." : "Save changes"}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function EditField({ label, type = "text", value, onChange, maxLength, placeholder }) {
+  return <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-700">{label}</span><input type={type} value={value} onChange={onChange} maxLength={maxLength} placeholder={placeholder} required={label !== "Phone number"} className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>;
 }
 
 function initials(name) { return String(name || "?").split(" ").filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase(); }

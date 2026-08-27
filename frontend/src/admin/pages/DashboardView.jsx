@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import {
   CalendarCheck2,
   Car,
+  AlertTriangle,
+  CheckCircle2,
   ChevronRight,
   Clock3,
   FileCheck2,
@@ -30,7 +32,7 @@ const tooltipStyle = {
   boxShadow: "0 12px 30px rgba(15,23,42,.1)",
 };
 
-export default function DashboardView({ vehicles, customers, documents, bookings = [], period, onSelect }) {
+export default function DashboardView({ vehicles, customers, documents, bookings = [], alerts = [], period, onSelect }) {
   const platformCustomers = customers.filter((customer) => customer.role !== "Admin");
   const renters = platformCustomers.filter((customer) => customer.role === "Renter").length;
   const operators = platformCustomers.filter((customer) => customer.role === "Operator").length;
@@ -62,6 +64,15 @@ export default function DashboardView({ vehicles, customers, documents, bookings
         <DashboardKpiCard label="Active Rentals" value={activeRentals} actionLabel="View rentals" onAction={() => onSelect("bookings", { status: "Active" })} icon={CalendarCheck2} tone="green" />
         <DashboardKpiCard label="Pending Reviews" value={pendingDocuments} actionLabel="Review documents" onAction={() => onSelect("documents", { status: "Pending Review" })} icon={FileCheck2} tone="amber" />
         <DashboardKpiCard label="Overdue Returns" value={overdueRentals} actionLabel="View overdue" onAction={() => onSelect("bookings", { status: "Overdue" })} icon={Clock3} tone="red" />
+      </section>
+
+      <section aria-label="Operational alerts" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 px-5 py-4"><h2 className="text-base font-bold text-slate-950">Operational Alerts</h2><p className="mt-1 text-xs text-slate-500">Items that need Super Admin attention, generated from current platform data.</p></div>
+        {alerts.length ? <div className="divide-y divide-slate-100">{alerts.map((alert) => {
+          const critical = alert.severity === "critical";
+          const warning = alert.severity === "warning";
+          return <button key={alert.id} type="button" onClick={() => onSelect(alert.view, alert.context || {})} className="flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-100"><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${critical ? "bg-rose-50 text-rose-600" : warning ? "bg-amber-50 text-amber-600" : "bg-blue-50 text-blue-600"}`}><AlertTriangle size={19} /></span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-900">{alert.title}</span><span className="mt-0.5 block text-xs leading-5 text-slate-500">{alert.description}</span></span><span className={`inline-flex min-w-8 items-center justify-center rounded-full px-2.5 py-1 text-xs font-bold ${critical ? "bg-rose-100 text-rose-700" : warning ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{alert.count}</span><ChevronRight size={17} className="text-slate-400" /></button>;
+        })}</div> : <div className="flex items-center gap-3 px-5 py-5 text-sm text-emerald-700"><CheckCircle2 size={20} /><span className="font-semibold">No operational alerts require attention.</span></div>}
       </section>
 
       <section aria-label="Platform operational overview" className="grid gap-3 xl:grid-cols-[minmax(0,1.25fr)_minmax(380px,1fr)]">

@@ -39,6 +39,10 @@ export const adminAuthApi = {
     method: "POST",
     body: JSON.stringify(credentials),
   }),
+  verifyMfa: (challengeId, otp) => request("/admin/auth/mfa/verify", {
+    method: "POST",
+    body: JSON.stringify({ challengeId, otp }),
+  }),
   getSession: () => request("/admin/auth/session"),
   logout: () => request("/admin/auth/logout", { method: "POST" }),
   requestPasswordReset: (email) => request("/admin/auth/forgot-password", {

@@ -1,0 +1,49 @@
+import AdminAuditLog from "../models/AdminAuditLog.js";
+
+const asText = (value) => String(value || "").trim();
+const secretKeyPattern = /password|otp|token|secret|code/i;
+
+const sanitizeMetadata = (value, depth = 0) => {
+  if (depth > 4 || value === null || value === undefined) return value ?? null;
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => sanitizeMetadata(item, depth + 1));
+  if (typeof value !== "object") return typeof value === "string" ? value.slice(0, 500) : value;
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !secretKeyPattern.test(key))
+      .slice(0, 50)
+      .map(([key, item]) => [key, sanitizeMetadata(item, depth + 1)]),
+  );
+};
+
+export async function recordAdminAudit({
+  request,
+  admin,
+  action,
+  outcome = "success",
+  targetType = "",
+  targetId = "",
+  targetLabel = "",
+  reason = "",
+  summary,
+  metadata = {},
+}) {
+  try {
+    await AdminAuditLog.create({
+      adminKey: asText(admin?.key || admin?.id || "system-admin"),
+      adminEmail: asText(admin?.email || "unknown@rentifypro.invalid").toLowerCase(),
+      action: asText(action),
+      outcome,
+      targetType: asText(targetType),
+      targetId: asText(targetId),
+      targetLabel: asText(targetLabel),
+      reason: asText(reason).slice(0, 500),
+      summary: asText(summary).slice(0, 500),
+      metadata: sanitizeMetadata(metadata),
+      ip: asText(request?.ip).slice(0, 100),
+      userAgent: asText(request?.get?.("user-agent")).slice(0, 500),
+    });
+  } catch (error) {
+    console.error("Admin audit write failed:", error.message);
+  }
+}
