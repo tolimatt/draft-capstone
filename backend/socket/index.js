@@ -2,6 +2,7 @@ import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { createOriginChecker } from "../utils/corsOrigins.js";
+import { releaseExpiredModerationSuspension } from "../utils/accountModeration.js";
 
 let ioInstance = null;
 const { isAllowedOrigin } = createOriginChecker();
@@ -46,9 +47,19 @@ export const initSocket = (httpServer) => {
       }
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id).select("_id role");
+      const user = await User.findById(decoded.id).select("_id role isDisabled isArchived sessionVersion");
       if (!user) {
         return next(new Error("User not found."));
+      }
+      await releaseExpiredModerationSuspension(user);
+      if (Number(decoded.sessionVersion || 0) !== Number(user.sessionVersion || 0)) {
+        return next(new Error("Session revoked."));
+      }
+      if (user.isArchived) {
+        return next(new Error("Account archived."));
+      }
+      if (user.isDisabled) {
+        return next(new Error("Account disabled."));
       }
 
       socket.user = { id: user._id.toString(), role: user.role };

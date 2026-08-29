@@ -1,7 +1,6 @@
 import Booking from "../models/Booking.js";
 import eventBus from "../events/eventBus.js";
 import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
-import { syncVehicleAvailabilityByBookingState } from "../utils/vehicleAvailability.js";
 import {
   getBookingDriverHourlyRate,
   getBookingVehicleHourlyRate,
@@ -12,7 +11,6 @@ import {
 const ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
 const DEFAULT_LIFECYCLE_INTERVAL_MS = 60 * 1000;
 const LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT = 0.25;
-const BOOKING_AUTO_COMPLETE_GRACE_MINUTES_DEFAULT = 0;
 const BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT = 0;
 
 let lifecycleTimer = null;
@@ -36,10 +34,6 @@ const parseGraceMinutes = (value, fallback = 0) => {
 };
 
 const getLifecycleGracePolicy = () => ({
-  autoCompleteMinutes: parseGraceMinutes(
-    process.env.BOOKING_AUTO_COMPLETE_GRACE_MINUTES,
-    BOOKING_AUTO_COMPLETE_GRACE_MINUTES_DEFAULT
-  ),
   overdueMinutes: parseGraceMinutes(
     process.env.BOOKING_OVERDUE_GRACE_MINUTES,
     BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT
@@ -53,12 +47,6 @@ const getReturnBoundaryWithGrace = (returnAt, graceMinutes = 0) => {
   return new Date(returnAt.getTime() + grace * 60 * 1000);
 };
 
-const isPaymentSettled = (booking) => {
-  const paymentStatus = String(booking?.paymentStatus || "").trim().toLowerCase();
-  const walkInStatus = String(booking?.walkInPaymentStatus || "").trim().toLowerCase();
-  return paymentStatus === "paid" || walkInStatus === "completed";
-};
-
 const getLatePenaltyRatePerHour = (booking) => {
   const persisted = Number(booking?.lateReturnPenaltyRatePerHour || 0);
   if (Number.isFinite(persisted) && persisted > 0) {
@@ -70,47 +58,11 @@ const getLatePenaltyRatePerHour = (booking) => {
   return roundCurrency(baseRate * getLateReturnPenaltyMultiplier());
 };
 
-const syncOneBookingLifecycle = async (booking, now = new Date()) => {
+export const syncOneBookingLifecycle = async (booking, now = new Date()) => {
   const returnAt = booking?.returnAt ? new Date(booking.returnAt) : null;
   if (!returnAt || Number.isNaN(returnAt.getTime())) return false;
   if (now.getTime() < returnAt.getTime()) return false;
   const gracePolicy = getLifecycleGracePolicy();
-
-  if (isPaymentSettled(booking)) {
-    const autoCompleteBoundary = getReturnBoundaryWithGrace(returnAt, gracePolicy.autoCompleteMinutes);
-    if (!autoCompleteBoundary || now.getTime() < autoCompleteBoundary.getTime()) return false;
-
-    let changed = false;
-    if (String(booking.status || "").trim().toLowerCase() !== "completed") {
-      booking.status = "completed";
-      changed = true;
-    }
-    if (!booking.autoCompletedAt) {
-      booking.autoCompletedAt = now;
-      changed = true;
-    }
-    if (!booking.actualReturnAt) {
-      booking.actualReturnAt = returnAt;
-      changed = true;
-    }
-    if (booking.lateReturnIsOverdue) {
-      booking.lateReturnIsOverdue = false;
-      changed = true;
-    }
-    if (Number(booking.lateReturnOverdueMinutes || 0) > 0) {
-      booking.lateReturnOverdueMinutes = 0;
-      changed = true;
-    }
-
-    if (!changed) return false;
-    await booking.save();
-    await syncVehicleAvailabilityByBookingState(booking.vehicle);
-    eventBus.emit(NOTIFICATION_EVENTS.BOOKING_COMPLETED, {
-      booking,
-      autoCompleted: true,
-    });
-    return true;
-  }
 
   const overdueBoundary = getReturnBoundaryWithGrace(returnAt, gracePolicy.overdueMinutes);
   if (!overdueBoundary || now.getTime() <= overdueBoundary.getTime()) return false;
@@ -160,7 +112,7 @@ const runLifecycleSync = async () => {
     status: { $in: ACTIVE_BOOKING_STATUSES },
     returnAt: { $lte: now },
   }).select(
-    "_id status returnAt renter owner vehicle paymentStatus walkInPaymentStatus driverSelected vehicleDailyRate driverDailyRate rentalRateUnit lateReturnIsOverdue lateReturnOverdueMinutes lateReturnDetectedAt lateReturnNotifiedAt lateReturnPenaltyRatePerHour autoCompletedAt actualReturnAt"
+    "_id status returnAt renter owner vehicle driverSelected vehicleDailyRate driverDailyRate rentalRateUnit lateReturnIsOverdue lateReturnOverdueMinutes lateReturnDetectedAt lateReturnNotifiedAt lateReturnPenaltyRatePerHour actualReturnAt"
   );
 
   let touched = 0;

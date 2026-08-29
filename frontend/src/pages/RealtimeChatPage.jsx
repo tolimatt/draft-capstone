@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, MessageSquare, Search, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, Flag, MessageSquare, Search, Send, Trash2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
@@ -11,6 +11,8 @@ import {
   REALTIME_CHAT_INPUT_MAX_LENGTH,
   sanitizeRealtimeChatInput,
 } from "../utils/realtimeChatInput";
+import MessageReportModal from "../components/MessageReportModal";
+import ChatMessageInput from "../components/ChatMessageInput";
 
 const getId = (value) => String(value?._id || value || "");
 const formatDateTime = (value) =>
@@ -95,6 +97,7 @@ export default function RealtimeChatPage({
   onNavigateToChat,
   onNavigateToNotifications,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   onLogout,
 }) {
   const currentUserId = user?._id || getSessionUser()?._id || "";
@@ -104,7 +107,7 @@ export default function RealtimeChatPage({
   const [activeChatContext, setActiveChatContext] = useState({ bookingId: "", vehicleId: "" });
   const [messages, setMessages] = useState([]);
   const [messageText, setMessageText] = useState("");
-  const [loadingConversations, setLoadingConversations] = useState(false);
+  const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
@@ -118,6 +121,8 @@ export default function RealtimeChatPage({
   const [conversationQuery, setConversationQuery] = useState("");
   const [isMobileView, setIsMobileView] = useState(() => window.innerWidth < 768);
   const [showConversationList, setShowConversationList] = useState(true);
+  const [reportMessage, setReportMessage] = useState(null);
+  const [reportNotice, setReportNotice] = useState("");
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => getId(conversation.partner) === activePartnerId),
@@ -338,6 +343,10 @@ export default function RealtimeChatPage({
     const text = messageText.trim();
     if (!activePartnerId || !text) return;
 
+    // Clear the submitted draft before the request completes. This lets the
+    // user type a follow-up without the first response erasing the new text.
+    setMessageText("");
+    setError("");
     try {
       const contextPayload = normalizeChatContext(activeChatContext);
       const response = await API.sendMessageToUser(activePartnerId, {
@@ -347,9 +356,9 @@ export default function RealtimeChatPage({
       if (messageMatchesContext(response.message, contextPayload)) {
         setMessages((prev) => appendUniqueMessage(prev, response.message));
       }
-      setMessageText("");
       loadConversations();
     } catch (err) {
+      setMessageText((currentDraft) => currentDraft || text);
       setError(err.message || "Failed to send message.");
     }
   };
@@ -470,6 +479,7 @@ export default function RealtimeChatPage({
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onLogout={onLogout}
       />
 
@@ -496,6 +506,7 @@ export default function RealtimeChatPage({
             {error}
           </div>
         )}
+        {reportNotice && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status">{reportNotice}</div>}
 
         <div className="rp-chat-shell">
           <aside className={`rp-chat-sidebar ${isShowingList ? "rp-chat-panel-visible" : "rp-chat-panel-hidden"}`}>
@@ -520,9 +531,6 @@ export default function RealtimeChatPage({
             </div>
 
             <div className="rp-chat-conversation-list">
-              {loadingConversations && (
-                <p className="rp-chat-list-message">Loading conversations...</p>
-              )}
               {!loadingConversations && !conversations.length && (
                 <div className="rp-chat-list-empty">
                   <MessageSquare size={20} aria-hidden="true" />
@@ -534,7 +542,7 @@ export default function RealtimeChatPage({
                 <p className="rp-chat-list-message">No conversations match your search.</p>
               )}
 
-              {filteredConversations.map((conversation) => {
+              {!loadingConversations && filteredConversations.map((conversation) => {
                 const partnerId = getId(conversation.partner);
                 const isActive = activePartnerId === partnerId;
                 return (
@@ -618,7 +626,6 @@ export default function RealtimeChatPage({
               className="rp-chat-message-area"
               onClick={() => setActiveMessageActionId("")}
             >
-              {loadingMessages && <p className="rp-chat-state-message">Loading messages...</p>}
               {!loadingMessages && !messages.length && (
                 <div className="rp-chat-empty-thread">
                   <span aria-hidden="true"><MessageSquare size={24} /></span>
@@ -632,7 +639,7 @@ export default function RealtimeChatPage({
               )}
 
               <div className="rp-chat-message-list">
-                {messages.map((message) => {
+                {!loadingMessages && messages.map((message) => {
                   const isMine = getId(message.sender) === String(currentUserId);
                   const isEditing = isMine && editingMessageId === message._id;
                   const showActions =
@@ -704,6 +711,17 @@ export default function RealtimeChatPage({
                             </button>
                           </div>
                         )}
+                        {!isMine && !message.isDeleted && (
+                          <button
+                            type="button"
+                            onClick={() => setReportMessage(message)}
+                            className="mt-1 inline-flex h-7 w-7 self-end items-center justify-center rounded-full border border-rose-200 bg-white text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                            aria-label="Report this message"
+                            title="Report message"
+                          >
+                            <Flag size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -718,15 +736,13 @@ export default function RealtimeChatPage({
                 sendMessage();
               }}
             >
-              <input
+              <ChatMessageInput
                 value={messageText}
-                onChange={(event) =>
-                  setMessageText(sanitizeRealtimeChatInput(event.target.value))
-                }
+                onChange={setMessageText}
+                onSend={sendMessage}
                 placeholder={activePartnerId ? "Write a message..." : "Select a conversation first"}
-                aria-label="Message"
-                maxLength={REALTIME_CHAT_INPUT_MAX_LENGTH}
                 disabled={!activePartnerId}
+                containerClassName="rp-chat-composer-input-wrap"
               />
               <button
                 type="submit"
@@ -819,6 +835,12 @@ export default function RealtimeChatPage({
           </div>
         </>
       )}
+      <MessageReportModal
+        message={reportMessage}
+        senderName={activeConversation?.partner?.name || "this owner"}
+        onClose={() => setReportMessage(null)}
+        onReported={(report) => setReportNotice(`Message reported as ${report.caseReference}. Only that message was included.`)}
+      />
     </div>
   );
 }

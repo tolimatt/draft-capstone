@@ -14,6 +14,7 @@ import {
 } from "../controllers/chat.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { authorize } from "../middleware/rbac.middleware.js";
+import { requireModerationCapability } from "../middleware/moderation.middleware.js";
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
 import { ensureChatbotServiceReady } from "../utils/chatbotServiceManager.js";
@@ -139,7 +140,7 @@ router.post("/owner/renters/:renterId/open", protect, authorize("owner", "admin"
 router.patch("/owner/renters/:renterId/pin", protect, authorize("owner", "admin"), updateOwnerRenterThreadPin);
 router.delete("/conversations/:userId", protect, authorize("user", "owner", "admin"), deleteConversation);
 router.get("/messages/:userId", protect, authorize("user", "owner", "admin"), getMessagesWithUser);
-router.post("/messages/:userId", protect, authorize("user", "owner", "admin"), sendMessageToUser);
+router.post("/messages/:userId", protect, authorize("user", "owner", "admin"), requireModerationCapability("chat"), sendMessageToUser);
 router.patch("/messages/:userId/read", protect, authorize("user", "owner", "admin"), markMessagesAsRead);
 router.patch("/messages/:messageId", protect, authorize("user", "owner", "admin"), editMessage);
 router.delete("/messages/:messageId", protect, authorize("user", "owner", "admin"), deleteMessage);

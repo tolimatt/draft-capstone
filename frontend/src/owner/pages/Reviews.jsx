@@ -26,7 +26,7 @@ const getRenterProfile = (renter) => {
 
 export default function Reviews() {
   const [reviews, setReviews] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [ratingFilter, setRatingFilter] = useState("all");
 
@@ -82,13 +82,14 @@ export default function Reviews() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border p-5">
-        <p className="text-sm text-gray-500">Average Rating</p>
-        <p className="text-3xl font-bold">{average.toFixed(1)} / 5</p>
-        <p className="text-sm text-gray-500">{filtered.length} review(s)</p>
-      </div>
+      {!loading && (
+        <div className="bg-white rounded-xl border p-5">
+          <p className="text-sm text-gray-500">Average Rating</p>
+          <p className="text-3xl font-bold">{average.toFixed(1)} / 5</p>
+          <p className="text-sm text-gray-500">{filtered.length} review(s)</p>
+        </div>
+      )}
 
-      {loading && <p className="text-sm text-gray-600">Loading reviews...</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {!loading && !error && filtered.length === 0 && (
@@ -97,7 +98,7 @@ export default function Reviews() {
         </div>
       )}
 
-      <div className="space-y-3">
+      {!loading && <div className="space-y-3">
         {filtered.map((review) => {
           const renter = getRenterProfile(review.renter);
           return (
@@ -122,7 +123,7 @@ export default function Reviews() {
             </article>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 }

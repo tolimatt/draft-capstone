@@ -11,12 +11,9 @@
     "db:check": "node scripts/check-mongo-connection.js",
     "db:migrate:kyc": "node scripts/migrate-kyc-collections.js",
     "db:migrate:notifications": "node scripts/migrate-notifications.js",
+    "db:migrate:reports": "node scripts/migrate-report-indexes.js",
     "db:migrate:local": "node scripts/migrate-mongo-to-local.js",
-    "services:check": "node scripts/check-external-services.js",
-    "blockchain:compile": "node blockchain/scripts/compile-booking-ledger.cjs",
-    "blockchain:deploy:sepolia": "node blockchain/scripts/deploy-booking-ledger.cjs",
-    "blockchain:compile:hardhat": "node blockchain/scripts/run-hardhat.cjs compile --config blockchain/hardhat.config.cjs",
-    "blockchain:deploy:hardhat:sepolia": "node blockchain/scripts/run-hardhat.cjs run blockchain/scripts/deploy-booking-ledger-hardhat.cjs --network sepolia --config blockchain/hardhat.config.cjs"
+    "services:check": "node scripts/check-external-services.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
@@ -25,7 +22,6 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
-    "ethers": "^6.15.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "form-data": "^4.0.5",
@@ -38,8 +34,6 @@
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
-    "hardhat": "^2.28.6",
     "nodemon": "^3.1.11"
   }
 }

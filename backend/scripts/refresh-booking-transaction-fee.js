@@ -41,10 +41,9 @@ const getRentalTotal = (booking) => {
 
 const shouldUpdateBooking = (booking, fee) => {
   const status = String(booking?.paymentStatus || "").toLowerCase();
-  const persisted = Number(booking?.blockchainGasFee);
+  const persisted = Number(booking?.transactionFee);
   if (!["unpaid", "partial"].includes(status)) return false;
-  if (!Number.isFinite(persisted)) return false;
-  return persisted > 0 && persisted < fee;
+  return !Number.isFinite(persisted) || persisted < fee;
 };
 
 const updateBooking = async (booking, fee) => {
@@ -54,7 +53,7 @@ const updateBooking = async (booking, fee) => {
   const safePaid = Number.isFinite(paidAmount) && paidAmount > 0 ? Math.min(paidAmount, totalPayable) : 0;
   const remaining = roundCurrency(Math.max(totalPayable - safePaid, 0));
 
-  booking.blockchainGasFee = fee;
+  booking.transactionFee = fee;
   booking.paymentAmountDue = remaining;
   await booking.save();
 };
@@ -69,7 +68,10 @@ const main = async () => {
 
   const candidates = await Booking.find({
     paymentStatus: { $in: ["unpaid", "partial"] },
-    blockchainGasFee: { $gt: 0, $lt: fee },
+    $or: [
+      { transactionFee: { $exists: false } },
+      { transactionFee: { $lt: fee } },
+    ],
   });
 
   console.log(`Found ${candidates.length} booking(s) to refresh.`);

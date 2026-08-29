@@ -78,6 +78,11 @@ const vehicleSchema = new mongoose.Schema(
       default: "available",
       index: true,
     },
+    availabilityHoldReason: {
+      type: String,
+      enum: ["none", "manual", "inspection"],
+      default: "none",
+    },
     images: {
       type: [String],
       default: [],

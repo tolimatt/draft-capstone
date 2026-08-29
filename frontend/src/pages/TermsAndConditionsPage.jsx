@@ -23,6 +23,7 @@ export default function TermsAndConditionsPage({
   onNavigateToChat,
   onNavigateToNotifications,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   onNavigateToPrivacyPolicy,
   isLoggedIn,
   user,
@@ -44,6 +45,7 @@ export default function TermsAndConditionsPage({
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onLogout={onLogout}
       />
 

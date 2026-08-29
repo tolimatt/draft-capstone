@@ -9,7 +9,9 @@ const MAX_LIMIT = 24;
 const MAX_SEARCH_LENGTH = 100;
 const MAX_LOCATION_LENGTH = 180;
 const REVIEW_PREVIEW_LIMIT = 20;
+const ALLOWED_SEARCH_PATTERN = /^[\p{L}\p{N} -]*$/u;
 const ALLOWED_VEHICLE_TYPES = new Set(["car", "motorcycle", "van", "truck"]);
+const DYNAMIC_VEHICLE_CACHE_CONTROL = "private, no-store, no-cache, must-revalidate, max-age=0";
 const SEARCH_FIELDS = [
   "name",
   "description",
@@ -28,6 +30,22 @@ const parsePositiveInt = (value, fallback, max = Number.POSITIVE_INFINITY) => {
 };
 
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const validateVehicleSearch = (value = "") => {
+  const search = String(value || "");
+  if (search.length > MAX_SEARCH_LENGTH) {
+    return `Search must be ${MAX_SEARCH_LENGTH} characters or fewer.`;
+  }
+  if (!ALLOWED_SEARCH_PATTERN.test(search)) {
+    return "Use letters, numbers, spaces, and hyphens only.";
+  }
+  if (search.startsWith(" ") || search.includes("  ")) {
+    return "Use only one space between search terms.";
+  }
+  if (search.includes("--")) {
+    return "Use only one hyphen at a time.";
+  }
+  return "";
+};
 
 const buildVehicleSearchQuery = (search) => {
   const normalized = String(search || "").trim();
@@ -99,13 +117,13 @@ const buildVehicleQuery = ({ search, location, vehicleType }) => {
   return { $and: clauses };
 };
 
-const getLockedVehicleIdSet = async (vehicleIds, now = new Date()) => {
+const getLockedVehicleIdSet = async (vehicleIds) => {
   if (!vehicleIds.length) return new Set();
 
   const lockedVehicleIds = await Booking.distinct("vehicle", {
     vehicle: { $in: vehicleIds },
-    status: { $in: ["pending", "confirmed"] },
-    returnAt: { $gt: now },
+    status: { $in: ["pending", "confirmed", "extended"] },
+    actualReturnAt: null,
   });
 
   return new Set(lockedVehicleIds.map((id) => String(id)));
@@ -220,14 +238,16 @@ const applyVehicleReviewInsights = (vehicle, reviewInsightsByVehicle) => {
 
 export const getVehicles = async (req, res, next) => {
   try {
-    const search = String(req.query.search || "").trim();
+    const rawSearch = String(req.query.search || "");
+    const search = rawSearch.trim();
     const location = String(req.query.location || "").trim();
     const vehicleType = normalizeVehicleType(req.query.vehicleType || "");
+    const searchValidationError = validateVehicleSearch(rawSearch);
 
-    if (search.length > MAX_SEARCH_LENGTH) {
+    if (searchValidationError) {
       return res.status(400).json({
         success: false,
-        message: `Search must be ${MAX_SEARCH_LENGTH} characters or fewer.`,
+        message: searchValidationError,
       });
     }
     if (location.length > MAX_LOCATION_LENGTH) {
@@ -246,7 +266,6 @@ export const getVehicles = async (req, res, next) => {
     const page = parsePositiveInt(req.query.page, DEFAULT_PAGE);
     const limit = parsePositiveInt(req.query.limit, DEFAULT_LIMIT, MAX_LIMIT);
     const skip = (page - 1) * limit;
-    const now = new Date();
     const vehicleQuery = buildVehicleQuery({
       search,
       location,
@@ -263,11 +282,12 @@ export const getVehicles = async (req, res, next) => {
 
     const vehicleIds = vehicles.map((vehicle) => vehicle._id);
     const [lockedVehicleIds, reviewInsightsByVehicle] = await Promise.all([
-      getLockedVehicleIdSet(vehicleIds, now),
+      getLockedVehicleIdSet(vehicleIds),
       buildVehicleReviewInsights(vehicleIds, 3),
     ]);
 
-    res.setHeader("Cache-Control", "public, max-age=30, s-maxage=30, stale-while-revalidate=60");
+    // Availability is operational state, so the public listing must never be served stale.
+    res.setHeader("Cache-Control", DYNAMIC_VEHICLE_CACHE_CONTROL);
     return res.json({
       success: true,
       vehicles: vehicles.map((vehicle) => {
@@ -300,7 +320,6 @@ export const getVehicles = async (req, res, next) => {
 
 export const getVehicleById = async (req, res, next) => {
   try {
-    const now = new Date();
     const vehicle = await Vehicle.findById(req.params.id).populate("owner", "name avatar").lean();
 
     if (!vehicle) {
@@ -312,13 +331,13 @@ export const getVehicleById = async (req, res, next) => {
 
     const vehicleIds = [vehicle._id];
     const [lockedVehicleIds, reviewInsightsByVehicle] = await Promise.all([
-      getLockedVehicleIdSet(vehicleIds, now),
+      getLockedVehicleIdSet(vehicleIds),
       buildVehicleReviewInsights(vehicleIds),
     ]);
 
     const vehicleWithReviews = applyVehicleReviewInsights(vehicle, reviewInsightsByVehicle);
 
-    res.setHeader("Cache-Control", "public, max-age=30, s-maxage=30, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", DYNAMIC_VEHICLE_CACHE_CONTROL);
     return res.json({
       success: true,
       vehicle: serializeVehicleForRenter(req, {

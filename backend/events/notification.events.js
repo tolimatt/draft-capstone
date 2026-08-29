@@ -7,6 +7,9 @@ export const NOTIFICATION_EVENTS = Object.freeze({
   BOOKING_OVERDUE: "booking.overdue",
   BOOKING_COMPLETED: "booking.completed",
   LATE_RETURN_PROCESSED: "late_return.processed",
+  VEHICLE_RETURN_REQUESTED: "vehicle_return.requested",
+  VEHICLE_RETURN_CONFIRMED: "vehicle_return.confirmed",
+  VEHICLE_RETURN_DECLINED: "vehicle_return.declined",
 
   CANCELLATION_REQUESTED: "cancellation.requested",
   CANCELLATION_APPROVED: "cancellation.approved",

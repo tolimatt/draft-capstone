@@ -32,22 +32,34 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isDisabled: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    disabledAt: { type: Date },
+    disabledUntil: { type: Date, default: null, index: true },
+    disabledBy: { type: String, trim: true, default: "" },
+    disabledReason: { type: String, trim: true, default: "" },
+    disabledSourceReport: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Report",
+      default: null,
+    },
+    moderationRestrictions: {
+      bookingUntil: { type: Date, default: null },
+      listingUntil: { type: Date, default: null },
+      chatUntil: { type: Date, default: null },
+    },
+    isArchived: { type: Boolean, default: false, index: true },
+    archivedAt: { type: Date },
+    archivedBy: { type: String, trim: true, default: "" },
+    archiveReason: { type: String, trim: true, default: "" },
+    sessionVersion: { type: Number, default: 0 },
     kycStatus: {
       type: String,
       enum: ["not_started", "id_uploaded", "challenge_passed", "approved", "rejected"],
       default: "not_started",
-    },
-    walletAddress: {
-      type: String,
-      trim: true,
-      lowercase: true,
-      unique: true,
-      sparse: true,
-      index: true,
-      set: (value) => {
-        const normalized = String(value || "").trim().toLowerCase();
-        return normalized || undefined;
-      },
     },
     avatar: {
       type: String,

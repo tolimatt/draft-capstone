@@ -8,7 +8,7 @@ import {
   getMyBookings,
   getOwnerBookings,
   proceedBookingLateReturn,
-  recordBookingTransactionOnChain,
+  requestBookingReturn,
   requestBookingExtension,
   setBookingBalancePaymentMethod,
   verifyBookingPayment,
@@ -16,6 +16,7 @@ import {
 import { protect } from "../middleware/auth.middleware.js";
 import { authorize, requireKyc } from "../middleware/rbac.middleware.js";
 import { validateObjectIdParam } from "../middleware/validate.middleware.js";
+import { requireModerationCapability } from "../middleware/moderation.middleware.js";
 import {
   bookingCreateLimiter,
   paymentVerifyLimiter,
@@ -23,7 +24,7 @@ import {
 
 const router = express.Router();
 
-router.post("/", protect, authorize("user", "owner", "admin"), requireKyc, bookingCreateLimiter, createBooking);
+router.post("/", protect, authorize("user", "owner", "admin"), requireKyc, requireModerationCapability("booking"), bookingCreateLimiter, createBooking);
 router.get("/me", protect, authorize("user", "owner", "admin"), getMyBookings);
 router.get("/owner", protect, authorize("owner", "admin"), getOwnerBookings);
 router.get("/:id", protect, authorize("user", "owner", "admin"), validateObjectIdParam("id"), getBookingById);
@@ -34,6 +35,13 @@ router.post(
   authorize("user", "owner", "admin"),
   validateObjectIdParam("id"),
   requestBookingExtension
+);
+router.post(
+  "/:id/return-request",
+  protect,
+  authorize("user", "owner", "admin"),
+  validateObjectIdParam("id"),
+  requestBookingReturn
 );
 router.post(
   "/:id/late-return/proceed",
@@ -66,12 +74,4 @@ router.post(
   paymentVerifyLimiter,
   verifyBookingPayment
 );
-router.post(
-  "/:id/blockchain-record",
-  protect,
-  authorize("user", "owner", "admin"),
-  validateObjectIdParam("id"),
-  recordBookingTransactionOnChain
-);
-
 export default router;

@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CarFront, Clock3, CreditCard, MapPin, Users } from "lucide-react";
+import { CalendarDays, CarFront, Check, Clock3, CreditCard, Flag, MapPin, X, Users } from "lucide-react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { getTransactionFee } from "../../utils/fees";
 import { formatDurationMinutes, getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
 import { resolveAssetUrl } from "../../utils/media";
+import ReportIssueModal from "../../components/ReportIssueModal";
+import ModalPortal from "../../components/ModalPortal";
 
 const statusFilters = [
-  { id: "action", label: "Needs Approval" },
-  { id: "active", label: "Active Rentals" },
-  { id: "past", label: "Past Bookings" },
-  { id: "all", label: "All Bookings" },
+  { id: "action", label: "Needs Action" },
+  { id: "active", label: "Upcoming & Active" },
+  { id: "past", label: "History" },
+  { id: "all", label: "All" },
 ];
 const statusStyles = {
   pending: "bg-yellow-100 text-yellow-700",
@@ -39,7 +41,7 @@ const toTitleCase = (value = "") =>
     .replace(/\b\w/g, (char) => char.toUpperCase());
 const normalizeBookingStatus = (booking) =>
   booking?.status === "rejected" ? { ...booking, status: "cancelled" } : booking;
-const ACTIVE_BOOKING_STATUSES = ["pending", "confirmed", "extended"];
+const ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
 const PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
 const bookingNeedsOwnerAction = (booking) => {
   const status = String(booking?.status || "").toLowerCase();
@@ -47,6 +49,7 @@ const bookingNeedsOwnerAction = (booking) => {
     status === "pending" ||
     String(booking?.extensionStatus || booking?.extension_request?.status || "").toLowerCase() === "requested" ||
     String(booking?.cancellationStatus || booking?.cancellation_request?.status || "").toLowerCase() === "requested" ||
+    String(booking?.returnStatus || booking?.returnRequest?.status || booking?.return_request?.status || "").toLowerCase() === "requested" ||
     getWalkInStatus(booking) === "requested" ||
     (Boolean(booking?.lateReturn?.isOverdue || booking?.late_return?.isOverdue) &&
       ["confirmed", "extended"].includes(status))
@@ -82,6 +85,15 @@ const getExtensionRequestInfo = (booking) => {
     requestedReturnAt: extension?.requestedReturnAt || null,
     requestNote: String(extension?.requestNote || "").trim(),
     reviewNote: String(extension?.reviewNote || "").trim(),
+  };
+};
+const getReturnRequestInfo = (booking) => {
+  const vehicleReturn = booking?.returnRequest || booking?.return_request || {};
+  return {
+    status: String(vehicleReturn?.status || "none").trim().toLowerCase(),
+    requestedAt: vehicleReturn?.requestedAt || null,
+    confirmedAt: vehicleReturn?.confirmedAt || booking?.actualReturnAt || null,
+    reviewNote: String(vehicleReturn?.reviewNote || "").trim(),
   };
 };
 const getCancellationRequestInfo = (booking) => {
@@ -147,12 +159,16 @@ const getPayableAmount = (booking) => getRentalTotal(booking) + getTransactionFe
 
 export default function Bookings() {
   const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("action");
   const [bookingPage, setBookingPage] = useState({ hasMore: false, nextCursor: null });
   const [loadingMore, setLoadingMore] = useState(false);
   const [walkInActionBookingId, setWalkInActionBookingId] = useState("");
+  const [reportBooking, setReportBooking] = useState(null);
+  const [reportNotice, setReportNotice] = useState("");
+  const [returnReview, setReturnReview] = useState(null);
+  const [returnReviewNote, setReturnReviewNote] = useState("");
 
   const loadBookings = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (append) setLoadingMore(true);
@@ -161,7 +177,7 @@ export default function Bookings() {
     try {
       const response = await API.getOwnerBookings({
         view: statusFilter,
-        limit: 25,
+        limit: 10,
         ...(cursor ? { cursor } : {}),
       });
       const mapped = (response.bookings || []).map(normalizeBookingStatus);
@@ -284,6 +300,33 @@ export default function Bookings() {
     }
   };
 
+  const openReturnReview = (booking, action) => {
+    setReturnReview({ booking, action });
+    setReturnReviewNote("");
+  };
+
+  const reviewVehicleReturn = async () => {
+    const bookingId = returnReview?.booking?._id;
+    const action = returnReview?.action;
+    if (!bookingId || !["confirm", "decline"].includes(action)) return;
+    try {
+      setWalkInActionBookingId(bookingId);
+      setError("");
+      const response = await API.reviewOwnerVehicleReturnRequest(bookingId, action, {
+        note: returnReviewNote,
+      });
+      const normalized = normalizeBookingStatus(response.booking);
+      setBookings((prev) => prev.map((booking) => (booking._id === bookingId ? normalized : booking)));
+      setReportNotice(response.message || `Vehicle return request ${action === "confirm" ? "confirmed" : "declined"}.`);
+      setReturnReview(null);
+      setReturnReviewNote("");
+    } catch (err) {
+      setError(err.message || "Failed to review vehicle return request.");
+    } finally {
+      setWalkInActionBookingId("");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="border-b border-slate-200 pb-5">
@@ -308,8 +351,7 @@ export default function Bookings() {
       </div>
 
       {error && <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-      {loading && <p className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">Loading bookings...</p>}
-
+      {reportNotice && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{reportNotice}</p>}
       {!loading && !filteredBookings.length && (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#017FE6]"><CarFront size={26} /></div>
@@ -318,10 +360,11 @@ export default function Bookings() {
         </div>
       )}
 
-      <div className="space-y-4">
+      {!loading && <div className="space-y-4">
         {filteredBookings.map((booking) => {
           const lateReturnInfo = getLateReturnInfo(booking);
           const extensionInfo = getExtensionRequestInfo(booking);
+          const returnRequestInfo = getReturnRequestInfo(booking);
           const cancellationInfo = getCancellationRequestInfo(booking);
           const vehicleImage = resolveAssetUrl(booking.vehicle?.imageUrl || booking.vehicle?.images?.[0] || "");
 
@@ -368,6 +411,17 @@ export default function Bookings() {
                     }`}
                   >
                     Extension {toTitleCase(extensionInfo.status)}
+                  </span>
+                )}
+                {returnRequestInfo.status !== "none" && (
+                  <span className={`text-xs px-2 py-1 rounded-full ${
+                    returnRequestInfo.status === "confirmed"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : returnRequestInfo.status === "declined"
+                        ? "bg-rose-100 text-rose-700"
+                      : "bg-blue-100 text-blue-700"
+                  }`}>
+                    Return {toTitleCase(returnRequestInfo.status)}
                   </span>
                 )}
                 {getWalkInStatus(booking) !== "none" && (
@@ -423,6 +477,22 @@ export default function Bookings() {
                 {extensionInfo.requestedReturnAt ? ` Requested return: ${formatDateTime(extensionInfo.requestedReturnAt)}.` : ""}
               </div>
             )}
+            {returnRequestInfo.status === "requested" && (
+              <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                The renter requested a vehicle return. Confirm only after you physically receive the vehicle.
+              </div>
+            )}
+            {returnRequestInfo.status === "confirmed" && (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                Return confirmed. Inspect the vehicle, then mark it available from Vehicle Management when it is rental-ready.
+              </div>
+            )}
+            {returnRequestInfo.status === "declined" && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                Vehicle return request declined. The booking remains active.
+                {returnRequestInfo.reviewNote ? ` Note: ${returnRequestInfo.reviewNote}` : ""}
+              </div>
+            )}
 
 
 
@@ -444,15 +514,26 @@ export default function Bookings() {
                     </button>
                   </>
                 )}
-                {["confirmed", "extended"].includes(String(booking.status || "").toLowerCase()) && (
-                  <button
-                    onClick={() => updateBookingStatus(booking._id, "completed")}
-                    className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm"
-                  >
-                    Mark Completed
-                  </button>
+                {returnRequestInfo.status === "requested" && (
+                  <>
+                    <button
+                      onClick={() => openReturnReview(booking, "confirm")}
+                      disabled={walkInActionBookingId === booking._id || extensionInfo.status === "requested"}
+                      className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Confirm Vehicle Received
+                    </button>
+                    <button
+                      onClick={() => openReturnReview(booking, "decline")}
+                      disabled={walkInActionBookingId === booking._id}
+                      className="px-3 py-2 rounded-lg border border-rose-200 bg-white text-rose-700 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Decline Return Request
+                    </button>
+                  </>
                 )}
-                {["pending", "confirmed", "extended"].includes(String(booking.status || "").toLowerCase()) && (
+                {["pending", "confirmed", "extended"].includes(String(booking.status || "").toLowerCase()) &&
+                  returnRequestInfo.status !== "requested" && (
                   <button
                     onClick={() => updateBookingStatus(booking._id, "cancelled")}
                     className="px-3 py-2 rounded-lg bg-gray-700 text-white text-sm"
@@ -536,6 +617,7 @@ export default function Bookings() {
                 {getWalkInStatus(booking) === "completed" && (
                   <p className="w-full text-xs text-green-700">Walk-in payment has been confirmed.</p>
                 )}
+                <button type="button" onClick={() => setReportBooking(booking)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"><Flag size={15} />Report renter</button>
                 {extensionInfo.status === "approved" && (
                   <p className="w-full text-xs text-violet-700">
                     Extension approved. Updated return schedule is now {formatDateTime(booking.returnAt)}.
@@ -577,7 +659,7 @@ export default function Bookings() {
           </article>
           );
         })}
-      </div>
+      </div>}
 
       {bookingPage.hasMore && (
         <div className="flex justify-center">
@@ -587,11 +669,83 @@ export default function Bookings() {
             disabled={loadingMore}
             className="rounded-lg border border-[#017FE6] px-4 py-2 text-sm font-medium text-[#017FE6] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loadingMore ? "Loading..." : "Load more bookings"}
+            {loadingMore ? "Loading..." : "Load more"}
           </button>
         </div>
       )}
+      <ReportIssueModal booking={reportBooking} perspective="owner" onClose={() => setReportBooking(null)} onSubmitted={(report) => setReportNotice(`Report ${report.caseReference} was submitted for administrator review.`)} />
+      <ReturnReviewModal
+        review={returnReview}
+        note={returnReviewNote}
+        loading={Boolean(returnReview?.booking?._id) && walkInActionBookingId === returnReview?.booking?._id}
+        onNoteChange={setReturnReviewNote}
+        onClose={() => {
+          if (walkInActionBookingId) return;
+          setReturnReview(null);
+          setReturnReviewNote("");
+        }}
+        onSubmit={reviewVehicleReturn}
+      />
     </div>
+  );
+}
+
+function ReturnReviewModal({ review, note, loading, onNoteChange, onClose, onSubmit }) {
+  if (!review?.booking) return null;
+  const confirming = review.action === "confirm";
+  const vehicleName = review.booking.vehicle?.name || "this vehicle";
+
+  return (
+    <ModalPortal>
+      <div className="rp-modal-layer" role="dialog" aria-modal="true" aria-labelledby="return-review-title">
+        <button type="button" className="rp-modal-backdrop" onClick={loading ? undefined : onClose} aria-label="Close return review" />
+        <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.3)]">
+          <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+            <div className="flex items-start gap-3">
+              <span className={`mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${confirming ? "bg-blue-100 text-blue-700" : "bg-rose-100 text-rose-700"}`}>
+                {confirming ? <Check size={21} /> : <X size={21} />}
+              </span>
+              <div>
+                <h2 id="return-review-title" className="text-lg font-bold text-slate-900">
+                  {confirming ? "Confirm vehicle received" : "Decline return request"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">Review the renter’s return request for {vehicleName}.</p>
+              </div>
+            </div>
+            <button type="button" onClick={onClose} disabled={loading} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50" aria-label="Close modal">
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="space-y-4 p-5 sm:p-6">
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${confirming ? "border-blue-200 bg-blue-50 text-blue-900" : "border-rose-200 bg-rose-50 text-rose-900"}`}>
+              {confirming
+                ? "Confirm only after you have physically received the vehicle. It will be placed under inspection/maintenance."
+                : "Declining keeps the booking active and the vehicle unavailable. The renter can submit another return request later."}
+            </div>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Optional note</span>
+              <textarea
+                value={note}
+                maxLength={500}
+                onChange={(event) => onNoteChange(event.target.value)}
+                placeholder={confirming ? "Condition or handover note" : "Reason for declining the request"}
+                className="min-h-24 w-full resize-y rounded-2xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
+              />
+            </label>
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+            <button type="button" onClick={onClose} disabled={loading} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              Cancel
+            </button>
+            <button type="button" onClick={onSubmit} disabled={loading} className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 ${confirming ? "bg-[#017FE6] hover:bg-[#006cc3]" : "bg-rose-600 hover:bg-rose-700"}`}>
+              {loading ? "Saving..." : confirming ? "Confirm vehicle received" : "Decline request"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
   );
 }
 

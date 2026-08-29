@@ -31,6 +31,8 @@ const DATA_KEYS = new Set([
   "bookingId", "vehicleId", "conversationId", "messageId", "senderId", "status", "paymentStatus",
   "walkInPaymentStatus", "cancellationStatus", "extensionStatus", "requestedReturnAt", "returnAt",
   "overdueMinutes", "isOverdue", "autoCompleted", "rating", "actions", "unreadCount", "actionUrl",
+  "returnStatus", "returnRequestedAt", "actualReturnAt",
+  "reportId", "caseReference", "sanctionType", "restrictedUntil",
 ]);
 
 const sanitizeData = (data = {}) => {

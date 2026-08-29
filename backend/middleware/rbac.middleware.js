@@ -23,6 +23,7 @@ export const requireKyc = (req, res, next) => {
   if (req.user.kycStatus !== "approved") {
     return res.status(403).json({
       success: false,
+      code: "IDENTITY_VERIFICATION_REQUIRED",
       message: "Identity verification is required before using this feature.",
       kycStatus: req.user.kycStatus || "not_started",
     });

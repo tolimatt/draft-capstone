@@ -9,9 +9,9 @@ import Notifications from "./pages/Notifications";
 import Reviews from "./pages/Reviews";
 import Earnings from "./pages/Earnings";
 import Analytics from "./pages/Analytics";
-import Blockchain from "./pages/Blockchain";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
+import ReportsCenter from "../components/ReportsCenter";
 import API from "../utils/api";
 import { normalizeOwnerProfile, persistOwnerProfile } from "./utils/ownerProfile";
 
@@ -25,9 +25,9 @@ const OWNER_PAGES = new Set([
   "Reviews",
   "Earnings",
   "Analytics",
-  "Blockchain",
   "Settings",
   "Profile",
+  "Reports",
 ]);
 
 const normalizeOwnerPage = (value) => {
@@ -146,9 +146,9 @@ export default function OwnerLayout() {
           {activePage === "Reviews" && <Reviews />}
           {activePage === "Earnings" && <Earnings />}
           {activePage === "Analytics" && <Analytics />}
-          {activePage === "Blockchain" && <Blockchain />}
           {activePage === "Settings" && <Settings />}
           {activePage === "Profile" && <Profile />}
+          {activePage === "Reports" && <ReportsCenter embedded />}
         </main>
       </div>
     </div>

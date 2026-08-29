@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { CarFront, Fuel, MapPin, Search, Settings, Users } from "lucide-react";
+import {
+  ArrowRight,
+  CarFront,
+  Fuel,
+  MapPin,
+  Search,
+  Settings,
+  Star,
+  Users,
+} from "lucide-react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
@@ -15,6 +24,42 @@ const normalizeVehicleType = (value = "") => {
   if (!normalized) return "";
   if (normalized === "motor") return "motorcycle";
   return normalized;
+};
+
+const VEHICLE_TYPE_FILTERS = [
+  { label: "All vehicles", value: "" },
+  { label: "Cars", value: "car" },
+  { label: "Motorcycles", value: "motorcycle" },
+  { label: "Vans", value: "van" },
+  { label: "Trucks", value: "truck" },
+];
+
+const MAX_VEHICLE_SEARCH_LENGTH = 100;
+const ALLOWED_VEHICLE_SEARCH_PATTERN = /^[\p{L}\p{N} -]*$/u;
+
+const filterVehicleSearch = (value = "") => String(value || "")
+  .normalize("NFKC")
+  .replace(/[^\p{L}\p{N} -]/gu, "")
+  .replace(/ {2,}/g, " ")
+  .replace(/-{2,}/g, "-")
+  .replace(/^ +/, "")
+  .slice(0, MAX_VEHICLE_SEARCH_LENGTH);
+
+const validateVehicleSearch = (value = "") => {
+  const search = String(value || "");
+  if (search.length > MAX_VEHICLE_SEARCH_LENGTH) {
+    return `Search must be ${MAX_VEHICLE_SEARCH_LENGTH} characters or fewer.`;
+  }
+  if (!ALLOWED_VEHICLE_SEARCH_PATTERN.test(search)) {
+    return "Use letters, numbers, spaces, and hyphens only.";
+  }
+  if (search.startsWith(" ") || search.includes("  ")) {
+    return "Use only one space between search terms.";
+  }
+  if (search.includes("--")) {
+    return "Use only one hyphen at a time.";
+  }
+  return "";
 };
 
 const normalizeVehicle = (vehicle) => ({
@@ -70,19 +115,18 @@ export default function VehiclesPage({
   onNavigateToNotifications,
   onOpenNotificationsModal,
   onNavigateToAccountSettings,
+  onNavigateToReports,
 }) {
   const [vehicles, setVehicles] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAI, setShowAI] = useState(false);
   const [showBookingAccessModal, setShowBookingAccessModal] = useState(false);
   const [previewVehicle, setPreviewVehicle] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [locationQuery, setLocationQuery] = useState(String(bookingData.location || ""));
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState(
     normalizeVehicleType(bookingData.vehicleType || "")
   );
-  const [pagination, setPagination] = useState({ page: 1, limit: 24, total: 0, totalPages: 1 });
 
   useEffect(() => {
     setBookingData((prev) => {
@@ -99,10 +143,18 @@ export default function VehiclesPage({
     });
   }, [setBookingData]);
 
+  const searchValidationError = useMemo(
+    () => validateVehicleSearch(searchQuery),
+    [searchQuery]
+  );
   const combinedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
-  const combinedLocation = useMemo(() => locationQuery.trim(), [locationQuery]);
 
   useEffect(() => {
+    if (searchValidationError) {
+      setLoading(false);
+      return undefined;
+    }
+
     let isActive = true;
     const timeoutId = window.setTimeout(async () => {
       setLoading(true);
@@ -111,7 +163,6 @@ export default function VehiclesPage({
       try {
         const response = await API.getPublicVehicles({
           search: combinedSearch,
-          location: combinedLocation,
           vehicleType: vehicleTypeFilter,
           page: 1,
           limit: 24,
@@ -122,13 +173,6 @@ export default function VehiclesPage({
           .map(normalizeVehicle)
           .filter((vehicle) => vehicle.available);
         setVehicles(availableVehicles);
-        setPagination({
-          ...(response.pagination || { page: 1, limit: 24, total: 0, totalPages: 1 }),
-          total: availableVehicles.length,
-          totalPages: Math.max(1, Math.ceil(availableVehicles.length / 24)),
-          hasNextPage: false,
-          hasPrevPage: false,
-        });
       } catch (err) {
         if (!isActive) return;
         setError(err.message || "Failed to load available vehicles.");
@@ -141,12 +185,12 @@ export default function VehiclesPage({
       isActive = false;
       window.clearTimeout(timeoutId);
     };
-  }, [combinedSearch, combinedLocation, vehicleTypeFilter]);
+  }, [combinedSearch, searchValidationError, vehicleTypeFilter]);
 
-  const availableCount = useMemo(
-    () => vehicles.filter((vehicle) => vehicle.available).length,
-    [vehicles]
-  );
+  const clearVehicleSearch = () => {
+    setSearchQuery("");
+    setVehicleTypeFilter("");
+  };
 
   const closeBookingAccessModal = () => setShowBookingAccessModal(false);
   const handleBookingModalSignIn = () => {
@@ -223,185 +267,161 @@ export default function VehiclesPage({
           onNavigateToSignIn={onNavigateToSignIn}
           onNavigateToRegister={onNavigateToRegister}
           onNavigateToAccountSettings={onNavigateToAccountSettings}
+          onNavigateToReports={onNavigateToReports}
           isAIOpen={showAI}
           onShowAI={() => setShowAI(true)}
           onLogout={onLogout}
         />
 
-        <div className="rp-page-shell mx-auto max-w-[1380px] px-4 pb-16 pt-24 sm:px-6 sm:pt-28">
-          <div className="rp-page-header mb-6">
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-              <div>
-                <span className="rp-page-eyebrow">Rental marketplace</span>
-                <h1 className="text-3xl sm:text-4xl font-bold">Browse Vehicles</h1>
-                <p className="text-slate-600 mt-2">
-                  Explore verified listings with flexible schedules and transparent pricing.
-                </p>
-              </div>
-              <div className="rp-chip bg-[#0B75E7]/10 text-[#0B75E7] text-sm font-bold">
-                {availableCount} available now
-              </div>
-            </div>
-          </div>
+        <main className="rp-page-shell mx-auto max-w-[1440px] px-4 pb-16 pt-24 sm:px-6 sm:pt-28">
+          <header className="rp-fleet-header">
+            <h1>Choose Your Perfect Ride</h1>
+            <p>
+              Compare available vehicles from verified owners with clear hourly pricing and
+              practical details for every trip.
+            </p>
+          </header>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-            <aside className="rp-surface rp-glass p-5 h-fit sticky top-24 space-y-4">
-              <h2 className="text-lg font-bold">Filters</h2>
-
-              <div>
-                <label className="text-sm font-medium mb-1 block text-slate-600">Search</label>
-                <div className="relative">
-                  <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    className="rp-input pr-9 text-sm"
-                    placeholder="Name, details, plate number"
-                    maxLength={100}
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                  />
+          <section className="rp-fleet-results" aria-labelledby="vehicle-results-heading">
+              <div className="rp-results-toolbar">
+                <div>
+                  <span className="rp-page-eyebrow">Explore the fleet</span>
+                  <h2 id="vehicle-results-heading">Available vehicles</h2>
+                  <p>
+                    {loading
+                      ? "Checking the latest listings..."
+                      : `${vehicles.length} ${vehicles.length === 1 ? "vehicle" : "vehicles"} match your search`}
+                  </p>
+                </div>
+                <div className="rp-vehicle-search">
+                  <label htmlFor="vehicle-market-search">Search vehicles</label>
+                  <div className="rp-vehicle-search__control">
+                    <Search size={19} aria-hidden="true" />
+                    <input
+                      id="vehicle-market-search"
+                      type="search"
+                      placeholder="Search available vehicles"
+                      maxLength={MAX_VEHICLE_SEARCH_LENGTH}
+                      value={searchQuery}
+                      aria-invalid={Boolean(searchValidationError)}
+                      aria-describedby="vehicle-search-help"
+                      onChange={(event) => setSearchQuery(filterVehicleSearch(event.target.value))}
+                    />
+                  </div>
+                  <span
+                    id="vehicle-search-help"
+                    className={searchValidationError ? "is-error" : ""}
+                    role={searchValidationError ? "alert" : undefined}
+                  >
+                    {searchValidationError || "Letters, numbers, single spaces, and hyphens only."}
+                  </span>
                 </div>
               </div>
 
-              <div>
-                <label className="text-sm font-medium mb-1 block text-slate-600">Location</label>
-                <div className="relative">
-                  <MapPin size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    className="rp-input pr-9 text-sm"
-                    placeholder="City, municipality, or area"
-                    maxLength={180}
-                    value={locationQuery}
-                    onChange={(event) => setLocationQuery(event.target.value)}
-                  />
-                </div>
+              <div className="rp-quick-filters" role="group" aria-label="Quick vehicle type filters">
+                {VEHICLE_TYPE_FILTERS.map((filter) => (
+                  <button
+                    key={filter.value || "all"}
+                    type="button"
+                    aria-pressed={vehicleTypeFilter === filter.value}
+                    className={vehicleTypeFilter === filter.value ? "is-active" : ""}
+                    onClick={() => setVehicleTypeFilter(filter.value)}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
               </div>
 
-              <div>
-                <label className="text-sm font-medium mb-1 block text-slate-600">Vehicle Type</label>
-                <select
-                  className="rp-input text-sm"
-                  value={vehicleTypeFilter}
-                  onChange={(event) => setVehicleTypeFilter(normalizeVehicleType(event.target.value))}
-                >
-                  <option value="">All types</option>
-                  <option value="car">Car</option>
-                  <option value="motorcycle">Motorcycle</option>
-                  <option value="van">Van</option>
-                  <option value="truck">Truck</option>
-                </select>
-              </div>
-            </aside>
+              {loading && (
+                <div className="rp-results-status">Loading available vehicles...</div>
+              )}
 
-            <section>
-              {loading && <p className="text-sm text-slate-600">Loading vehicles...</p>}
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              {!loading && !error && pagination.total > 0 && (
-                <p className="mb-3 text-sm text-slate-500">
-                  Showing {vehicles.length} of {pagination.total} vehicles
-                </p>
+              {!loading && error && (
+                <div className="rp-results-status rp-results-status--error">{error}</div>
               )}
 
               {!loading && !error && vehicles.length === 0 && (
-                <div className="rp-surface p-6 text-slate-600 text-sm">
-                  No vehicles match your filters.
+                <div className="rp-results-status">
+                  <CarFront size={24} />
+                  <strong>No vehicles match your search</strong>
+                  <span>Try another search term or vehicle type.</span>
+                  {(combinedSearch || vehicleTypeFilter) && (
+                    <button type="button" onClick={clearVehicleSearch}>Clear search</button>
+                  )}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {vehicles.map((vehicle) => (
-                  <article
-                    key={vehicle.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => openVehiclePreview(vehicle)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        openVehiclePreview(vehicle);
-                      }
-                    }}
-                    aria-label={`Preview ${vehicle.name}`}
-                    className="rp-surface rp-hover-lift overflow-hidden flex flex-col cursor-pointer"
-                  >
-                  <div className="px-4 pt-4">
-                    <VehicleCover
-                      vehicle={vehicle}
-                      alt={vehicle.name}
-                      contentClassName="p-4 sm:p-5"
-                    >
-                      <span
-                        className={`absolute top-3 left-3 z-10 rp-chip ${
-                          vehicle.available
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-slate-200 text-slate-700"
-                        }`}
+              {!loading && !error && vehicles.length > 0 && (
+                <div className="rp-market-grid">
+                  {vehicles.map((vehicle) => (
+                    <article key={vehicle.id} className="rp-market-card">
+                      <button
+                        type="button"
+                        onClick={() => openVehiclePreview(vehicle)}
+                        className="rp-market-card__preview"
+                        aria-label={`View details for ${vehicle.name}`}
                       >
-                        {vehicle.available ? "Available" : "Unavailable"}
-                      </span>
-                      <span className="absolute top-3 right-3 z-10 rp-chip bg-slate-900 text-white">
-                        {vehicle.reviewCount > 0 ? vehicle.rating.toFixed(1) : "No reviews"}
-                      </span>
-                    </VehicleCover>
-                  </div>
-
-                    <div className="p-5 flex flex-col gap-2 flex-1">
-                      <h3 className="text-lg font-bold">{vehicle.name}</h3>
-                      <p className="text-sm text-slate-600 line-clamp-2">{vehicle.description}</p>
-
-                      <div className="flex items-center gap-1 text-sm text-slate-500">
-                        <CarFront size={14} className="text-[#0B75E7]" />
-                        <span>{formatVehicleType(vehicle.type, "Vehicle")}</span>
-                      </div>
-
-                      <div className="flex gap-4 text-sm text-slate-600">
-                        <span className="flex items-center gap-1">
-                          <Users size={14} className="text-[#0B75E7]" />
-                          {vehicle.seats}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Settings size={14} className="text-[#0B75E7]" />
-                          {vehicle.transmission}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Fuel size={14} className="text-[#0B75E7]" />
-                          {vehicle.fuel}
-                        </span>
-                      </div>
-
-                      {vehicle.driverOptionEnabled && (
-                        <p className="text-sm text-blue-700">
-                          Driver available
-                        </p>
-                      )}
-
-                      <div className="text-xl font-bold text-[#0B75E7]">
-                        P{vehicle.price.toLocaleString()}
-                        <span className="text-sm text-slate-500 font-medium"> / hour</span>
-                      </div>
-
-                      <div className="pt-4 mt-auto">
-                        <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleBookNow(vehicle);
-                          }}
-                          disabled={!vehicle.available}
-                          className={`py-2 text-sm w-full rounded-xl font-semibold transition ${
-                            vehicle.available
-                              ? "rp-btn-primary"
-                              : "bg-slate-200 text-slate-600 cursor-not-allowed"
-                          }`}
+                        <VehicleCover
+                          vehicle={vehicle}
+                          alt={vehicle.name}
+                          className="rp-market-card__cover"
                         >
-                          {vehicle.available ? "Book Now" : "Unavailable"}
-                        </button>
+                          <span className="rp-market-card__availability">Available</span>
+                          <span className="rp-market-card__rating">
+                            <Star size={12} fill="currentColor" />
+                            {vehicle.reviewCount > 0
+                              ? vehicle.rating.toFixed(1)
+                              : "New"}
+                          </span>
+                        </VehicleCover>
+
+                        <span className="rp-market-card__body">
+                          <span className="rp-market-card__category">
+                            {formatVehicleType(vehicle.type, "Vehicle")}
+                            {vehicle.subType ? ` \u00b7 ${formatVehicleType(vehicle.subType)}` : ""}
+                          </span>
+                          <span className="rp-market-card__title-row">
+                            <span className="rp-market-card__title">{vehicle.name}</span>
+                            <ArrowRight size={18} aria-hidden="true" />
+                          </span>
+                          <span className="rp-market-card__location">
+                            <MapPin size={14} />
+                            <span>{vehicle.location || "Location available on request"}</span>
+                          </span>
+                          {vehicle.description && (
+                            <span className="rp-market-card__description">{vehicle.description}</span>
+                          )}
+
+                          <span className="rp-market-card__specs">
+                            <span><Users size={13} /> {vehicle.seats} seats</span>
+                            <span><Settings size={13} /> {vehicle.transmission}</span>
+                            <span><Fuel size={13} /> {vehicle.fuel}</span>
+                          </span>
+
+                          {vehicle.driverOptionEnabled && (
+                            <span className="rp-market-card__driver">Driver available</span>
+                          )}
+                        </span>
+                      </button>
+
+                      <div className="rp-market-card__footer">
+                        <p>
+                          <span>From</span>
+                          <strong>P{vehicle.price.toLocaleString()}</strong>
+                          <small>/ hour</small>
+                        </p>
+                        <div>
+                          <button type="button" onClick={() => handleBookNow(vehicle)}>
+                            Book now
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          </div>
-        </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+          </section>
+        </main>
         <VehiclePreviewModal
           isOpen={Boolean(previewVehicle)}
           vehicle={previewVehicle}

@@ -104,7 +104,23 @@ Optional but needed for specific features:
   (or legacy `EMAIL_USER`, `EMAIL_PASS`)
 - `PAYMONGO_SECRET_KEY` (checkout/payment)
 - `GEMINI_API_KEY` (AI KYC/document checks)
-- `SEPOLIA_RPC_URL`, `DEPLOYER_PRIVATE_KEY`, `BOOKING_LEDGER_CONTRACT_ADDRESS` (blockchain recording)
+
+Document checks run through a database-backed queue so a Gemini quota or temporary
+provider failure does not reject an applicant. Recommended free-tier settings are:
+
+```env
+KYC_DOCUMENT_QUEUE_ENABLED=true
+KYC_ALLOW_GEMINI_AUTO_APPROVE=false
+KYC_GEMINI_REQUESTS_PER_MINUTE=4
+KYC_GEMINI_MAX_ATTEMPTS=3
+KYC_DOCUMENT_QUEUE_POLL_MS=5000
+KYC_PROCESSING_LOCK_TIMEOUT_MS=600000
+KYC_PENDING_REVIEW_RETENTION_HOURS=72
+```
+
+Keep automatic approval disabled unless the legal and risk policy explicitly permits
+it. The Super Admin makes the final decision in **Customers > Documents**. See
+`docs/KYC_VERIFICATION_WORKFLOW.md` before production deployment.
 
 ### 5.2 Frontend `.env`
 
@@ -117,7 +133,6 @@ Use:
 ```env
 VITE_API_BASE_URL=http://localhost:5000
 VITE_SOCKET_URL=http://localhost:5000
-VITE_BOOKING_LEDGER_CONTRACT_ADDRESS=
 ```
 
 ### 5.3 Face Service `.env`

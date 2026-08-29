@@ -151,6 +151,7 @@ const serializeVehicle = (req, vehicle) => {
     pricingUnit: HOURLY_RATE_UNIT,
     location: vehicle.location,
     availabilityStatus: vehicle.availabilityStatus,
+    availabilityHoldReason: vehicle.availabilityHoldReason || "none",
     images,
     imagePaths,
     coverImageUrl: primaryImage,
@@ -216,6 +217,7 @@ export const createOwnerVehicle = async (req, res) => {
       pricingUnit: HOURLY_RATE_UNIT,
       location: req.body.location.trim(),
       availabilityStatus: req.body.availabilityStatus,
+      availabilityHoldReason: req.body.availabilityStatus === "unavailable" ? "manual" : "none",
       images,
       imageUrl: coverImagePath || images[0] || "",
       coverDisplayMode: normalizeCoverDisplayMode(req.body.coverDisplayMode),
@@ -250,6 +252,8 @@ export const updateOwnerVehicle = async (req, res) => {
       vehicle.coverDisplayMode = normalizeCoverDisplayMode(req.body.coverDisplayMode);
     }
     if (req.body.availabilityStatus && allowedAvailabilityStatuses.has(req.body.availabilityStatus)) {
+      const previousAvailabilityStatus = vehicle.availabilityStatus;
+      const previousHoldReason = vehicle.availabilityHoldReason || "none";
       if (
         req.body.availabilityStatus === "available" &&
         (await hasActiveBookingForVehicle(vehicle._id))
@@ -261,6 +265,12 @@ export const updateOwnerVehicle = async (req, res) => {
         });
       }
       vehicle.availabilityStatus = req.body.availabilityStatus;
+      vehicle.availabilityHoldReason =
+        req.body.availabilityStatus === "available"
+          ? "none"
+          : previousAvailabilityStatus === "unavailable" && previousHoldReason === "inspection"
+            ? "inspection"
+            : "manual";
     }
 
     const previousSpecs = vehicle.specs || {};
@@ -353,6 +363,7 @@ export const deleteOwnerVehicle = async (req, res) => {
 export const setOwnerVehicleAvailability = async (req, res) => {
   try {
     const { availabilityStatus } = req.body;
+    const requestedHoldReason = String(req.body?.availabilityHoldReason || "").trim().toLowerCase();
     const vehicle = await Vehicle.findOne({ _id: req.params.id, owner: req.user._id });
 
     if (!vehicle) {
@@ -367,6 +378,12 @@ export const setOwnerVehicleAvailability = async (req, res) => {
     }
 
     vehicle.availabilityStatus = availabilityStatus;
+    vehicle.availabilityHoldReason =
+      availabilityStatus === "available"
+        ? "none"
+        : requestedHoldReason === "inspection"
+          ? "inspection"
+          : "manual";
     await vehicle.save();
 
     res.json({ success: true, vehicle: serializeVehicle(req, vehicle) });

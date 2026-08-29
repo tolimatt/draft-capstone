@@ -1,6 +1,7 @@
 // Auth input validation
 import mongoose from "mongoose";
 import { normalizePhilippineMobile } from "../utils/phone.js";
+import { cleanupUploadedVehicleFiles } from "../utils/localMedia.js";
 
 const EMOJI_REGEX = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{2028}\u{2029}]/u;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -349,7 +350,7 @@ const sanitizeVehicleBody = (req, { isUpdate = false } = {}) => {
   return req.body;
 };
 
-export const validateVehicleCreate = (req, res, next) => {
+export const validateVehicleCreate = async (req, res, next) => {
   const body = sanitizeVehicleBody(req);
   const errors = {};
 
@@ -408,13 +409,14 @@ export const validateVehicleCreate = (req, res, next) => {
   }
 
   if (Object.keys(errors).length) {
+    await cleanupUploadedVehicleFiles(req.files);
     return res.status(400).json({ success: false, message: "Validation failed.", errors });
   }
 
   next();
 };
 
-export const validateVehicleUpdate = (req, res, next) => {
+export const validateVehicleUpdate = async (req, res, next) => {
   const body = sanitizeVehicleBody(req, { isUpdate: true });
   const errors = {};
 
@@ -478,6 +480,7 @@ export const validateVehicleUpdate = (req, res, next) => {
   }
 
   if (Object.keys(errors).length) {
+    await cleanupUploadedVehicleFiles(req.files);
     return res.status(400).json({ success: false, message: "Validation failed.", errors });
   }
 
@@ -509,13 +512,24 @@ export const validatePaymentStatusUpdate = (req, res, next) => {
 };
 
 export const validateVehicleAvailability = (req, res, next) => {
-  const { availabilityStatus } = req.body;
+  const { availabilityStatus, availabilityHoldReason } = req.body;
 
   if (!AVAILABILITY_STATUSES.has(availabilityStatus)) {
     return res.status(400).json({
       success: false,
       message: "Validation failed.",
       errors: { availabilityStatus: "Availability status must be 'available' or 'unavailable'." },
+    });
+  }
+
+  if (
+    availabilityHoldReason !== undefined &&
+    !["none", "manual", "inspection"].includes(String(availabilityHoldReason).trim().toLowerCase())
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed.",
+      errors: { availabilityHoldReason: "Invalid vehicle availability reason." },
     });
   }
 

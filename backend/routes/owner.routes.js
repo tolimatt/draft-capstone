@@ -34,11 +34,13 @@ import {
   updateOwnerBookingStatus,
   updateOwnerBookingPaymentStatus,
   reviewOwnerBookingExtensionRequest,
+  confirmOwnerVehicleReturn,
   reviewOwnerBookingCancellationRequest,
   reviewOwnerWalkInPaymentRequest,
   confirmOwnerWalkInPayment,
 } from "../controllers/ownerDashboard.controller.js";
 import { otpLimiter } from "../middleware/security.middleware.js";
+import { requireModerationCapability } from "../middleware/moderation.middleware.js";
 
 const router = express.Router();
 
@@ -51,7 +53,8 @@ router.post(
   protect,
   authorize("owner"),
   requireKyc,
-  uploadVehicleImages.array("images", 8),
+  requireModerationCapability("listing"),
+  uploadVehicleImages,
   validateUploadedVehicleImages,
   validateVehicleCreate,
   createOwnerVehicle
@@ -61,7 +64,8 @@ router.put(
   protect,
   authorize("owner"),
   validateObjectIdParam("id"),
-  uploadVehicleImages.array("images", 8),
+  requireModerationCapability("listing"),
+  uploadVehicleImages,
   validateUploadedVehicleImages,
   validateVehicleUpdate,
   updateOwnerVehicle
@@ -71,10 +75,11 @@ router.patch(
   protect,
   authorize("owner"),
   validateObjectIdParam("id"),
+  requireModerationCapability("listing"),
   validateVehicleAvailability,
   setOwnerVehicleAvailability
 );
-router.delete("/vehicles/:id", protect, authorize("owner"), validateObjectIdParam("id"), deleteOwnerVehicle);
+router.delete("/vehicles/:id", protect, authorize("owner"), validateObjectIdParam("id"), requireModerationCapability("listing"), deleteOwnerVehicle);
 
 router.get("/bookings", protect, authorize("owner"), getOwnerBookings);
 router.patch(
@@ -84,6 +89,20 @@ router.patch(
   validateObjectIdParam("id"),
   validateBookingStatusUpdate,
   updateOwnerBookingStatus
+);
+router.post(
+  "/bookings/:id/confirm-return",
+  protect,
+  authorize("owner"),
+  validateObjectIdParam("id"),
+  confirmOwnerVehicleReturn
+);
+router.patch(
+  "/bookings/:id/return-request",
+  protect,
+  authorize("owner"),
+  validateObjectIdParam("id"),
+  confirmOwnerVehicleReturn
 );
 router.patch(
   "/bookings/:id/payment-status",

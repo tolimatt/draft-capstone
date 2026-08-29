@@ -3,6 +3,7 @@ import { BadgeCheck, MapPin, MessageCircle, Star, X } from "lucide-react";
 import { getInitialsFromName } from "../utils/dateUtils";
 import { resolveAssetUrl } from "../utils/media";
 import VehicleCover from "./VehicleCover";
+import ModalPortal from "./ModalPortal";
 
 const STAR_SLOTS = [1, 2, 3, 4, 5];
 
@@ -45,8 +46,9 @@ export default function VehiclePreviewModal({
   const location = String(vehicle.location || "").trim();
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4 py-6">
-      <div className="absolute inset-0 bg-slate-900/55 backdrop-blur-[2px]" onClick={onClose} />
+    <ModalPortal lockScroll={false}>
+    <div className="rp-modal-layer">
+      <button type="button" className="rp-modal-backdrop" onClick={onClose} aria-label="Close vehicle preview" />
 
       <div className="relative w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
         <div className="border-b border-slate-200 bg-gradient-to-r from-[#0B75E7]/10 via-white to-white px-5 py-4 sm:px-6">
@@ -156,5 +158,6 @@ export default function VehiclePreviewModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

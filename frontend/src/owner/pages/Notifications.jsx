@@ -3,6 +3,7 @@ import NotificationActionMenu from "../../components/NotificationActionMenu";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { requestLiveCountersRefresh } from "../../utils/liveCounters";
+import ModalPortal from "../../components/ModalPortal";
 
 const formatDateTime = (value) =>
   value
@@ -24,7 +25,7 @@ const DELETE_NOTIFICATION_CONFIRMATION_MESSAGE =
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
   const [confirmationAction, setConfirmationAction] = useState(null);
@@ -208,15 +209,13 @@ export default function Notifications() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {loading && <p className="text-sm text-gray-600">Loading notifications...</p>}
-
       {!loading && !notifications.length && (
         <div className="bg-white border rounded-xl p-6 text-sm text-gray-600">
           {showArchived ? "No archived notifications." : "No notifications yet."}
         </div>
       )}
 
-      <div className="space-y-3">
+      {!loading && <div className="space-y-3">
         {notifications.map((notification) => {
           const isUnread = !isNotificationRead(notification);
 
@@ -261,16 +260,14 @@ export default function Notifications() {
             </article>
           );
         })}
-      </div>
+      </div>}
 
       {confirmationAction && (
-        <div
-          className="fixed inset-0 z-[60] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center p-4"
-          onClick={() => setConfirmationAction(null)}
-        >
+        <ModalPortal>
+        <div className="rp-modal-layer">
+          <button type="button" className="rp-modal-backdrop" onClick={() => setConfirmationAction(null)} aria-label="Cancel notification action" />
           <div
-            className="w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-[0_25px_80px_rgba(15,23,42,0.25)] p-5"
-            onClick={(event) => event.stopPropagation()}
+            className="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-[0_25px_80px_rgba(15,23,42,0.25)] p-5"
           >
             <h2 className="text-lg font-bold text-slate-900 mb-2">Confirm Action</h2>
             <p className="text-sm text-slate-700">
@@ -295,6 +292,7 @@ export default function Notifications() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

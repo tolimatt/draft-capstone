@@ -935,34 +935,11 @@
           "RentifyPro uses email OTP, CAPTCHA, ID verification, selfie-to-ID matching, liveness checks, secure sessions, and other security controls."
         ]
       }
-    },
-    {
-      "id": "blockchain_record",
-      "examples": [
-        "what is the blockchain record",
-        "blockchain booking",
-        "transaction hash",
-        "can I verify a booking",
-        "explorer link",
-        "blockchain transaction",
-        "para saan blockchain"
-      ],
-      "responses": {
-        "en": [
-          "For eligible paid bookings, RentifyPro can record a booking on an Ethereum booking ledger. The transaction hash, timestamp, wallet information, and explorer link can help verify the record."
-        ],
-        "fil": [
-          "Para sa eligible paid bookings, maaaring ma-record ang booking sa Ethereum booking ledger. Ang transaction hash, timestamp, wallet information, at explorer link ay maaaring gamitin para ma-verify ang record."
-        ],
-        "taglish": [
-          "For eligible paid bookings, a booking can be recorded on an Ethereum ledger, with transaction details that can help verify the record."
-        ]
-      }
     }
   ],
   "notes": [
     "Expanded short inputs, casual conversation, Taglish, unclear/nonsense messages, acknowledgements, goodbyes, and help requests.",
-    "Added renter-facing intents for payments, booking status, extensions, cancellations, driver options, categories, reviews, notifications, messaging, verification, and blockchain transparency.",
+    "Added renter-facing intents for payments, booking status, extensions, cancellations, driver options, categories, reviews, notifications, messaging, and verification.",
     "Natural responses intentionally vary so the chatbot does not repeat one robotic sentence.",
     "Real-time availability, exact rates, booking status, payment status, penalties, extensions, and account-specific information should be retrieved from RentifyPro backend data rather than treated as fixed chatbot facts.",
     "Validate all business-sensitive values against current RentifyPro rules before production deployment."

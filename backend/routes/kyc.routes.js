@@ -4,18 +4,17 @@ import { protect } from "../middleware/auth.middleware.js";
 import {
   faceDetect,
   registerIdFace,
-  selfieChallenge,
   selfieVerify,
   internalUpdateStatus,
   getMyKyc,
   preRegisterIdFace,
-  preSelfieChallenge,
   preSelfieVerify,
   preVerifySupportingDocument,
   createPreKycSession,
   listPendingKycReviews,
   getKycReviewFile,
   decideKycReview,
+  getPreKycStatus,
 } from "../controllers/kyc.controller.js";
 import {
   kycLimiter,
@@ -36,16 +35,15 @@ router.use((_req, res, next) => {
 // Logged-in KYC routes
 router.post("/face/detect", protect, kycLimiter, faceDetect);
 router.post("/id-register", protect, kycLimiter, registerIdFace);
-router.post("/selfie/challenge", protect, kycLimiter, selfieChallenge);
 router.post("/selfie/verify", protect, kycLimiter, selfieVerify);
 router.get("/me", protect, getMyKyc);
 
 // Pre-registration KYC routes
 router.post("/pre/session", preKycLimiter, createPreKycSession);
 router.post("/pre/id-register", preKycLimiter, requirePreKycSession, preRegisterIdFace);
-router.post("/pre/selfie/challenge", preKycLimiter, requirePreKycSession, preSelfieChallenge);
 router.post("/pre/selfie/verify", preKycLimiter, requirePreKycSession, preSelfieVerify);
 router.post("/pre/supporting-doc/verify", preKycLimiter, requirePreKycSession, preVerifySupportingDocument);
+router.get("/pre/status", preKycLimiter, requirePreKycSession, getPreKycStatus);
 
 // Internal callback from the Python service
 router.patch("/internal/update-status", internalUpdateStatus);

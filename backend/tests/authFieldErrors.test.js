@@ -94,3 +94,82 @@ test("login distinguishes an invalid email from an invalid password", async () =
     User.findOne = originalFindUser;
   }
 });
+
+test("login blocks an account disabled by an administrator", async () => {
+  const originalFindChallenge = LoginChallenge.findOne;
+  const originalFindUser = User.findOne;
+  const answerHash = await bcrypt.hash("7", 4);
+  const request = {
+    body: {
+      email: "disabled@gmail.com",
+      password: "ValidPass1!",
+      captchaId: "challenge-id",
+      captchaAnswer: "7",
+    },
+    ip: "127.0.0.1",
+  };
+
+  try {
+    LoginChallenge.findOne = () => ({
+      select: async () => ({
+        answerHash,
+        attempts: 0,
+        maxAttempts: 5,
+        usedAt: null,
+        save: async () => {},
+      }),
+    });
+    User.findOne = () => ({
+      select: async () => ({
+        _id: { toString: () => "disabled-user-id" },
+        email: "disabled@gmail.com",
+        isDisabled: true,
+        matchPassword: async () => true,
+      }),
+    });
+
+    const response = createResponse();
+    await loginUser(request, response);
+
+    assert.equal(response.statusCode, 403);
+    assert.equal(response.body.code, "ACCOUNT_DISABLED");
+    assert.deepEqual(response.body.errors, {
+      email: "This account has been disabled. Contact the RentifyPro administrator.",
+    });
+  } finally {
+    LoginChallenge.findOne = originalFindChallenge;
+    User.findOne = originalFindUser;
+  }
+});
+
+test("login blocks an archived account before issuing a session", async () => {
+  const originalFindChallenge = LoginChallenge.findOne;
+  const originalFindUser = User.findOne;
+  const answerHash = await bcrypt.hash("7", 4);
+  const request = {
+    body: { email: "archived@gmail.com", password: "ValidPass1!", captchaId: "challenge-id", captchaAnswer: "7" },
+    ip: "127.0.0.1",
+  };
+
+  try {
+    LoginChallenge.findOne = () => ({ select: async () => ({ answerHash, attempts: 0, maxAttempts: 5, usedAt: null, save: async () => {} }) });
+    User.findOne = () => ({
+      select: async () => ({
+        _id: { toString: () => "archived-user-id" },
+        email: "archived+archived-user-id@rentifypro.invalid",
+        isArchived: true,
+        isDisabled: true,
+        matchPassword: async () => true,
+      }),
+    });
+
+    const response = createResponse();
+    await loginUser(request, response);
+
+    assert.equal(response.statusCode, 403);
+    assert.equal(response.body.code, "ACCOUNT_ARCHIVED");
+  } finally {
+    LoginChallenge.findOne = originalFindChallenge;
+    User.findOne = originalFindUser;
+  }
+});

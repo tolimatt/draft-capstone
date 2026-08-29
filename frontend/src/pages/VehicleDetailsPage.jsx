@@ -86,6 +86,7 @@ export default function VehicleDetailsPage({
   onNavigateToAbout,
   onNavigateToContacts,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   isLoggedIn,
   user,
   onLogout,
@@ -96,6 +97,7 @@ export default function VehicleDetailsPage({
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState("");
   const [bookingSuccess, setBookingSuccess] = useState("");
+  const [bookingRequiresKyc, setBookingRequiresKyc] = useState(false);
   const [chatOwnerError, setChatOwnerError] = useState("");
   const [driverSelected, setDriverSelected] = useState(false);
   const [vehicleData, setVehicleData] = useState(vehicle || null);
@@ -244,6 +246,13 @@ export default function VehicleDetailsPage({
       return;
     }
 
+    const userRequiresKyc =
+      user?.role !== "admin" && String(user?.kycStatus || "not_started") !== "approved";
+    if (userRequiresKyc || bookingRequiresKyc) {
+      onNavigateToAccountSettings?.();
+      return;
+    }
+
     if (!isAvailable) {
       setBookingError("This vehicle is currently unavailable.");
       return;
@@ -271,7 +280,14 @@ export default function VehicleDetailsPage({
       setBookingSuccess("Booking submitted successfully. Redirecting to booking history...");
       setTimeout(() => onNavigateToBookingHistory?.(), 900);
     } catch (error) {
-      setBookingError(error.message || "Failed to submit booking.");
+      if (error?.details?.code === "IDENTITY_VERIFICATION_REQUIRED") {
+        setBookingRequiresKyc(true);
+        setBookingError(
+          "Complete identity verification in Account Settings before booking. Your session is still active."
+        );
+      } else {
+        setBookingError(error.message || "Failed to submit booking.");
+      }
     } finally {
       setBookingLoading(false);
     }
@@ -350,6 +366,7 @@ export default function VehicleDetailsPage({
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onLogout={onLogout}
       />
 
@@ -644,6 +661,11 @@ export default function VehicleDetailsPage({
                     ? "Submitting..."
                     : !isAvailable
                     ? "Currently Unavailable"
+                    : isLoggedIn &&
+                      (bookingRequiresKyc ||
+                        (user?.role !== "admin" &&
+                          String(user?.kycStatus || "not_started") !== "approved"))
+                    ? "Verify Identity to Book"
                     : isLoggedIn
                     ? "Book Now"
                     : "Sign In to Book"}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Flag,
   MessageSquare,
   MoreHorizontal,
   Pin,
@@ -17,6 +18,9 @@ import {
   REALTIME_CHAT_INPUT_MAX_LENGTH,
   sanitizeRealtimeChatInput,
 } from "../../utils/realtimeChatInput";
+import ModalPortal from "../../components/ModalPortal";
+import MessageReportModal from "../../components/MessageReportModal";
+import ChatMessageInput from "../../components/ChatMessageInput";
 
 const getId = (value) => String(value?._id || value || "");
 
@@ -151,7 +155,7 @@ export default function Messages() {
   );
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
-  const [loadingThreads, setLoadingThreads] = useState(false);
+  const [loadingThreads, setLoadingThreads] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
@@ -163,6 +167,8 @@ export default function Messages() {
   const [showDeleteConversationConfirm, setShowDeleteConversationConfirm] = useState(false);
   const [deletingConversation, setDeletingConversation] = useState(false);
   const [threadQuery, setThreadQuery] = useState("");
+  const [reportMessage, setReportMessage] = useState(null);
+  const [reportNotice, setReportNotice] = useState("");
 
   const activeThread = useMemo(
     () => renterThreads.find((thread) => thread.partner._id === activeRenterId) || null,
@@ -417,14 +423,18 @@ export default function Messages() {
     const nextText = text.trim();
     if (!activeThread?.partner?._id || !nextText) return;
 
+    // Release the composer immediately so a follow-up can be typed while this
+    // request is completing. A failed send restores the text if it is still empty.
+    setText("");
+    setError("");
     try {
       const response = await API.sendMessageToUser(activeThread.partner._id, {
         text: nextText,
       });
       setMessages((prev) => appendUniqueMessage(prev, response.message));
-      setText("");
       loadRenterThreads();
     } catch (err) {
+      setText((currentDraft) => currentDraft || nextText);
       setError(err.message || "Failed to send message.");
     }
   };
@@ -545,6 +555,7 @@ export default function Messages() {
           Real-time messaging
         </span>
       </div>
+      {reportNotice && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status">{reportNotice}</div>}
 
       <div className="owner-messages-shell">
       <aside
@@ -576,10 +587,6 @@ export default function Messages() {
             </div>
           )}
 
-          {loadingThreads && (
-            <p className="px-1 py-2 text-sm text-slate-500">Loading renters...</p>
-          )}
-
           {!loadingThreads && !renterThreads.length && (
             <p className="px-1 py-2 text-sm text-slate-500">No renter conversations yet.</p>
           )}
@@ -589,7 +596,7 @@ export default function Messages() {
           )}
 
           <div className="owner-messages-renter-list">
-            {filteredRenterThreads.map((thread) => (
+            {!loadingThreads && filteredRenterThreads.map((thread) => (
               <RenterCard
                 key={thread.partner._id}
                 thread={thread}
@@ -645,7 +652,6 @@ export default function Messages() {
             </div>
 
             <div className="owner-messages-chat-body" onClick={() => setActiveMessageActionId("")}>
-              {loadingMessages && <p className="text-sm text-slate-500">Loading messages...</p>}
               {error && (
                 <div className="mb-4 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
                   {error}
@@ -657,7 +663,7 @@ export default function Messages() {
               )}
 
               <div className="owner-messages-bubble-list">
-                {messages.map((message) => (
+                {!loadingMessages && messages.map((message) => (
                   <MessageBubble
                     key={message._id}
                     message={message}
@@ -680,6 +686,7 @@ export default function Messages() {
                     onSaveEdit={saveEditedMessage}
                     onEditingTextChange={setEditingText}
                     onDelete={() => openDeleteMessageConfirm(message)}
+                    onReport={() => setReportMessage(message)}
                   />
                 ))}
               </div>
@@ -687,23 +694,14 @@ export default function Messages() {
 
             <div className="owner-messages-composer">
               <div className="owner-messages-composer-row">
-                <div className="owner-messages-input-wrap">
-                  <input
-                    value={text}
-                    onChange={(event) =>
-                      setText(sanitizeRealtimeChatInput(event.target.value))
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        send();
-                      }
-                    }}
-                    placeholder="Write a message..."
-                    maxLength={REALTIME_CHAT_INPUT_MAX_LENGTH}
-                    className="owner-messages-input"
-                  />
-                </div>
+                <ChatMessageInput
+                  value={text}
+                  onChange={setText}
+                  onSend={send}
+                  placeholder="Write a message..."
+                  containerClassName="owner-messages-input-wrap"
+                  textareaClassName="owner-messages-input"
+                />
                 <button
                   type="button"
                   onClick={send}
@@ -762,6 +760,12 @@ export default function Messages() {
       )}
 
       {pinNotice && <PinStatusToast key={pinNotice.id} message={pinNotice.message} />}
+      <MessageReportModal
+        message={reportMessage}
+        senderName={activeThread?.partner?.name || "this renter"}
+        onClose={() => setReportMessage(null)}
+        onReported={(report) => setReportNotice(`Message reported as ${report.caseReference}. Only that message was included.`)}
+      />
       </div>
     </div>
   );
@@ -844,6 +848,7 @@ function MessageBubble({
   onSaveEdit,
   onEditingTextChange,
   onDelete,
+  onReport,
 }) {
   const senderId = getId(message.sender);
   const isOwner = currentUserId ? senderId === String(currentUserId) : senderId !== renterId;
@@ -907,14 +912,27 @@ function MessageBubble({
               </div>
             </div>
           ) : (
-            <p className={message.isDeleted ? "italic opacity-80" : ""}>{message.text}</p>
+            <p className={`max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${message.isDeleted ? "italic opacity-80" : ""}`}>{message.text}</p>
           )}
         </div>
 
-        <span className="mt-1 px-1 text-[10px] font-medium text-slate-400">
-          {formatDateTime(message.createdAt)}
-          {message.isEdited && !message.isDeleted ? " · edited" : ""}
-        </span>
+        <div className={`mt-1 flex w-full items-center gap-2 px-1 ${isOwner ? "justify-end" : "justify-between"}`}>
+          <span className="text-[10px] font-medium text-slate-400">
+            {formatDateTime(message.createdAt)}
+            {message.isEdited && !message.isDeleted ? " · edited" : ""}
+          </span>
+          {!isOwner && !message.isDeleted && (
+            <button
+              type="button"
+              onClick={onReport}
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-white text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+              aria-label="Report this message"
+              title="Report message"
+            >
+              <Flag size={13} />
+            </button>
+          )}
+        </div>
 
         {showActions && isOwner && !isEditing && !message.isDeleted && (
           <div className="mt-2 flex justify-end gap-2 text-[11px] font-medium text-slate-500">
@@ -972,14 +990,15 @@ function EmptyConversationState({ showBackButton, onBack, error }) {
 
 function ActionModal({ thread, onChat, onCancel }) {
   return (
-    <>
+    <ModalPortal>
+      <div className="rp-modal-layer">
       <button
         type="button"
-        className="fixed inset-0 z-[70] bg-slate-950/55 backdrop-blur-[1px]"
+        className="rp-modal-backdrop"
         aria-label="Close chat actions"
         onClick={onCancel}
       />
-      <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div className="relative z-10 w-full max-w-md">
         <div className="owner-chat-action-modal">
           <div className="owner-chat-action-modal-header">
             <p>{thread.partner.name}</p>
@@ -1003,7 +1022,8 @@ function ActionModal({ thread, onChat, onCancel }) {
           </div>
         </div>
       </div>
-    </>
+      </div>
+    </ModalPortal>
   );
 }
 
@@ -1028,16 +1048,17 @@ function ConfirmModal({
   onConfirm,
 }) {
   return (
-    <>
+    <ModalPortal>
+      <div className="rp-modal-layer">
       <button
         type="button"
-        className="fixed inset-0 z-[70] bg-slate-950/50 backdrop-blur-[1px]"
+        className="rp-modal-backdrop"
         aria-label={`Close ${title}`}
         onClick={() => {
           if (!confirming) onCancel();
         }}
       />
-      <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div className="relative z-10 w-full max-w-md">
         <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-[0_26px_80px_rgba(15,23,42,0.28)]">
           <div className="border-b border-slate-200 px-6 py-4">
             <h3 className="text-base font-semibold tracking-normal text-slate-900">{title}</h3>
@@ -1065,7 +1086,8 @@ function ConfirmModal({
           </div>
         </div>
       </div>
-    </>
+      </div>
+    </ModalPortal>
   );
 }
 

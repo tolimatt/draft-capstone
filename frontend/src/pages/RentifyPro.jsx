@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Bike,
   Car,
-  ChevronDown,
   Fuel,
   MapPin,
   Radio,
@@ -11,10 +10,12 @@ import {
   Shield,
   ShieldCheck,
   Sparkles,
+  Star,
   Truck,
   Users,
   Van,
   Wrench,
+  ArrowRight,
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
@@ -158,8 +159,6 @@ const locations = [
   "Robinsons Place Pangasinan",
 ];
 
-const formatCoding = (day) => (day ? `Coding every ${day}` : "");
-
 const getDefaultSearchDates = () => {
   const minPickupDateTime = getMinPickupDateTime();
   const pickupDate = formatDateInput(minPickupDateTime);
@@ -203,6 +202,7 @@ export default function RentifyPro({
   onViewDetails,
   onNavigateToBookingHistory,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   onNavigateToPrivacyPolicy,
   onNavigateToTermsAndConditions,
   onOpenNotificationsModal,
@@ -211,11 +211,12 @@ export default function RentifyPro({
   onLogout,
 }) {
   const [featuredVehicles, setFeaturedVehicles] = useState([]);
-  const [featuredLoading, setFeaturedLoading] = useState(false);
+  const [featuredLoading, setFeaturedLoading] = useState(true);
   const [featuredError, setFeaturedError] = useState("");
   const [location, setLocation] = useState("");
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
   const [vehicleType, setVehicleType] = useState("");
+  const [activeCategoryId, setActiveCategoryId] = useState(categories[0].id);
   const [showAI, setShowAI] = useState(false);
   const [previewVehicle, setPreviewVehicle] = useState(null);
   const [validationModalMessage, setValidationModalMessage] = useState("");
@@ -227,6 +228,14 @@ export default function RentifyPro({
       ),
     [location]
   );
+
+  const activeCategory =
+    categories.find((category) => category.id === activeCategoryId) || categories[0];
+
+  const selectVehicleCategory = (category) => {
+    setActiveCategoryId(category.id);
+    setVehicleType(category.vehicleType);
+  };
 
   const handleSearch = (typeOverride = vehicleType) => {
     const normalizedLocation = location.trim();
@@ -246,8 +255,10 @@ export default function RentifyPro({
       try {
         const response = await API.getPublicVehicles({ page: 1, limit: 24 });
         if (!active) return;
-        const normalized = (response.vehicles || []).map(normalizeFeaturedVehicle);
-        setFeaturedVehicles(pickRandom(normalized, 3));
+        const availableVehicles = (response.vehicles || [])
+          .map(normalizeFeaturedVehicle)
+          .filter((vehicle) => vehicle.available);
+        setFeaturedVehicles(pickRandom(availableVehicles, 3));
       } catch (err) {
         if (!active) return;
         setFeaturedError(err.message || "Failed to load featured vehicles.");
@@ -324,6 +335,7 @@ export default function RentifyPro({
         onNavigateToSignIn={onNavigateToSignIn}
         onNavigateToRegister={onNavigateToRegister}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onShowAI={() => setShowAI(true)}
         onLogout={onLogout}
       />
@@ -411,11 +423,18 @@ export default function RentifyPro({
 
             <div>
               <label className="text-xs font-semibold text-slate-500">Vehicle Type</label>
-              <div className="group relative mt-1.5">
+              <div className="mt-1.5">
                 <select
-                  className="rp-input cursor-pointer appearance-none pr-12"
+                  className="rp-input cursor-pointer"
                   value={vehicleType}
-                  onChange={(event) => setVehicleType(event.target.value)}
+                  onChange={(event) => {
+                    const nextVehicleType = event.target.value;
+                    setVehicleType(nextVehicleType);
+                    const matchingCategory = categories.find(
+                      (category) => category.vehicleType === nextVehicleType
+                    );
+                    if (matchingCategory) setActiveCategoryId(matchingCategory.id);
+                  }}
                 >
                   <option value="">All Vehicles</option>
                   <option value="car">Car</option>
@@ -423,9 +442,6 @@ export default function RentifyPro({
                   <option value="van">Van</option>
                   <option value="truck">Truck</option>
                 </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition group-hover:bg-[#0B75E7]/10 group-hover:text-[#0B75E7] group-focus-within:bg-[#0B75E7]/10 group-focus-within:text-[#0B75E7]">
-                  <ChevronDown size={16} strokeWidth={2.25} aria-hidden="true" />
-                </span>
               </div>
             </div>
           </div>
@@ -442,151 +458,179 @@ export default function RentifyPro({
         </div>
       </section>
 
-      <section className="rp-home-section mx-auto max-w-6xl px-5 py-16 sm:px-8 sm:py-20">
-        <div className="rp-section-heading mb-10 text-center">
-          <span className="rp-page-eyebrow">Find your perfect ride</span>
-          <h2 className="text-3xl sm:text-4xl font-bold">
-            Select Your <span className="text-[#0B75E7]">Vehicle Category</span>
-          </h2>
-          <p className="text-slate-600 mt-3">
-            Filter fast and jump directly into the right vehicle type for your next trip.
+      <section id="categories" className="rp-home-section mx-auto max-w-7xl scroll-mt-24 px-5 py-16 sm:px-8 sm:py-20">
+        <div className="mb-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="rp-section-heading max-w-2xl">
+            <span className="rp-page-eyebrow">Browse by vehicle type</span>
+            <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
+              What are you looking to <span className="text-[#0B75E7]">drive?</span>
+            </h2>
+          </div>
+          <p className="max-w-md text-sm leading-6 text-slate-600 sm:text-base">
+            Choose a category to see available vehicles, rates, and pickup options near you.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          {categories.map((category) => (
-            <button
-              key={category.id}
-              onClick={() => handleSearch(category.vehicleType)}
-              className="rp-surface rp-hover-lift overflow-hidden text-left"
-            >
-              <div className="rp-image-frame">
-                <img
-                  src={category.image}
-                  alt={category.title}
-                  className="rp-image-fit"
-                />
-              </div>
-              <div className="p-5">
-                <h3 className="text-xl font-bold flex items-center gap-2">
-                  <category.icon className="w-5 h-5 text-[#0B75E7]" />
-                  {category.title}
-                </h3>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {category.tags.map((tag) => (
-                    <span key={tag} className="rp-chip bg-[#0B75E7]/10 text-[#0B75E7]">
-                      {tag}
+        <div className="rp-vehicle-selector">
+          <div className="rp-vehicle-selector__choices">
+            <div className="rp-vehicle-selector__intro">
+              <span>Vehicle collection</span>
+              <strong>Choose your drive</strong>
+            </div>
+
+            <div className="rp-vehicle-selector__list" role="group" aria-label="Choose a vehicle type">
+              {categories.map((category, index) => {
+                const isActive = category.id === activeCategory.id;
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => selectVehicleCategory(category)}
+                    className={`rp-vehicle-selector__option ${isActive ? "is-active" : ""}`}
+                  >
+                    <span className="rp-vehicle-selector__number">
+                      {String(index + 1).padStart(2, "0")}
                     </span>
-                  ))}
-                </div>
-                <p className="text-sm text-slate-600 mt-3">{category.description}</p>
+                    <span className="rp-vehicle-selector__icon" aria-hidden="true">
+                      <category.icon size={19} />
+                    </span>
+                    <span className="rp-vehicle-selector__label">{category.title}</span>
+                    <ArrowRight className="rp-vehicle-selector__arrow" size={18} aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="rp-vehicle-selector__hint">
+              Select a type to preview it, then continue to matching listings.
+            </p>
+          </div>
+
+          <article className="rp-vehicle-selector__preview">
+            <img
+              src={activeCategory.image}
+              alt={`${activeCategory.title} available on RentifyPro`}
+              className="rp-vehicle-selector__image"
+            />
+            <span className="rp-vehicle-selector__shade" aria-hidden="true" />
+
+            <div className="rp-vehicle-selector__meta">
+              <span>
+                {String(categories.indexOf(activeCategory) + 1).padStart(2, "0")} / {String(categories.length).padStart(2, "0")}
+              </span>
+              <span>Available in the marketplace</span>
+            </div>
+
+            <div className="rp-vehicle-selector__details">
+              <span className="rp-vehicle-selector__active-icon" aria-hidden="true">
+                <activeCategory.icon size={21} />
+              </span>
+              <p className="rp-vehicle-selector__eyebrow">Selected vehicle type</p>
+              <h3>{activeCategory.title}</h3>
+              <p className="rp-vehicle-selector__description">{activeCategory.description}</p>
+
+              <div className="rp-vehicle-selector__tags" aria-label={`${activeCategory.title} examples`}>
+                {activeCategory.tags.map((tag) => (
+                  <span key={tag}>{tag}</span>
+                ))}
               </div>
-            </button>
-          ))}
+
+              <button
+                type="button"
+                onClick={() => handleSearch(activeCategory.vehicleType)}
+                className="rp-vehicle-selector__browse"
+              >
+                Browse {activeCategory.title}
+                <ArrowRight size={17} aria-hidden="true" />
+              </button>
+            </div>
+          </article>
         </div>
       </section>
 
-      <section className="bg-white/55 py-16 backdrop-blur-[2px] sm:py-20">
+      <section id="featured" className="scroll-mt-24 bg-white/55 py-16 backdrop-blur-[2px] sm:py-20">
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
-          <div className="rp-section-heading mb-10">
-            <span className="rp-page-eyebrow">Curated marketplace</span>
-            <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
-              <span className="text-[#0B75E7]">Featured</span> Vehicles
-            </h2>
+          <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div className="rp-section-heading max-w-2xl">
+              <span className="rp-page-eyebrow">Available near you</span>
+              <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
+                Featured <span className="text-[#0B75E7]">vehicles</span>
+              </h2>
+              <p className="mt-3 text-slate-600">A small selection of verified listings ready to book.</p>
+            </div>
+            <button type="button" onClick={onNavigateToVehicles} className="rp-btn-secondary self-start px-4 py-2.5 text-sm sm:self-auto">
+              View all vehicles
+              <ArrowRight size={16} />
+            </button>
           </div>
 
-          {featuredLoading && (
-            <div className="rp-surface p-6 text-sm text-slate-600">Loading featured vehicles...</div>
-          )}
           {featuredError && (
             <div className="rp-surface p-6 text-sm text-rose-600">{featuredError}</div>
           )}
           {!featuredLoading && !featuredError && featuredVehicles.length === 0 && (
-            <div className="rp-surface p-6 text-sm text-slate-600">No featured vehicles yet.</div>
+            <div className="rp-surface p-6 text-sm text-slate-600">
+              No available vehicles to feature right now.
+            </div>
           )}
 
           {!featuredLoading && !featuredError && featuredVehicles.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
               {featuredVehicles.map((vehicle) => (
                 <article
                   key={vehicle.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openVehiclePreview(vehicle)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      openVehiclePreview(vehicle);
-                    }
-                  }}
-                  aria-label={`Preview ${vehicle.name}`}
-                  className="rp-surface rp-hover-lift overflow-hidden flex flex-col cursor-pointer"
+                  className="rp-featured-card flex h-full flex-col overflow-hidden"
                 >
-                  <div className="px-4 pt-4">
-                    <VehicleCover
-                      vehicle={vehicle}
-                      alt={vehicle.name}
-                      contentClassName="p-4 sm:p-5"
-                    >
-                      {vehicle.available && (
-                        <span className="absolute top-3 left-3 z-10 rp-chip bg-emerald-100 text-emerald-700">
-                          Available
+                  <button
+                    type="button"
+                    onClick={() => openVehiclePreview(vehicle)}
+                    className="rp-featured-card__preview text-left"
+                    aria-label={`View details for ${vehicle.name}`}
+                  >
+                    <span className="block px-3 pt-3">
+                      <VehicleCover vehicle={vehicle} alt={vehicle.name} contentClassName="p-4 sm:p-5">
+                        <span className={`absolute left-3 top-3 z-10 rp-chip ${vehicle.available ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
+                          {vehicle.available ? "Available" : "Unavailable"}
                         </span>
-                      )}
-                      <span className="absolute top-3 right-3 z-10 rp-chip bg-slate-900 text-white">
-                        {vehicle.rating}
-                      </span>
-                    </VehicleCover>
-                  </div>
-
-                  <div className="p-5 flex flex-col gap-2 flex-1">
-                    <h3 className="text-xl font-bold">{vehicle.name}</h3>
-                    <p className="text-sm text-slate-500">{vehicle.category}</p>
-
-                    <div className="flex items-center gap-1 mt-1 text-sm text-slate-600">
-                      <MapPin size={14} className="text-[#0B75E7]" />
-                      {vehicle.location}
-                    </div>
-
-                    {formatCoding(vehicle.codingDay) && (
-                      <div className="mt-1">
-                        <span className="rp-chip bg-slate-100 text-slate-600">
-                          {formatCoding(vehicle.codingDay)}
+                        <span className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 rounded-full bg-slate-900/90 px-2.5 py-1 text-xs font-semibold text-white">
+                          <Star size={12} fill="currentColor" />
+                          {vehicle.reviewCount > 0 ? vehicle.rating : "New"}
                         </span>
-                      </div>
-                    )}
+                      </VehicleCover>
+                    </span>
 
-                    <div className="flex items-center gap-4 mt-2 text-sm text-slate-600">
-                      <span className="flex items-center gap-1">
-                        <Users size={14} className="text-[#0B75E7]" />
-                        {vehicle.seats} seats
+                    <span className="block px-5 pb-4 pt-5">
+                      <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{vehicle.category}</span>
+                      <span className="mt-1 flex items-start justify-between gap-4">
+                        <span className="text-xl font-bold tracking-tight text-slate-900">{vehicle.name}</span>
+                        <span className="mt-1 text-[#0B75E7]" aria-hidden="true"><ArrowRight size={18} /></span>
                       </span>
-                      <span className="flex items-center gap-1">
-                        <Settings size={14} className="text-[#0B75E7]" />
-                        {vehicle.transmission}
+                      <span className="mt-2 flex items-center gap-1.5 text-sm text-slate-600">
+                        <MapPin size={14} className="shrink-0 text-[#0B75E7]" />
+                        <span className="truncate">{vehicle.location}</span>
                       </span>
-                      <span className="flex items-center gap-1">
-                        <Fuel size={14} className="text-[#0B75E7]" />
-                        {vehicle.fuel}
-                      </span>
-                    </div>
 
-                    <p className="text-[#0B75E7] text-2xl font-bold mt-2">
+                      <span className="mt-5 grid grid-cols-3 divide-x divide-slate-200 border-y border-slate-100 py-3 text-xs text-slate-600">
+                        <span className="flex items-center gap-1.5 pr-2"><Users size={14} className="text-slate-400" />{vehicle.seats} seats</span>
+                        <span className="flex items-center gap-1.5 px-3"><Settings size={14} className="text-slate-400" /><span className="truncate">{vehicle.transmission}</span></span>
+                        <span className="flex items-center gap-1.5 pl-3"><Fuel size={14} className="text-slate-400" /><span className="truncate">{vehicle.fuel}</span></span>
+                      </span>
+                    </span>
+                  </button>
+
+                  <div className="mt-auto flex items-center justify-between gap-4 border-t border-slate-100 px-5 py-4">
+                    <p className="text-2xl font-bold tracking-tight text-slate-900">
                       P{vehicle.price.toLocaleString()}
-                      <span className="text-sm text-slate-500 font-medium"> / hour</span>
+                      <span className="ml-1 text-xs font-medium text-slate-500">/ hour</span>
                     </p>
-
-                    <div className="pt-3 mt-auto">
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleFeaturedBookNow(vehicle);
-                        }}
-                        className="rp-btn-primary py-2 text-sm w-full"
-                      >
-                        Book Now
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleFeaturedBookNow(vehicle)}
+                      disabled={!vehicle.available}
+                      className="rp-btn-primary min-h-10 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
+                    >
+                      {vehicle.available ? "Book now" : "Unavailable"}
+                    </button>
                   </div>
                 </article>
               ))}

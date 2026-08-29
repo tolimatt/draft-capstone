@@ -1,21 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import API from "../../utils/api";
 import { getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
 const money = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
+const HIDDEN_MONEY = "\u20b1\u2022\u2022\u2022\u2022\u2022\u2022";
 const getBookingAmountPayable = (booking) => {
   const payable = Number(booking?.amountPayable);
   if (Number.isFinite(payable) && payable >= 0) return payable;
 
   const total = Number(booking?.totalAmount);
-  const gasFee = Number(booking?.blockchainGasFee);
+  const transactionFee = Number(booking?.transactionFee);
   if (Number.isFinite(total) && total >= 0) {
-    return total + (Number.isFinite(gasFee) ? gasFee : 0);
+    return total + (Number.isFinite(transactionFee) ? transactionFee : 0);
   }
 
   const baseAmount = Number(booking?.baseAmount);
   const driverAmount = Number(booking?.driverAmount);
   if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount >= 0) {
-    return baseAmount + driverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+    return baseAmount + driverAmount + (Number.isFinite(transactionFee) ? transactionFee : 0);
   }
 
   const directMinutes = Number(booking?.bookingDurationMinutes);
@@ -36,7 +38,8 @@ const getBookingAmountPayable = (booking) => {
       driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
         ? driverHourlyRate * durationHours
         : 0;
-    return hourlyRate * durationHours + computedDriverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+    return hourlyRate * durationHours + computedDriverAmount +
+      (Number.isFinite(transactionFee) ? transactionFee : 0);
   }
 
   return 0;
@@ -77,7 +80,8 @@ export default function Earnings() {
   });
   const [monthly, setMonthly] = useState([]);
   const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [isEarningsVisible, setIsEarningsVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -99,20 +103,35 @@ export default function Earnings() {
   }, []);
 
   const latestMonth = useMemo(() => monthly[0] || null, [monthly]);
+  const displayMoney = (value) => isEarningsVisible ? money(value) : HIDDEN_MONEY;
+
+  if (loading) return null;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Earnings & Revenue</h1>
-        <p className="text-sm text-gray-600">
-          Income per booking, driver breakdown, and monthly revenue.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Earnings & Revenue</h1>
+          <p className="text-sm text-gray-600">
+            Income per booking, driver breakdown, and monthly revenue.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsEarningsVisible((visible) => !visible)}
+          className="inline-flex w-fit items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40"
+          aria-label={isEarningsVisible ? "Hide earnings amounts" : "Show earnings amounts"}
+          aria-pressed={isEarningsVisible}
+        >
+          {isEarningsVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+          {isEarningsVisible ? "Hide amounts" : "Show amounts"}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard title="Total Earnings" value={money(summary.totalEarnings)} />
-        <StatCard title="Vehicle Income" value={money(summary.vehicleIncome)} />
-        <StatCard title="Driver Income" value={money(summary.driverIncome)} />
+        <StatCard title="Total Earnings" value={displayMoney(summary.totalEarnings)} />
+        <StatCard title="Vehicle Income" value={displayMoney(summary.vehicleIncome)} />
+        <StatCard title="Driver Income" value={displayMoney(summary.driverIncome)} />
       </div>
 
       <div className="bg-white border rounded-xl p-5">
@@ -122,14 +141,13 @@ export default function Earnings() {
             <Cell title="Year" value={latestMonth._id?.year} />
             <Cell title="Month" value={latestMonth._id?.month} />
             <Cell title="Bookings" value={latestMonth.bookings} />
-            <Cell title="Earnings" value={money(latestMonth.totalEarnings)} />
+            <Cell title="Earnings" value={displayMoney(latestMonth.totalEarnings)} />
           </div>
         ) : (
           <p className="text-sm text-gray-500">No monthly earnings data yet.</p>
         )}
       </div>
 
-      {loading && <p className="text-sm text-gray-600">Loading earnings...</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="bg-white border rounded-xl overflow-x-auto">
@@ -151,9 +169,9 @@ export default function Earnings() {
                 <td className="px-4 py-3">{booking._id.slice(-6).toUpperCase()}</td>
                 <td className="px-4 py-3">{booking.vehicle?.name || "-"}</td>
                 <td className="px-4 py-3">{booking.renter?.name || booking.renter?.email || "-"}</td>
-                <td className="px-4 py-3 text-right">{money(getBookingVehicleIncome(booking))}</td>
-                <td className="px-4 py-3 text-right">{money(getBookingDriverIncome(booking))}</td>
-                <td className="px-4 py-3 text-right font-semibold">{money(getBookingAmountEarned(booking))}</td>
+                <td className="px-4 py-3 text-right">{displayMoney(getBookingVehicleIncome(booking))}</td>
+                <td className="px-4 py-3 text-right">{displayMoney(getBookingDriverIncome(booking))}</td>
+                <td className="px-4 py-3 text-right font-semibold">{displayMoney(getBookingAmountEarned(booking))}</td>
                 <td className="px-4 py-3">{booking.paymentStatus}</td>
               </tr>
             ))}

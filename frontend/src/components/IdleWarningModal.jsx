@@ -1,5 +1,6 @@
 import React from "react";
 import { AlertTriangle, Clock4 } from "lucide-react";
+import ModalPortal from "./ModalPortal";
 
 const formatCountdown = (seconds) => {
   const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -18,8 +19,9 @@ export default function IdleWarningModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4 py-6">
-      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" />
+    <ModalPortal>
+    <div className="rp-modal-layer">
+      <div className="rp-modal-backdrop" />
 
       <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
         <div className="border-b border-amber-100 bg-gradient-to-r from-amber-50 via-white to-white px-6 pb-4 pt-5 sm:px-7">
@@ -57,5 +59,6 @@ export default function IdleWarningModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

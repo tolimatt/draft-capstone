@@ -1,3 +1,8 @@
+import {
+  validateKycImageFile,
+  validateSupportingDocumentFile as validateSupportingFileSelection,
+} from "./fileValidation";
+
 // Convert a file to a data URL
 export function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -154,22 +159,44 @@ export async function captureBase64FromStream(stream, { mime = "image/jpeg", qua
   }
 }
 
-/**
- * Capture multiple frames from a MediaStream with a short delay.
- * Returns an array of data URLs.
- */
-export async function captureFramesFromStream(
-  stream,
-  { count = 3, intervalMs = 220, mime = "image/jpeg", quality = 0.92 } = {}
-) {
-  if (!stream) return [];
-  const frames = [];
-  for (let i = 0; i < count; i += 1) {
-    const dataUrl = await captureBase64FromStream(stream, { mime, quality });
-    if (dataUrl) frames.push(dataUrl);
-    if (i < count - 1) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+export async function validateDocumentImageFile(file) {
+  validateKycImageFile(file);
+  if (typeof createImageBitmap !== "function") return { skipped: true };
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    if (bitmap.width < 480 || bitmap.height < 300) {
+      throw new Error("Document image resolution is too low. Upload a clearer image at least 480 × 300 pixels.");
     }
+    const size = 64;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0, size, size);
+    const pixels = context.getImageData(0, 0, size, size).data;
+    let luminanceTotal = 0;
+    let edgeTotal = 0;
+    let prior = null;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const luminance = 0.2126 * pixels[index] + 0.7152 * pixels[index + 1] + 0.0722 * pixels[index + 2];
+      luminanceTotal += luminance;
+      if (prior !== null) edgeTotal += Math.abs(luminance - prior);
+      prior = luminance;
+    }
+    const averageLuminance = luminanceTotal / (pixels.length / 4);
+    const averageEdge = edgeTotal / Math.max((pixels.length / 4) - 1, 1);
+    if (averageLuminance < 22) throw new Error("Document image is too dark. Retake it in better lighting.");
+    if (averageLuminance > 242) throw new Error("Document image is overexposed. Retake it without glare.");
+    if (averageEdge < 1.1) throw new Error("Document image appears too blurry or blank. Upload a sharper photo.");
+    return { width: bitmap.width, height: bitmap.height };
+  } finally {
+    bitmap.close?.();
   }
-  return frames;
+}
+
+export async function validateSupportingDocumentFile(file) {
+  validateSupportingFileSelection(file);
+  if (file.type === "application/pdf") return { documentType: "pdf" };
+  return validateDocumentImageFile(file);
 }

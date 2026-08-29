@@ -13,6 +13,7 @@ import Navbar from "../components/Navbar";
     onNavigateToNotifications,
     onNavigateToBookingHistory,
     onNavigateToAccountSettings,
+    onNavigateToReports,
     onNavigateToPrivacyPolicy,
     onNavigateToTermsAndConditions,
     isLoggedIn,
@@ -44,6 +45,7 @@ import Navbar from "../components/Navbar";
         onNavigateToSignIn={onNavigateToSignIn}
         onNavigateToRegister={onNavigateToRegister}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onShowAI={() => setShowAI(true)}
         onLogout={onLogout}
       />

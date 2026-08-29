@@ -23,7 +23,7 @@ export async function getPendingPreKycDocs(email, requiredDocs = [], sessionId =
   const query = {
     email: normalizedEmail,
     docType: { $in: requiredDocs },
-    status: "pending_review",
+    status: { $in: ["queued", "processing", "retry_wait", "pending_review"] },
   };
   if (sessionId) query.sessionId = String(sessionId).trim();
   const pendingDocs = await PreKycDocument.find(query).select("docType");

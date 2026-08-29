@@ -23,8 +23,9 @@ const preKycDocumentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["verified", "pending_review", "rejected"],
+      enum: ["queued", "processing", "retry_wait", "verified", "pending_review", "rejected"],
       default: "rejected",
+      index: true,
     },
     country: { type: String, default: "" },
     docCategory: { type: String, default: "" },
@@ -35,6 +36,13 @@ const preKycDocumentSchema = new mongoose.Schema(
     confidence: { type: Number, default: 0 },
     reason: { type: String, default: "" },
     provider: { type: String, default: "gemini" },
+    processingAttempts: { type: Number, default: 0 },
+    nextAttemptAt: { type: Date, default: null, index: true },
+    processingLockedAt: { type: Date, default: null },
+    lastProcessedAt: { type: Date, default: null },
+    processingError: { type: String, default: "" },
+    // Minimum fields required to compare the document. Hidden from ordinary queries.
+    profileSnapshot: { type: mongoose.Schema.Types.Mixed, default: {}, select: false },
     fileName: { type: String, default: "" },
     // Object key only. Do not retain host paths or a public URL for KYC evidence.
     fileKey: { type: String, default: "" },
@@ -52,5 +60,6 @@ const preKycDocumentSchema = new mongoose.Schema(
 
 preKycDocumentSchema.index({ email: 1, docType: 1 }, { unique: true });
 preKycDocumentSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+preKycDocumentSchema.index({ status: 1, nextAttemptAt: 1, createdAt: 1 });
 
 export default mongoose.model("PreKycDocument", preKycDocumentSchema);

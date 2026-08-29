@@ -14,6 +14,8 @@ import {
   Circle,
   CircleDot,
   Clock3,
+  Eye,
+  EyeOff,
   Flame,
   History,
   ImageOff,
@@ -32,6 +34,7 @@ import {
 } from "../../utils/dateUtils";
 import { resolveAssetUrl } from "../../utils/media";
 import { formatVehicleTypeLabel } from "../../utils/vehicleText";
+import ModalPortal from "../../components/ModalPortal";
 
 const money = (value) =>
   `\u20b1${Number(value || 0).toLocaleString("en-PH", {
@@ -116,6 +119,15 @@ const isExtensionRequested = (booking) =>
     .trim()
     .toLowerCase() === "requested";
 
+const getReturnRequestInfo = (booking) => {
+  const vehicleReturn = booking?.returnRequest || booking?.return_request || {};
+  return {
+    status: String(vehicleReturn?.status || booking?.returnStatus || "none").trim().toLowerCase(),
+    requestedAt: vehicleReturn?.requestedAt || booking?.returnRequestedAt || null,
+    reviewNote: String(vehicleReturn?.reviewNote || booking?.returnReviewNote || "").trim(),
+  };
+};
+
 const getCancellationRequestedAt = (booking) => {
   const dateStr = booking?.cancellationRequest?.requestedAt || booking?.cancellation_request?.requestedAt;
   return dateStr ? new Date(dateStr) : null;
@@ -169,15 +181,15 @@ const getBookingAmountPayable = (booking) => {
   if (Number.isFinite(payable) && payable >= 0) return payable;
 
   const total = Number(booking?.totalAmount);
-  const gasFee = Number(booking?.blockchainGasFee);
+  const transactionFee = Number(booking?.transactionFee);
   if (Number.isFinite(total) && total >= 0) {
-    return total + (Number.isFinite(gasFee) ? gasFee : 0);
+    return total + (Number.isFinite(transactionFee) ? transactionFee : 0);
   }
 
   const baseAmount = Number(booking?.baseAmount);
   const driverAmount = Number(booking?.driverAmount);
   if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount >= 0) {
-    return baseAmount + driverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+    return baseAmount + driverAmount + (Number.isFinite(transactionFee) ? transactionFee : 0);
   }
 
   const directMinutes = Number(booking?.bookingDurationMinutes);
@@ -198,7 +210,8 @@ const getBookingAmountPayable = (booking) => {
       driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
         ? driverHourlyRate * durationHours
         : 0;
-    return hourlyRate * durationHours + computedDriverAmount + (Number.isFinite(gasFee) ? gasFee : 0);
+    return hourlyRate * durationHours + computedDriverAmount +
+      (Number.isFinite(transactionFee) ? transactionFee : 0);
   }
 
   return 0;
@@ -424,6 +437,7 @@ const getRenterRequests = (bookings) =>
       const extension = getExtensionRequestInfo(booking);
       const cancellation = getCancellationRequestInfo(booking);
       const walkInPayment = getWalkInPaymentInfo(booking);
+      const vehicleReturn = getReturnRequestInfo(booking);
 
       if (bookingStatus === "pending") {
         requests.push({
@@ -478,6 +492,20 @@ const getRenterRequests = (bookings) =>
           requestNote: walkInPayment.requestNote,
           tone: "bg-emerald-100 text-emerald-700",
           icon: Wallet,
+        });
+      }
+
+      if (vehicleReturn.status === "requested") {
+        requests.push({
+          key: `${booking._id}-return`,
+          type: "return",
+          booking,
+          label: "Vehicle Return Request",
+          detail: "Confirm after physically receiving the vehicle",
+          requestedAt: vehicleReturn.requestedAt || booking?.updatedAt || booking?.createdAt || null,
+          requestNote: "",
+          tone: "bg-blue-100 text-blue-700",
+          icon: CarFront,
         });
       }
 
@@ -677,7 +705,8 @@ export default function Dashboard() {
   const [vehicles, setVehicles] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [earningsBookings, setEarningsBookings] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [isRevenueVisible, setIsRevenueVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [updatingBookingId, setUpdatingBookingId] = useState("");
@@ -702,17 +731,26 @@ export default function Dashboard() {
     }
 
     try {
-      const [vehiclesResponse, bookingsResponse, earningsResponse] = await Promise.all([
+      const [vehiclesResponse, activeBookingsResponse, actionBookingsResponse, earningsResponse] = await Promise.all([
         API.getOwnerVehicles(),
         // The dashboard is operational: it needs upcoming/current rentals, not
         // an account's complete financial history. History remains available
         // through the paginated Bookings page and earnings report.
-        API.getOwnerBookings({ view: "active", limit: 50 }),
+        API.getOwnerBookings({ view: "active", limit: 100 }),
+        API.getOwnerBookings({ view: "action", limit: 100 }),
         API.getOwnerEarnings(),
       ]);
 
       setVehicles(vehiclesResponse.vehicles || []);
-      setBookings((bookingsResponse.bookings || []).map(normalizeBookingStatus));
+      const dashboardBookings = [
+        ...(activeBookingsResponse.bookings || []),
+        ...(actionBookingsResponse.bookings || []),
+      ];
+      setBookings(
+        Array.from(new Map(dashboardBookings.map((booking) => [booking._id, booking])).values()).map(
+          normalizeBookingStatus
+        )
+      );
       setEarningsBookings(earningsResponse.bookings || []);
       setLastUpdated(new Date().toISOString());
       setError("");
@@ -754,6 +792,7 @@ export default function Dashboard() {
           String(booking.status || "").toLowerCase() === "pending" ||
           isCancellationRequested(booking) ||
           isExtensionRequested(booking) ||
+          getReturnRequestInfo(booking).status === "requested" ||
           getWalkInPaymentInfo(booking).status === "requested"
       ).length,
     }),
@@ -849,6 +888,11 @@ export default function Dashboard() {
         response = await API.reviewOwnerBookingCancellationRequest(request.booking._id, action);
       } else if (request.type === "walk-in") {
         response = await API.reviewOwnerWalkInPaymentRequest(request.booking._id, action);
+      } else if (request.type === "return") {
+        response = await API.reviewOwnerVehicleReturnRequest(
+          request.booking._id,
+          action === "approve" ? "confirm" : "decline"
+        );
       } else {
         return;
       }
@@ -880,6 +924,8 @@ export default function Dashboard() {
   const openOwnerPage = (page) => {
     window.dispatchEvent(new CustomEvent("navigate", { detail: page }));
   };
+
+  if (loading) return null;
 
   /* ── Render ───────────────────────────────────────── */
 
@@ -919,11 +965,13 @@ export default function Dashboard() {
         />
         <SummaryCard
           title="Revenue Today"
-          value={money(todayRevenue)}
+          value={isRevenueVisible ? money(todayRevenue) : "\u20b1\u2022\u2022\u2022\u2022\u2022\u2022"}
           subtitle="View earnings"
           icon={Wallet}
           iconClassName="bg-violet-50 text-violet-600"
           onAction={() => openViewAllModal("earnings")}
+          isValueVisible={isRevenueVisible}
+          onToggleValueVisibility={() => setIsRevenueVisible((visible) => !visible)}
         />
       </section>
 
@@ -1230,6 +1278,7 @@ export default function Dashboard() {
           vehicles={vehicles}
           bookings={bookings}
           earningsBookings={earningsBookings}
+          isRevenueVisible={isRevenueVisible}
           today={today}
           tasks={todayTasks}
           renterRequests={renterRequests}
@@ -1464,7 +1513,9 @@ export default function Dashboard() {
                   ? "Approve Booking"
                   : renterRequestReview.type === "cancellation"
                     ? "Approve Cancellation"
-                    : "Approve Walk-in"}
+                    : renterRequestReview.type === "return"
+                      ? "Confirm Vehicle Received"
+                      : "Approve Walk-in"}
               </button>
               <button
                 type="button"
@@ -1477,7 +1528,9 @@ export default function Dashboard() {
                   ? "Decline Booking"
                   : renterRequestReview.type === "cancellation"
                     ? "Decline Cancellation"
-                    : "Decline Walk-in"}
+                    : renterRequestReview.type === "return"
+                      ? "Decline Return Request"
+                      : "Decline Walk-in"}
               </button>
             </div>
           </div>
@@ -1499,8 +1552,18 @@ function Panel({ children, className = "" }) {
   );
 }
 
-function SummaryCard({ title, value, subtitle, icon, iconClassName = "", onAction }) {
+function SummaryCard({
+  title,
+  value,
+  subtitle,
+  icon,
+  iconClassName = "",
+  onAction,
+  isValueVisible,
+  onToggleValueVisibility,
+}) {
   const SummaryIcon = icon;
+  const hasVisibilityToggle = typeof onToggleValueVisibility === "function";
 
   return (
     <Panel className="p-4 sm:p-5">
@@ -1509,7 +1572,20 @@ function SummaryCard({ title, value, subtitle, icon, iconClassName = "", onActio
           <SummaryIcon size={25} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-slate-600">{title}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-600">{title}</p>
+            {hasVisibilityToggle && (
+              <button
+                type="button"
+                onClick={onToggleValueVisibility}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40"
+                aria-label={isValueVisible ? `Hide ${title}` : `Show ${title}`}
+                title={isValueVisible ? `Hide ${title}` : `Show ${title}`}
+              >
+                {isValueVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            )}
+          </div>
           <p className="mt-1 text-3xl font-bold tracking-tight text-slate-900">{value}</p>
           {subtitle && (
             <button
@@ -1668,8 +1744,9 @@ function ActivityDescription({ description, vehicleName }) {
 
 function Modal({ title, description = "Simple, readable booking details.", children, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 px-4 py-6 backdrop-blur-md">
-      <div className="absolute inset-0" onClick={onClose} />
+    <ModalPortal>
+    <div className="rp-modal-layer">
+      <button type="button" className="rp-modal-backdrop" onClick={onClose} aria-label="Close dashboard dialog" />
       <div
         role="dialog"
         aria-modal="true"
@@ -1693,6 +1770,7 @@ function Modal({ title, description = "Simple, readable booking details.", child
         <div className="max-h-[calc(92vh-76px)] overflow-y-auto p-5 sm:p-6">{children}</div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -1704,6 +1782,7 @@ function ViewAllDashboardModal({
   vehicles,
   bookings,
   earningsBookings,
+  isRevenueVisible,
   today,
   tasks,
   renterRequests,
@@ -1790,7 +1869,11 @@ function ViewAllDashboardModal({
     ));
   } else if (section === "earnings") {
     cards = items.map((booking, index) => (
-      <DashboardEarningsCard key={booking?._id || `earning-${index}`} booking={booking} />
+      <DashboardEarningsCard
+        key={booking?._id || `earning-${index}`}
+        booking={booking}
+        isRevenueVisible={isRevenueVisible}
+      />
     ));
   } else if (section === "tasks") {
     cards = items.map((task, index) => (
@@ -1923,7 +2006,7 @@ function DashboardRequestCard({ request, onReviewRequest }) {
   );
 }
 
-function DashboardEarningsCard({ booking }) {
+function DashboardEarningsCard({ booking, isRevenueVisible }) {
   const renter = getRenterProfile(booking?.renter);
   const earnedAt = getBookingEarnedAt(booking);
   const paymentStatus = String(booking?.paymentStatus || "paid").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -1937,7 +2020,9 @@ function DashboardEarningsCard({ booking }) {
         <p className="mt-1 text-xs font-medium text-slate-500">{formatRelativeActivityTime(earnedAt)}</p>
       </div>
       <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end">
-        <p className="text-base font-semibold text-emerald-700">{money(getBookingAmountEarned(booking))}</p>
+        <p className="text-base font-semibold text-emerald-700">
+          {isRevenueVisible ? money(getBookingAmountEarned(booking)) : "\u20b1\u2022\u2022\u2022\u2022\u2022\u2022"}
+        </p>
         <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">{paymentStatus}</span>
       </div>
     </article>

@@ -9,6 +9,7 @@ const VehicleDetailsPage = lazy(() => import("./pages/VehicleDetailsPage"));
 const BookingsPage = lazy(() => import("./pages/BookingsPage"));
 const RealtimeChatPage = lazy(() => import("./pages/RealtimeChatPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
+const ReportsCenter = lazy(() => import("./components/ReportsCenter"));
 const AboutPage = lazy(() => import("./pages/AboutPage"));
 const PrivacyPolicyPage = lazy(() => import("./pages/PrivacyPolicyPage"));
 const TermsAndConditionsPage = lazy(() => import("./pages/TermsAndConditionsPage"));
@@ -23,6 +24,7 @@ const ForgotPasswordEmail = lazy(() => import("./verification/ForgotPasswordEmai
 const ForgotPasswordOTP = lazy(() => import("./verification/ForgotPasswordOTP"));
 const ResetPassword = lazy(() => import("./verification/ResetPassword"));
 const OwnerLayout = lazy(() => import("./owner/OwnerLayout"));
+const AdminLayout = lazy(() => import("./admin/AdminLayout"));
 
 // Shared parts
 import LogoutModal from "./components/LogoutModal";
@@ -57,17 +59,13 @@ const ROUTE_TO_PAGE = {
   "/reset-password": "reset-password",
   "/chat": "realtime-chat",
   "/notifications": "notifications",
+  "/reports": "reports",
   "/account-settings": "account-settings",
   "/vehicle-owner-proceed": "vehicle-owner-proceed",
   "/vehicle-owner-verification": "vehicle-owner-verification",
   "/owner-dashboard": "owner-dashboard",
+  "/admin-dashboard": "admin-dashboard",
 };
-
-const PageFallback = () => (
-  <div className="flex min-h-screen items-center justify-center bg-white text-sm text-slate-600" role="status">
-    Loading page...
-  </div>
-);
 
 const PAGE_TO_ROUTE = Object.entries(ROUTE_TO_PAGE).reduce((map, [route, page]) => {
   map[page] = route;
@@ -277,10 +275,16 @@ const App = () => {
         setSessionUser(profileUser);
         setUser(hydratedUser);
 
+        const isAdmin = profileUser.role === "admin";
         const isOwner = profileUser.role === "owner";
         const ownerPreference = String(localStorage.getItem("isNewOwner") || "").trim().toLowerCase();
         const ownerMode = isOwner && ownerPreference !== "false";
-        if (ownerMode) {
+        if (isAdmin) {
+          localStorage.removeItem("isNewOwner");
+          setIsOwnerLoggedIn(false);
+          setIsLoggedIn(true);
+          setCurrentPage("admin-dashboard");
+        } else if (ownerMode) {
           localStorage.setItem("isNewOwner", "true");
           setIsOwnerLoggedIn(true);
           setIsLoggedIn(false);
@@ -290,7 +294,11 @@ const App = () => {
           setIsOwnerLoggedIn(false);
           setIsLoggedIn(true);
           const pathPage = resolvePageFromPath(window.location.pathname);
-          if (AUTH_PAGES.has(pathPage) || pathPage === "owner-dashboard") {
+          if (
+            AUTH_PAGES.has(pathPage) ||
+            pathPage === "owner-dashboard" ||
+            pathPage === "admin-dashboard"
+          ) {
             setCurrentPage("home");
           }
         }
@@ -303,6 +311,10 @@ const App = () => {
         clearSessionOwnerProfile();
         purgeLegacyStorage();
         localStorage.removeItem("isNewOwner");
+        const pathPage = resolvePageFromPath(window.location.pathname);
+        if (pathPage === "owner-dashboard" || pathPage === "admin-dashboard" || pathPage === "reports") {
+          setCurrentPage("signin");
+        }
       } finally {
         if (mounted) setIsSessionBootstrapping(false);
       }
@@ -810,7 +822,7 @@ const App = () => {
         onViewAllNotifications={handleViewAllRenterNotifications}
       />
 
-      <Suspense fallback={<PageFallback />}>
+      <Suspense fallback={null}>
 
       {/* home */}
       {currentPage === "home" && (
@@ -820,6 +832,7 @@ const App = () => {
           onNavigateToHome={() => setCurrentPage("home")}
           onNavigateToSignIn={() => setCurrentPage("signin")}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onNavigateToVehicles={() => {
             setBookingData(getDefaultBookingData());
             setCurrentPage("vehicles");
@@ -861,7 +874,12 @@ const App = () => {
             setForgotEmail("");
             setForgotResetToken("");
 
-            if (userData?.role === "owner") {
+            if (userData?.role === "admin") {
+              setIsOwnerLoggedIn(false);
+              setIsLoggedIn(true);
+              localStorage.removeItem("isNewOwner");
+              setCurrentPage("admin-dashboard");
+            } else if (userData?.role === "owner") {
               setIsOwnerLoggedIn(true);
               setIsLoggedIn(false);
               localStorage.setItem("isNewOwner", "true");
@@ -929,6 +947,7 @@ const App = () => {
           onNavigateToAbout={navigateToAbout}
           onNavigateToContacts={navigateToContacts}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onViewDetails={(vehicle) => {
             setSelectedVehicle(vehicle);
             setCurrentPage("vehicle-details");
@@ -938,12 +957,6 @@ const App = () => {
       )}
 
       {/* vehicle details */}
-      {currentPage === "vehicle-details" && !selectedVehicle && (
-        <div className="min-h-screen bg-white flex items-center justify-center text-slate-600 text-sm">
-          Loading vehicle details...
-        </div>
-      )}
-
       {currentPage === "vehicle-details" && selectedVehicle && (
         <VehicleDetailsPage
           vehicle={selectedVehicle}
@@ -962,6 +975,7 @@ const App = () => {
           onNavigateToAbout={navigateToAbout}
           onNavigateToContacts={navigateToContacts}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onLogout={requestLogout}
         />
       )}
@@ -1056,6 +1070,7 @@ const App = () => {
           onNavigateToNotifications={goToNotifications}
           onNavigateToSignIn={() => setCurrentPage("signin")}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onNavigateToVehicleOwnerProceed={() => setCurrentPage("vehicle-owner-proceed")}
           onNavigateToAbout={navigateToAbout}
           onLogout={requestLogout}
@@ -1076,6 +1091,7 @@ const App = () => {
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onNavigateToPrivacyPolicy={goToPrivacyPolicy}
           onNavigateToTermsAndConditions={goToTermsAndConditions}
           onLogout={requestLogout}
@@ -1096,6 +1112,7 @@ const App = () => {
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onNavigateToTermsAndConditions={goToTermsAndConditions}
           onLogout={requestLogout}
         />
@@ -1115,6 +1132,7 @@ const App = () => {
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onNavigateToPrivacyPolicy={goToPrivacyPolicy}
           onLogout={requestLogout}
         />
@@ -1135,8 +1153,13 @@ const App = () => {
           onOpenNotificationsModal={openRenterNotificationsModal}
           onNavigateToBookingHistory={goToBookingHistory}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onLogout={requestLogout}
         />
+      )}
+
+      {currentPage === "reports" && isLoggedIn && (
+        <ReportsCenter onBack={goToBookingHistory} />
       )}
 
       {currentPage === "realtime-chat" && (
@@ -1155,6 +1178,7 @@ const App = () => {
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onLogout={requestLogout}
         />
       )}
@@ -1173,6 +1197,7 @@ const App = () => {
           onNavigateToChat={goToRealtimeChat}
           onNavigateToNotifications={goToNotifications}
           onNavigateToAccountSettings={() => setCurrentPage("account-settings")}
+          onNavigateToReports={() => setCurrentPage("reports")}
           onLogout={requestLogout}
         />
       )}
@@ -1209,6 +1234,11 @@ const App = () => {
 
       {/* owner dashboard */}
       {currentPage === "owner-dashboard" && isOwnerLoggedIn && <OwnerLayout />}
+
+      {/* admin dashboard */}
+      {currentPage === "admin-dashboard" && isLoggedIn && user?.role === "admin" && (
+        <AdminLayout user={user} onLogout={requestLogout} />
+      )}
       </Suspense>
     </>
   );

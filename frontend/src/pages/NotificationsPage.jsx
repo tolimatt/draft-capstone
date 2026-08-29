@@ -36,10 +36,11 @@ export default function NotificationsPage({
   onNavigateToChat,
   onNavigateToNotifications,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   onLogout,
 }) {
   const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
   const [selectedNotification, setSelectedNotification] = useState(null);
@@ -228,6 +229,7 @@ export default function NotificationsPage({
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onLogout={onLogout}
       />
 
@@ -267,15 +269,13 @@ export default function NotificationsPage({
         </div>
 
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-        {loading && <p className="text-sm text-gray-600">Loading notifications...</p>}
-
         {!loading && !notifications.length && (
           <div className="rp-minimal-card p-6 text-sm text-gray-600">
             {showArchived ? "No archived notifications." : "No notifications yet."}
           </div>
         )}
 
-        <div className="space-y-3">
+        {!loading && <div className="space-y-3">
           {notifications.map((notification) => {
             const isUnread = !isNotificationRead(notification);
 
@@ -321,7 +321,7 @@ export default function NotificationsPage({
               </article>
             );
           })}
-        </div>
+        </div>}
         {hasMore && (
           <div className="mt-5 text-center">
             <button onClick={() => loadNotifications({ cursor: nextCursor, append: true })} disabled={loading} className="px-4 py-2 rounded-lg border border-slate-300 text-sm">Load more</button>

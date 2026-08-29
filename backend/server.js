@@ -29,6 +29,8 @@ import ownerRoutes from "./routes/owner.routes.js";
 import bookingRoutes from "./routes/booking.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+import reportRoutes from "./routes/report.routes.js";
 import { initSocket } from "./socket/index.js";
 import { registerNotificationHandlers } from "./handlers/notification.handlers.js";
 import { warmupFaceService } from "./utils/faceServiceManager.js";
@@ -48,6 +50,10 @@ import {
 } from "./jobs/kycFileCleanup.job.js";
 import { startLogRetentionJob, stopLogRetentionJob } from "./jobs/logRetention.job.js";
 import { startNotificationDeliveryJob, stopNotificationDeliveryJob } from "./jobs/notificationDelivery.job.js";
+import {
+  startKycDocumentProcessingJob,
+  stopKycDocumentProcessingJob,
+} from "./jobs/kycDocumentProcessing.job.js";
 
 const app = express();
 const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 1);
@@ -123,6 +129,8 @@ app.use("/api/owner", ownerRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/reports", reportRoutes);
 
 // Info routes
 app.get("/", (_req, res) => {
@@ -199,6 +207,7 @@ const startServer = async () => {
   startNotificationCleanupJob();
   startBookingLifecycleJob();
   startKycFileCleanupJob();
+  startKycDocumentProcessingJob();
   startLogRetentionJob();
   startNotificationDeliveryJob();
 };
@@ -214,6 +223,7 @@ process.on("unhandledRejection", (err) => {
   stopNotificationCleanupJob();
   stopBookingLifecycleJob();
   stopKycFileCleanupJob();
+  stopKycDocumentProcessingJob();
   stopLogRetentionJob();
   stopNotificationDeliveryJob();
   if (!server) {
@@ -228,6 +238,7 @@ process.on("SIGTERM", () => {
   stopNotificationCleanupJob();
   stopBookingLifecycleJob();
   stopKycFileCleanupJob();
+  stopKycDocumentProcessingJob();
   stopLogRetentionJob();
   stopNotificationDeliveryJob();
   if (!server) {
@@ -242,6 +253,7 @@ process.on("SIGINT", () => {
   stopNotificationCleanupJob();
   stopBookingLifecycleJob();
   stopKycFileCleanupJob();
+  stopKycDocumentProcessingJob();
   stopLogRetentionJob();
   stopNotificationDeliveryJob();
   if (!server) {

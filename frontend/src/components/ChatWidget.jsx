@@ -65,7 +65,6 @@ const SUGGESTED_QUESTION_POOL = [
   "Can I rent with a driver?",
   "How do I message the owner?",
   "How is my account verified?",
-  "What is the blockchain record?",
   "Do you have automatic cars?",
   "Can I choose a specific vehicle model?",
   "What is the minimum age to rent?",

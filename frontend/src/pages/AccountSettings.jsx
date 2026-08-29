@@ -20,17 +20,29 @@ import {
   normalizeUserProfile,
   persistUserProfile,
 } from "../utils/userProfile";
-import { fileToBase64, stripDataUrlPrefix, getMimeFromDataUrl } from "../utils/cameraKyc";
+import {
+  fileToBase64,
+  stripDataUrlPrefix,
+  getMimeFromDataUrl,
+  validateSupportingDocumentFile,
+} from "../utils/cameraKyc";
+import { validateAvatarImageFile } from "../utils/fileValidation";
 import { getPreKycSessionToken, preVerifySupportingDocument } from "../utils/kycApi";
 import { RELATIONSHIP_OPTIONS } from "../data/registerValidation";
 import { SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
+const fetchPsgcOptions = async (path, signal) => {
+  const response = await fetch(`${PSGC_BASE_URL}${path}`, { signal });
+  if (!response.ok) throw new Error(`PSGC request failed with status ${response.status}.`);
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
+};
 const GENDER_OPTIONS = ["Male", "Female", "Prefer not to say"];
 const KYC_STATUS_LABELS = {
   not_started: "Not started",
   id_uploaded: "ID uploaded",
-  challenge_passed: "Selfie verified",
+  challenge_passed: "Document review pending",
   approved: "Approved",
   rejected: "Rejected",
 };
@@ -71,7 +83,6 @@ const DEFAULT_PROFILE = {
   emergencyContactRelationship: "",
   role: "user",
   isVerified: false,
-  walletAddress: null,
 };
 
 const parseDateInput = (value) => {
@@ -289,12 +300,17 @@ const AccountSettings = ({
   onNavigateToChat,
   onNavigateToNotifications,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   isLoggedIn,
   user,
   onLogout,
 }) => {
   const [showAI, setShowAI] = useState(false);
-  const [activeTab, setActiveTab] = useState("Profile Settings");
+  const [activeTab, setActiveTab] = useState(() =>
+    isLoggedIn && user?.role !== "admin" && user?.kycStatus !== "approved"
+      ? "Verification"
+      : "Profile Settings"
+  );
   const [showPhotoMenu, setShowPhotoMenu] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState(
     getUserProfileFromStorage().avatar || null
@@ -306,7 +322,7 @@ const AccountSettings = ({
   }));
   const [draftProfile, setDraftProfile] = useState(null);
   const [editingSection, setEditingSection] = useState(null);
-  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [, setLoadingProfile] = useState(false);
   const [savingSection, setSavingSection] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [statusError, setStatusError] = useState("");
@@ -356,6 +372,9 @@ const AccountSettings = ({
   const [provinces, setProvinces] = useState([]);
   const [cities, setCities] = useState([]);
   const [barangays, setBarangays] = useState([]);
+  const [barangaysLoading, setBarangaysLoading] = useState(false);
+  const [barangayLoadError, setBarangayLoadError] = useState("");
+  const [barangayReloadKey, setBarangayReloadKey] = useState(0);
 
   const current = draftProfile || profile;
   const activeUserIdentity = String(user?._id || user?.email || "").trim().toLowerCase();
@@ -426,55 +445,50 @@ const AccountSettings = ({
   };
 
   useEffect(() => {
-    let active = true;
-    fetch(`${PSGC_BASE_URL}/regions/`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (active) setRegions(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        if (active) setRegions([]);
+    const controller = new AbortController();
+
+    fetchPsgcOptions("/regions/", controller.signal)
+      .then(setRegions)
+      .catch((error) => {
+        if (error.name !== "AbortError") setRegions([]);
       });
 
     return () => {
-      active = false;
+      controller.abort();
     };
   }, []);
 
   useEffect(() => {
+    setProvinces([]);
+    setCities([]);
+    setBarangays([]);
+    setBarangaysLoading(false);
+    setBarangayLoadError("");
+
     if (!current.region) {
-      setProvinces([]);
-      setCities([]);
-      setBarangays([]);
       return;
     }
 
-    let active = true;
+    const controller = new AbortController();
 
     const loadProvincesOrCities = async () => {
       try {
-        const provinceResponse = await fetch(`${PSGC_BASE_URL}/regions/${current.region}/provinces/`);
-        if (!provinceResponse.ok) throw new Error("Failed to load provinces.");
-        const provinceData = await provinceResponse.json();
-        const provinceList = Array.isArray(provinceData) ? provinceData : [];
-        if (!active) return;
+        const provinceList = await fetchPsgcOptions(
+          `/regions/${current.region}/provinces/`,
+          controller.signal
+        );
 
         setProvinces(provinceList);
-        setBarangays([]);
 
         if (provinceList.length === 0) {
-          const cityResponse = await fetch(
-            `${PSGC_BASE_URL}/regions/${current.region}/cities-municipalities/`
+          const cityList = await fetchPsgcOptions(
+            `/regions/${current.region}/cities-municipalities/`,
+            controller.signal
           );
-          if (!cityResponse.ok) throw new Error("Failed to load cities.");
-          const cityData = await cityResponse.json();
-          if (!active) return;
-          setCities(Array.isArray(cityData) ? cityData : []);
-        } else if (!current.province) {
-          setCities([]);
+          setCities(cityList);
         }
-      } catch {
-        if (!active) return;
+      } catch (error) {
+        if (error.name === "AbortError") return;
         setProvinces([]);
         setCities([]);
         setBarangays([]);
@@ -483,9 +497,9 @@ const AccountSettings = ({
 
     loadProvincesOrCities();
     return () => {
-      active = false;
+      controller.abort();
     };
-  }, [current.region, current.province]);
+  }, [current.region]);
 
   useEffect(() => {
     if (!current.region || provinces.length === 0 || !current.province) {
@@ -496,45 +510,69 @@ const AccountSettings = ({
       return;
     }
 
-    let active = true;
-    fetch(`${PSGC_BASE_URL}/provinces/${current.province}/cities-municipalities/`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (!active) return;
-        setCities(Array.isArray(data) ? data : []);
-        setBarangays([]);
-      })
-      .catch(() => {
-        if (!active) return;
+    setCities([]);
+    setBarangays([]);
+    setBarangaysLoading(false);
+    setBarangayLoadError("");
+
+    const controller = new AbortController();
+    fetchPsgcOptions(
+      `/provinces/${current.province}/cities-municipalities/`,
+      controller.signal
+    )
+      .then(setCities)
+      .catch((error) => {
+        if (error.name === "AbortError") return;
         setCities([]);
         setBarangays([]);
-      });
+      })
 
     return () => {
-      active = false;
+      controller.abort();
     };
   }, [current.province, current.region, provinces.length]);
 
   useEffect(() => {
     if (!current.city) {
       setBarangays([]);
+      setBarangaysLoading(false);
+      setBarangayLoadError("");
       return;
     }
 
+    if (cities.length === 0) return;
+
+    const controller = new AbortController();
     let active = true;
-    fetch(`${PSGC_BASE_URL}/cities-municipalities/${current.city}/barangays/`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (active) setBarangays(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        if (active) setBarangays([]);
-      });
+
+    const loadBarangays = async () => {
+      setBarangays([]);
+      setBarangaysLoading(true);
+      setBarangayLoadError("");
+
+      try {
+        const barangayList = await fetchPsgcOptions(
+          `/cities-municipalities/${current.city}/barangays/`,
+          controller.signal
+        );
+        if (!active) return;
+        setBarangays(barangayList);
+      } catch (error) {
+        if (!active || error.name === "AbortError") return;
+        setBarangays([]);
+        setBarangayLoadError("Could not load barangays. Please try again.");
+      } finally {
+        if (active) setBarangaysLoading(false);
+      }
+    };
+
+    loadBarangays();
 
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [current.city]);
+  }, [barangayReloadKey, cities.length, current.city]);
 
   useEffect(() => {
     if (activeTab === "Notifications Settings") {
@@ -593,6 +631,14 @@ const AccountSettings = ({
   const handlePhotoUpload = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    try {
+      validateAvatarImageFile(file);
+    } catch (validationError) {
+      setStatusError(validationError.message || "Please choose a valid profile photo.");
+      event.target.value = "";
+      return;
+    }
 
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -700,7 +746,20 @@ const AccountSettings = ({
   const loadKycStatus = async () => {
     try {
       const response = await API.kycGetStatus();
-      setKycStatus(response?.status || "not_started");
+      const nextStatus = response?.status || "not_started";
+      setKycStatus(nextStatus);
+
+      if (nextStatus === "approved") {
+        try {
+          const profileResponse = await API.getProfile();
+          if (profileResponse?.user) {
+            const normalized = persistUserProfile(profileResponse.user);
+            setProfile((previous) => ({ ...previous, ...normalized }));
+          }
+        } catch {
+          // Keep the authoritative KYC status visible even if profile refresh fails.
+        }
+      }
     } catch {
       setKycStatus("not_started");
     }
@@ -735,6 +794,7 @@ const AccountSettings = ({
     setSupportingDocLoading(true);
     setSupportingDocStatus("");
     try {
+      await validateSupportingDocumentFile(supportingDocFile);
       const dataUrl = await fileToBase64(supportingDocFile);
       const clean = stripDataUrlPrefix(dataUrl);
       const mime = getMimeFromDataUrl(dataUrl);
@@ -751,7 +811,10 @@ const AccountSettings = ({
           address: profile.address,
         },
       });
-      setSupportingDocStatus(response.message || "Supporting document verified.");
+      setSupportingDocStatus(
+        response.message ||
+          "Supporting document queued for automated screening and Super Admin review."
+      );
     } catch (error) {
       setSupportingDocStatus(error.message || "Supporting document verification failed.");
     } finally {
@@ -936,6 +999,7 @@ const AccountSettings = ({
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onLogout={onLogout}
       />
 
@@ -979,11 +1043,6 @@ const AccountSettings = ({
 
             {activeTab === "Profile Settings" && (
               <>
-                {loadingProfile && (
-                  <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-700">
-                    Loading your latest profile details...
-                  </div>
-                )}
                 {statusMessage && (
                   <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-sm text-green-700">
                     {statusMessage}
@@ -1029,7 +1088,7 @@ const AccountSettings = ({
                             Upload Photo
                             <input
                               type="file"
-                              accept="image/*"
+                              accept="image/jpeg,image/png,image/webp"
                               onChange={(event) => {
                                 handlePhotoUpload(event);
                                 setShowPhotoMenu(false);
@@ -1228,7 +1287,11 @@ const AccountSettings = ({
                           ? draftProfile?.barangay ?? profile.barangay
                           : profile.barangay
                       }
-                      disabled={editingSection !== "location" || !current.city}
+                      disabled={
+                        editingSection !== "location" ||
+                        !current.city ||
+                        barangaysLoading
+                      }
                       options={barangays.map((barangay) => ({
                         label: barangay.name,
                         value: barangay.code,
@@ -1241,7 +1304,28 @@ const AccountSettings = ({
                           address: "",
                         }));
                       }}
+                      placeholder={
+                        !current.city
+                          ? "Select a city / municipality first"
+                          : barangaysLoading
+                            ? "Loading barangays..."
+                            : barangayLoadError
+                              ? "Barangays unavailable"
+                              : "Select barangay"
+                      }
                     />
+                    {editingSection === "location" && barangayLoadError && current.city && (
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        <span>{barangayLoadError}</span>
+                        <button
+                          type="button"
+                          onClick={() => setBarangayReloadKey((value) => value + 1)}
+                          className="shrink-0 font-semibold text-amber-900 underline underline-offset-2"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    )}
                   </>
                 ),
               },
@@ -1603,7 +1687,7 @@ const AccountSettings = ({
 
                   {showKycStepper && (
                     <div className="pt-2">
-                      <VerificationStepper />
+                      <VerificationStepper onVerificationComplete={loadKycStatus} />
                     </div>
                   )}
                 </div>
@@ -1626,9 +1710,7 @@ const AccountSettings = ({
                 )}
 
                 {loginActivityLoading ? (
-                  <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-sm text-blue-700">
-                    Loading login activity...
-                  </div>
+                  null
                 ) : loginActivity.length ? (
                   <div className="divide-y">
                     {loginActivity.map((entry) => {
@@ -1734,8 +1816,20 @@ const AccountSettings = ({
 
                   <input
                     type="file"
-                    accept="image/*,application/pdf"
-                    onChange={(event) => setSupportingDocFile(event.target.files?.[0] || null)}
+                    accept="image/jpeg,image/png,application/pdf"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0] || null;
+                      if (!file) return setSupportingDocFile(null);
+                      try {
+                        await validateSupportingDocumentFile(file);
+                        setSupportingDocFile(file);
+                        setSupportingDocStatus("");
+                      } catch (validationError) {
+                        setSupportingDocFile(null);
+                        setSupportingDocStatus(validationError.message || "Please choose a valid supporting document.");
+                        event.target.value = "";
+                      }
+                    }}
                     className="block w-full text-sm text-gray-600"
                   />
 

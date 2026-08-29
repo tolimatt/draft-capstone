@@ -57,7 +57,6 @@ Set:
 
 - `VITE_API_BASE_URL=https://<your-render-backend-domain>`
 - `VITE_SOCKET_URL=https://<your-render-backend-domain>`
-- `VITE_BOOKING_LEDGER_CONTRACT_ADDRESS=<optional>`
 
 Important:
 - Use `https://` URLs (not `http://`) to avoid browser mixed-content fetch failures.

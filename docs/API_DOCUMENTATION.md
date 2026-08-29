@@ -77,7 +77,6 @@ Used by auth/profile endpoints.
   "role": "user|owner|admin",
   "isVerified": true,
   "kycStatus": "not_started|id_uploaded|challenge_passed|approved|rejected",
-  "walletAddress": "string|null",
   "phone": "string",
   "dateOfBirth": "string",
   "gender": "Male|Female|Prefer not to say|",
@@ -134,13 +133,12 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
 - `_id`, `pickupAt`, `returnAt`, `bookingDays`
 - `status`
 - `paymentStatus`
+- `transactionFee`
 - `paymentAmountPaid`, `paymentAmountDue`, `paymentCheckoutAmount`
 - `paymentScope`, `paymentChannel`
 - `paymentMethod`, `balancePaymentMethod`
 - `walkInPayment` details (status/request/review/confirm fields)
 - `paymongoReference`, `paymongoCheckoutId`, `paymentIntentId`
-- `blockchainTxHash`, `blockchainRecordedAt`, `blockchainExplorerUrl`
-- `blockchain` metadata
 - `vehicle`, `renter`, `owner`
 
 ---
@@ -179,7 +177,7 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
   - If `role=owner`: `ownerType` required.
   - If `role=owner` and `ownerType=business`: `businessName` and `permitNumber` required.
 - Optional body:
-  - `walletAddress`, `phone`, `gender`, `address`, `region`, `province`, `city`, `barangay`,
+  - `phone`, `gender`, `address`, `region`, `province`, `city`, `barangay`,
     `emergencyContactName`, `emergencyContactPhone`, `emergencyContactRelationship`,
     `licenseNumber`.
 - Preconditions:
@@ -272,7 +270,6 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
   - `gender`, `ownerType`, `businessName`, `licenseNumber`, `permitNumber`
   - `address`, `region`, `province`, `city`, `barangay`
   - `emergencyContactName`, `emergencyContactPhone`, `emergencyContactRelationship`
-  - `walletAddress`
   - `avatar`:
     - empty string to clear
     - normal URL/path
@@ -338,22 +335,16 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
   - `id_image_mime` (optional; default `image/jpeg`)
   - `id_type` (required; must be one of the supported Philippine ID types)
 - Flow:
-  - Verifies document validity.
-  - If valid, registers ID face embedding via face service.
-  - Updates KYC status to `id_uploaded` on success.
-
-#### `POST /api/kyc/selfie/challenge`
-- Auth: Protected
-- Body:
-  - `frames_base64` (array, min configured frame count, default 3)
-- Proxies to face service liveness/challenge flow.
+  - Performs local type/size validation and stores the evidence privately.
+  - Queues automated screening with bounded retries and registers the ID face via the face service.
+  - Returns `verificationQueued: true`; final approval waits for Super Admin review by default.
 
 #### `POST /api/kyc/selfie/verify`
 - Auth: Protected
 - Body:
-  - `challenge_id`
   - `selfie_image_base64`
 - Verifies selfie against stored ID embedding.
+- A successful match advances the case to `challenge_passed`; it does not bypass document review.
 
 #### `GET /api/kyc/me`
 - Auth: Protected
@@ -372,19 +363,13 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
   - `full_name` (optional)
   - `role` (optional)
   - `id_image_mime` (optional)
-- Purpose: pre-registration ID verification and face ID registration.
-
-#### `POST /api/kyc/pre/selfie/challenge`
-- Auth: Signed pre-KYC token in `x-pre-kyc-token`
-- Body:
-  - `email`
-  - `frames_base64` (array, min configured count)
+- Purpose: securely queue pre-registration ID screening and register the face ID.
+- Returns `verificationQueued: true` and `reviewRequired: true` on successful submission.
 
 #### `POST /api/kyc/pre/selfie/verify`
 - Auth: Signed pre-KYC token in `x-pre-kyc-token`
 - Body:
   - `email`
-  - `challenge_id`
   - `selfie_image_base64`
   - `role` (optional)
 - Stores pre-registration face verification status.
@@ -396,12 +381,16 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
   - `doc_image_base64`
   - `role` (optional)
   - `doc_image_mime` (optional)
-- Verifies owner supporting document.
-- Clear results are accepted or rejected automatically. Otherwise `reviewRequired: true` is returned and registration waits for an admin decision.
+- Securely stores and queues the owner supporting document.
+- Returns `verificationQueued: true`; registration waits for a final document decision.
+
+#### `GET /api/kyc/pre/status`
+- Auth: Signed pre-KYC token in `x-pre-kyc-token`
+- Returns the current `queued`, `processing`, `retry_wait`, `pending_review`, `verified`, or `rejected` state for documents in the current verification attempt.
 
 #### `GET /api/kyc/admin/reviews`
 - Auth: Protected admin
-- Returns up to 200 pending document reviews, oldest first, without embedding file contents.
+- Returns up to 200 queued or pending document reviews, oldest first, without embedding file contents.
 
 #### `GET /api/kyc/admin/reviews/:id/file`
 - Auth: Protected admin
@@ -539,7 +528,6 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
 - Success:
   - `success`
   - `message`
-  - `blockchainWarning`
   - `booking`
 
 #### `PATCH /api/owner/bookings/:id/walk-in-request`
@@ -560,7 +548,6 @@ Booking payloads include core booking, payment, walk-in, vehicle, renter, and ow
 - Success:
   - `success`
   - `message`
-  - `blockchainWarning`
   - `booking`
 
 #### `GET /api/owner/reviews`
@@ -679,7 +666,7 @@ All booking routes are protected and role-guarded to `user|owner|admin` unless n
 - Param: `id` (ObjectId)
 - Body:
   - `checkoutId` (optional; validated against booking)
-- Verifies checkout, updates payment state, may auto-record on blockchain.
+- Verifies checkout and updates payment state.
 - Success:
   - `success`
   - `paid` (boolean for fully paid)
@@ -688,20 +675,25 @@ All booking routes are protected and role-guarded to `user|owner|admin` unless n
   - `checkoutId`
   - `referenceNumber`
   - `booking`
-  - `blockchain` object (`recorded`, `pending`, `warning`)
   - `message`
 
-#### `POST /api/bookings/:id/blockchain-record`
-- Auth: Protected
-- Roles: `user|owner|admin`
-- Param: `id` (ObjectId)
-- Manually triggers on-chain recording when eligible.
+### 6.7 Admin APIs (`/api/admin`)
+
+#### `GET /api/admin/transactions`
+- Auth: Protected admin
+- Purpose: Lists transaction records across all bookings for the admin dashboard.
+- Query:
+  - `paymentStatus` (`all|unpaid|partial|paid|refunded`, optional, default `all`)
+  - `search` (optional, max 100 characters; searches booking/payment references, vehicle, renter, and owner)
+  - `limit` (optional, default 50, max 100)
+  - `cursor` (optional pagination cursor returned by the previous response)
 - Success:
   - `success`
-  - `message`
-  - `booking`
+  - `transactions` (booking, payment, vehicle, renter, and owner transaction details)
+  - `summary` (record/payment counts and total collected)
+  - `page` (`hasMore`, `nextCursor`, `limit`)
 
-### 6.7 Chat APIs (`/api/chat`)
+### 6.8 Chat APIs (`/api/chat`)
 
 #### `POST /api/chat`
 - Auth: Public
@@ -764,7 +756,7 @@ All booking routes are protected and role-guarded to `user|owner|admin` unless n
   - `success`
   - `message`
 
-### 6.8 Notifications (`/api/notifications`)
+### 6.9 Notifications (`/api/notifications`)
 
 #### `GET /api/notifications`
 - Auth: Protected
@@ -892,7 +884,7 @@ Common status codes used across the project:
 - `429` Too many requests
 - `500` Internal server error
 - `502` Upstream dependency failed (PayMongo/chatbot)
-- `503` Service unavailable (blockchain/chatbot config)
+- `503` Service unavailable
 
 Generic backend error format from global error handler:
 

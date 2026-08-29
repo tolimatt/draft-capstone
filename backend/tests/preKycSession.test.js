@@ -65,6 +65,7 @@ test("KYC middleware blocks unapproved users and lets approved users and admins 
 
   requireKyc({ user: { role: "user", kycStatus: "not_started" } }, response, next);
   assert.equal(response.statusCode, 403);
+  assert.equal(response.payload.code, "IDENTITY_VERIFICATION_REQUIRED");
   assert.equal(nextCalls, 0);
 
   requireKyc({ user: { role: "user", kycStatus: "approved" } }, response, next);

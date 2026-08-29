@@ -11,7 +11,7 @@ import {
   Star,
   Wallet,
   BarChart3,
-  Link2,
+  ShieldAlert,
   LogOut,
 } from "lucide-react";
 import LogoutModal from "../../components/LogoutModal";
@@ -116,7 +116,7 @@ function Sidebar({
     { id: "Reviews", label: "Reviews", icon: Star },
     { id: "Earnings", label: "Earnings", icon: Wallet },
     { id: "Analytics", label: "Analytics", icon: BarChart3 },
-    { id: "Blockchain", label: "Transaction Records", icon: Link2 },
+    { id: "Reports", label: "Reports", icon: ShieldAlert },
   ];
 
   const openLogoutModal = () => {

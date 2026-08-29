@@ -5,8 +5,7 @@ DeepFace + OpenCV + FastAPI
 KYC flow:
   1) POST /api/kyc/face/detect     → Quality check + face bounding box
   2) POST /api/kyc/id/register     → Extract and store face embedding from ID card
-  3) POST /api/kyc/selfie/challenge → Single selfie liveness check
-  4) POST /api/kyc/selfie/verify   → Compare selfie vs stored ID embedding
+  3) POST /api/kyc/selfie/verify   → Compare one selfie vs stored ID embedding
 """
 
 from fastapi import FastAPI, HTTPException, Request
@@ -26,11 +25,9 @@ import numpy as np
 from deepface import DeepFace
 
 import time
-import uuid
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING
-from pymongo.errors import DuplicateKeyError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -73,11 +70,6 @@ SELFIE_FACE_COUNT_MIN_RELATIVE_RATIO = float(os.getenv("KYC_SELFIE_COUNT_MIN_REL
 BLUR_THRESHOLD      = 15
 BRIGHTNESS_MIN      = 15
 BRIGHTNESS_MAX      = 245
-CHALLENGE_TTL_SECS  = 300
-MIN_CHALLENGE_FRAMES = int(os.getenv("KYC_MIN_FRAMES", "3"))
-MAX_CHALLENGE_FRAMES = max(MIN_CHALLENGE_FRAMES, int(os.getenv("KYC_MAX_FRAMES", "5")))
-MIN_FRAME_DIFF      = float(os.getenv("KYC_MIN_FRAME_DIFF", "2.0"))
-MIN_FACE_MOVEMENT   = float(os.getenv("KYC_MIN_FACE_MOVEMENT", "0.015"))
 
 def sanitize_mongo_uri(uri: str) -> str:
     text = str(uri or "")
@@ -110,11 +102,10 @@ ACTIVE_MONGO_URI = ""
 mongo_client = None
 mongo_db = None
 kyc_col = None
-challenges_col = None
 
 
 async def connect_mongo_with_fallback() -> None:
-    global ACTIVE_MONGO_URI, mongo_client, mongo_db, kyc_col, challenges_col
+    global ACTIVE_MONGO_URI, mongo_client, mongo_db, kyc_col
 
     uris = get_candidate_mongo_uris()
     if not uris:
@@ -136,7 +127,6 @@ async def connect_mongo_with_fallback() -> None:
             mongo_client = client
             mongo_db = mongo_client[MONGO_DB_NAME]
             kyc_col = mongo_db["biometric_templates"]
-            challenges_col = mongo_db["kycchallenges"]
 
             logger.info("MongoDB connected successfully.")
             return
@@ -196,19 +186,6 @@ async def startup():
     except Exception as e:
         logger.warning(f"Index fix note: {e}")
 
-    try:
-        existing_challenge = await challenges_col.index_information()
-        if "challenge_id_1" not in existing_challenge:
-            await challenges_col.create_index([("challenge_id", ASCENDING)], unique=True, name="challenge_id_1")
-            logger.info("Created 'challenge_id_1' unique index")
-        if "expires_at_1" not in existing_challenge:
-            await challenges_col.create_index([("expires_at", ASCENDING)], expireAfterSeconds=0, name="expires_at_1")
-            logger.info("Created 'expires_at_1' TTL index")
-        if "user_id_1" not in existing_challenge:
-            await challenges_col.create_index([("user_id", ASCENDING)], name="user_id_1")
-    except Exception as e:
-        logger.warning(f"Challenge index note: {e}")
-
     # Warm up the model so the first request is faster
     logger.info("Pre-loading Facenet512 model (this takes ~30s on first run)...")
     try:
@@ -250,19 +227,8 @@ class KycIdRegisterResponse(BaseModel):
     user_id: Optional[str] = None
     stored_at: Optional[str] = None
 
-class SelfieChallengeRequest(BaseModel):
-    user_id: str
-    frames_base64: List[str] = Field(..., description="One or more selfie frames as base64.")
-
-class SelfieChallengeResponse(BaseModel):
-    passed: bool
-    message: str
-    user_id: str
-    challenge_id: Optional[str] = None
-
 class KycSelfieVerifyRequest(BaseModel):
     user_id: str
-    challenge_id: str
     selfie_image_base64: str
 
 class KycSelfieVerifyResponse(BaseModel):
@@ -329,46 +295,6 @@ def check_image_quality(image: np.ndarray) -> Optional[str]:
     if br > BRIGHTNESS_MAX:
         return "The image is too bright. Please avoid direct light or flash."
     return None
-
-
-def sample_frames(frames: List[str], max_frames: int) -> List[str]:
-    if len(frames) <= max_frames:
-        return frames
-    step = len(frames) / float(max_frames)
-    return [frames[int(i * step)] for i in range(max_frames)]
-
-
-def crop_face(image: np.ndarray, bbox: Dict[str, int], margin: float = 0.12) -> np.ndarray:
-    h, w = image.shape[:2]
-    x = max(0, int(bbox.get("x", 0)))
-    y = max(0, int(bbox.get("y", 0)))
-    bw = max(1, int(bbox.get("w", 0)))
-    bh = max(1, int(bbox.get("h", 0)))
-    pad_x = int(bw * margin)
-    pad_y = int(bh * margin)
-    x1 = max(0, x - pad_x)
-    y1 = max(0, y - pad_y)
-    x2 = min(w, x + bw + pad_x)
-    y2 = min(h, y + bh + pad_y)
-    return image[y1:y2, x1:x2]
-
-
-def mean_abs_diff(img_a: np.ndarray, img_b: np.ndarray) -> float:
-    if img_a.size == 0 or img_b.size == 0:
-        return 0.0
-    gray_a = cv2.cvtColor(img_a, cv2.COLOR_BGR2GRAY)
-    gray_b = cv2.cvtColor(img_b, cv2.COLOR_BGR2GRAY)
-    gray_a = cv2.resize(gray_a, (160, 160))
-    gray_b = cv2.resize(gray_b, (160, 160))
-    diff = cv2.absdiff(gray_a, gray_b)
-    return float(np.mean(diff))
-
-
-def face_center(bbox: Dict[str, int]) -> tuple:
-    return (
-        float(bbox.get("x", 0)) + float(bbox.get("w", 0)) / 2.0,
-        float(bbox.get("y", 0)) + float(bbox.get("h", 0)) / 2.0,
-    )
 
 
 # Face detection and embeddings
@@ -762,129 +688,7 @@ async def post_kyc_id_register(req: KycIdRegisterRequest):
         return KycIdRegisterResponse(success=False, message="Something went wrong while registering your ID. Please try again.")
 
 
-# Endpoint 3: selfie liveness check
-
-@app.post("/api/kyc/selfie/challenge", response_model=SelfieChallengeResponse)
-async def post_selfie_challenge(req: SelfieChallengeRequest):
-    t_start = time.time()
-    try:
-        if not req.frames_base64 or len(req.frames_base64) < MIN_CHALLENGE_FRAMES:
-            return SelfieChallengeResponse(
-                passed=False,
-                message=f"Please capture at least {MIN_CHALLENGE_FRAMES} selfie frames.",
-                user_id=req.user_id,
-            )
-
-        record = await kyc_col.find_one({"user_id": req.user_id})
-        if not record or "id_embedding" not in record:
-            return SelfieChallengeResponse(passed=False, message="Please register your ID first before taking a selfie.", user_id=req.user_id)
-
-        frames = sample_frames(req.frames_base64, MAX_CHALLENGE_FRAMES)
-        face_frames = []
-        quality_notes = []
-
-        for frame_b64 in frames:
-            img = resize_if_needed(decode_base64_image(frame_b64))
-            quality_err = check_image_quality(img)
-            if quality_err:
-                quality_notes.append(quality_err)
-
-            try:
-                best = extract_best_face(img)
-            except ValueError:
-                return SelfieChallengeResponse(
-                    passed=False,
-                    message="We couldn't find your face in the selfie. Please make sure your face is clearly visible.",
-                    user_id=req.user_id,
-                )
-
-            constraint_err = validate_face_constraints(
-                best,
-                img,
-                min_ratio=MIN_FACE_AREA_RATIO,
-                max_ratio=MAX_FACE_AREA_RATIO,
-                min_confidence=MIN_FACE_CONFIDENCE,
-                multi_face_message="Multiple people detected. Please make sure only you are in the frame.",
-                small_face_message="Your face is too small. Please move closer to the camera.",
-                large_face_message="Your face is too close. Please move slightly farther away.",
-                low_conf_message="We're having trouble detecting your face. Please improve the lighting.",
-                use_secondary_count=False,
-                count_min_area_ratio=SELFIE_FACE_COUNT_MIN_AREA_RATIO,
-                count_min_relative_to_largest=SELFIE_FACE_COUNT_MIN_RELATIVE_RATIO,
-            )
-            if constraint_err:
-                return SelfieChallengeResponse(
-                    passed=False,
-                    message=constraint_err,
-                    user_id=req.user_id,
-                )
-
-            face_frames.append({"img": img, "bbox": best["bbox"]})
-
-        diffs = []
-        centers = []
-        for i, entry in enumerate(face_frames):
-            centers.append(face_center(entry["bbox"]))
-            if i > 0:
-                crop_a = crop_face(face_frames[i - 1]["img"], face_frames[i - 1]["bbox"])
-                crop_b = crop_face(entry["img"], entry["bbox"])
-                diffs.append(mean_abs_diff(crop_a, crop_b))
-
-        avg_diff = float(np.mean(diffs)) if diffs else 0.0
-        movement_ratio = 0.0
-        if len(centers) >= 2:
-            frame_h, frame_w = face_frames[0]["img"].shape[:2]
-            max_move = 0.0
-            for c in centers[1:]:
-                dx = c[0] - centers[0][0]
-                dy = c[1] - centers[0][1]
-                max_move = max(max_move, float(np.hypot(dx, dy)))
-            movement_ratio = max_move / float(max(frame_w, frame_h))
-
-        if avg_diff < MIN_FRAME_DIFF and movement_ratio < MIN_FACE_MOVEMENT:
-            return SelfieChallengeResponse(
-                passed=False,
-                message="Please blink or move your head slightly during the selfie check.",
-                user_id=req.user_id,
-            )
-
-        if quality_notes:
-            logger.warning(f"Selfie quality notes for {req.user_id}: {quality_notes[-1]}")
-
-        challenge_id = str(uuid.uuid4())
-        expires_at = datetime.utcnow() + timedelta(seconds=CHALLENGE_TTL_SECS)
-        inserted = False
-        for _ in range(3):
-            try:
-                await challenges_col.insert_one(
-                    {
-                        "challenge_id": challenge_id,
-                        "user_id": req.user_id,
-                        "created_at": datetime.utcnow(),
-                        "expires_at": expires_at,
-                    }
-                )
-                inserted = True
-                break
-            except DuplicateKeyError:
-                challenge_id = str(uuid.uuid4())
-        if not inserted:
-            return SelfieChallengeResponse(
-                passed=False,
-                message="We couldn't start the selfie session. Please try again.",
-                user_id=req.user_id,
-            )
-
-        elapsed = time.time() - t_start
-        logger.info(f"Liveness passed: user_id={req.user_id} in {elapsed:.1f}s")
-        return SelfieChallengeResponse(passed=True, message="Selfie captured successfully! Click Verify to match with your ID.", user_id=req.user_id, challenge_id=challenge_id)
-
-    except Exception as e:
-        logger.error(f"Selfie challenge error for {req.user_id}: {e}")
-        return SelfieChallengeResponse(passed=False, message="Something went wrong. Please try again.", user_id=req.user_id)
-
-
-# Endpoint 4: selfie vs ID check
+# Endpoint 3: selfie vs ID check
 # Try the original image first, then a normalized one if needed.
 
 @app.post("/api/kyc/selfie/verify", response_model=KycSelfieVerifyResponse)
@@ -894,18 +698,6 @@ async def post_kyc_selfie_verify(req: KycSelfieVerifyRequest):
         record = await kyc_col.find_one({"user_id": req.user_id})
         if not record or "id_embedding" not in record:
             return KycSelfieVerifyResponse(verified=False, message="Please upload your ID first before verifying.", user_id=req.user_id)
-
-        challenge = await challenges_col.find_one({"challenge_id": req.challenge_id})
-        if not challenge:
-            return KycSelfieVerifyResponse(verified=False, message="Your selfie session has expired. Please capture a new selfie.", user_id=req.user_id)
-        if challenge.get("user_id") != req.user_id:
-            return KycSelfieVerifyResponse(verified=False, message="Session mismatch. Please start the selfie step again.", user_id=req.user_id)
-        expires_at = challenge.get("expires_at")
-        if expires_at and expires_at < datetime.utcnow():
-            await challenges_col.delete_one({"challenge_id": req.challenge_id})
-            return KycSelfieVerifyResponse(verified=False, message="Your session timed out. Please capture a new selfie.", user_id=req.user_id)
-
-        await challenges_col.delete_one({"challenge_id": req.challenge_id})
 
         img = resize_if_needed(decode_base64_image(req.selfie_image_base64))
 

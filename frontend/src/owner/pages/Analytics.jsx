@@ -7,7 +7,7 @@ export default function Analytics() {
   const [earningsTrend, setEarningsTrend] = useState([]);
   const [bookingTrend, setBookingTrend] = useState([]);
   const [topVehicles, setTopVehicles] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -42,6 +42,8 @@ export default function Analytics() {
     };
   }, [earningsTrend, bookingTrend]);
 
+  if (loading) return null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,7 +60,6 @@ export default function Analytics() {
         <Metric title="Utilization" value={`${metrics.utilization}%`} />
       </div>
 
-      {loading && <p className="text-sm text-gray-600">Loading analytics...</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

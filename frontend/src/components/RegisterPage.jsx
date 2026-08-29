@@ -10,19 +10,20 @@ import {
   getMimeFromDataUrl,
   startCamera,
   stopCamera,
-  captureFramesFromStream,
+  captureBase64FromStream,
+  validateDocumentImageFile,
 } from "../utils/cameraKyc";
 
 import {
   preRegisterIdFace,
-  preSelfieChallenge,
   preSelfieVerify,
   getPreKycSessionToken,
+  getPreKycStatus,
 } from "../utils/kycApi";
 
 import {
   Mail, Phone, User, Loader, Upload, CheckCircle2,
-  ArrowLeft, ArrowRight, ShieldCheck, Car, Check, Calendar, MapPin, ChevronDown,
+  ArrowLeft, ArrowRight, ShieldCheck, Car, Check, Calendar, MapPin,
 } from "lucide-react";
 
 import FormInput from "./FormInput";
@@ -39,6 +40,14 @@ const ACTION_COOLDOWN_MS = 2000;
 const RATE_LIMIT_FALLBACK_SECONDS = 5 * 60;
 const REGISTER_RATE_LIMIT_STORAGE_KEY = "rentifypro.registerRateLimitUntil";
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
+const formatDocumentStatus = (status) => ({
+  queued: "Queued",
+  processing: "Screening",
+  retry_wait: "Retrying",
+  pending_review: "Awaiting Super Admin",
+  verified: "Approved",
+  rejected: "Resubmission Required",
+}[status] || "Not uploaded");
 const normalizePhMobileInput = (value = "") => {
   const digits = String(value || "").replace(/\D/g, "");
   if (!digits) return "";
@@ -120,13 +129,13 @@ export default function RegisterPage({
     idType: "",
     idCardFile: null,
     idRegistered: false,
-    challengeId: "",
     selfieVerified: false,
     selfieDataUrl: "",
     selfieBase64Clean: "",
   });
 
   const [kycUi, setKycUi] = useState({ showCamera: false, statusText: "" });
+  const [documentReviewStatus, setDocumentReviewStatus] = useState("not_uploaded");
 
   // Camera state
   const videoRef = useRef(null);
@@ -440,7 +449,6 @@ export default function RegisterPage({
       setKyc((prev) => ({
         ...prev,
         idRegistered: false,
-        challengeId: "",
         selfieVerified: false,
         selfieDataUrl: "",
         selfieBase64Clean: "",
@@ -539,7 +547,7 @@ export default function RegisterPage({
   };
 
   const handleAccountSelect = (type) => {
-    if (type === "renter") {
+    if (type === "owner") {
       if (typeof onNavigateToOwnerRegister === "function") onNavigateToOwnerRegister();
       return;
     }
@@ -551,10 +559,11 @@ export default function RegisterPage({
   const resetKyc = useCallback(() => {
     setKyc({
       idType: "",
-      idCardFile: null, idRegistered: false, challengeId: "",
+      idCardFile: null, idRegistered: false,
       selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "",
     });
     setKycUi((p) => ({ ...p, statusText: "" }));
+    setDocumentReviewStatus("not_uploaded");
     setStepErrors({});
     setCamError(""); setCamInfo("");
   }, []);
@@ -754,6 +763,7 @@ export default function RegisterPage({
     setIsLoading(true);
     setKycUi((p) => ({ ...p, statusText: "Registering ID face..." }));
     try {
+      await validateDocumentImageFile(kyc.idCardFile);
       const dataUrl = await fileToBase64(kyc.idCardFile);
       const clean = stripDataUrlPrefix(dataUrl);
       const mime = getMimeFromDataUrl(dataUrl);
@@ -772,11 +782,11 @@ export default function RegisterPage({
       setKyc((prev) => ({
         ...prev,
         idRegistered: true,
-        challengeId: "",
         selfieVerified: false,
         selfieDataUrl: "",
         selfieBase64Clean: "",
       }));
+      setDocumentReviewStatus("queued");
       setStepErrors((p) => ({ ...p, idType: "", idRegistered: "" }));
       setKycUi((p) => ({ ...p, statusText: "ID registered. Open camera to capture your selfie." }));
     } catch (e) {
@@ -787,6 +797,23 @@ export default function RegisterPage({
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!kyc.idRegistered || !form.email) return undefined;
+    let cancelled = false;
+    const refreshStatus = async () => {
+      try {
+        const payload = await getPreKycStatus(form.email, "user");
+        const idDocument = payload?.documents?.find((document) => document.docType === "id");
+        if (!cancelled && idDocument?.status) setDocumentReviewStatus(idDocument.status);
+      } catch {
+        // Registration remains usable if a background status refresh is temporarily unavailable.
+      }
+    };
+    void refreshStatus();
+    const timer = window.setInterval(() => void refreshStatus(), 10_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [form.email, kyc.idRegistered]);
 
   // KYC step 2: capture selfie
 
@@ -799,26 +826,15 @@ export default function RegisterPage({
     setIsLoading(true);
     setKycUi((p) => ({ ...p, statusText: "Capturing selfie..." }));
     try {
-      const frames = await captureFramesFromStream(cameraStream, { count: 3, intervalMs: 220 });
-      if (!frames.length) throw new Error("Failed to capture selfie.");
-      const cleanFrames = frames.map(stripDataUrlPrefix);
-      const lastDataUrl = frames[frames.length - 1];
-      const lastClean = cleanFrames[cleanFrames.length - 1];
+      const dataUrl = await captureBase64FromStream(cameraStream);
+      if (!dataUrl) throw new Error("Failed to capture selfie.");
+      const clean = stripDataUrlPrefix(dataUrl);
 
-      setKyc((prev) => ({ ...prev, selfieDataUrl: lastDataUrl, selfieBase64Clean: lastClean }));
-
-      setKycUi((p) => ({ ...p, statusText: "Checking selfie motion... please blink or move slightly." }));
-      const result = await preSelfieChallenge(form.email, cleanFrames);
-
-      if (!result.passed) {
-        throw new Error(result.message || "Selfie check failed. Please try again.");
-      }
-
-      setKyc((prev) => ({ ...prev, challengeId: result.challenge_id }));
+      setKyc((prev) => ({ ...prev, selfieDataUrl: dataUrl, selfieBase64Clean: clean }));
       setStepErrors((p) => ({ ...p, selfieVerified: "" }));
       setKycUi((p) => ({ ...p, statusText: "Selfie captured. Click Verify to match with your ID." }));
     } catch (e) {
-      setKyc((prev) => ({ ...prev, selfieDataUrl: "", selfieBase64Clean: "", challengeId: "" }));
+      setKyc((prev) => ({ ...prev, selfieDataUrl: "", selfieBase64Clean: "" }));
       const msg = friendlyError(e.message);
       setStepErrors((p) => ({ ...p, selfieVerified: msg }));
       setKycUi((p) => ({ ...p, statusText: "" }));
@@ -831,14 +847,14 @@ export default function RegisterPage({
 
   const verifySelfie = async () => {
     if (!canAct()) return;
-    if (!kyc.challengeId || !kyc.selfieBase64Clean) {
+    if (!kyc.selfieBase64Clean) {
       setStepErrors((p) => ({ ...p, selfieVerified: "Capture a selfie first." }));
       return;
     }
     setIsLoading(true);
     setKycUi((p) => ({ ...p, statusText: "Verifying face match..." }));
     try {
-      const result = await preSelfieVerify(form.email, kyc.challengeId, kyc.selfieBase64Clean, "user");
+      const result = await preSelfieVerify(form.email, kyc.selfieBase64Clean, "user");
       if (!result.verified) throw new Error(result.message || "Face does not match ID.");
       setKyc((prev) => ({ ...prev, selfieVerified: true }));
       setStepErrors((p) => ({ ...p, selfieVerified: "" }));
@@ -1039,7 +1055,7 @@ export default function RegisterPage({
           onChange={(event) => onChange(event.target.value)}
           onBlur={onBlur}
           disabled={disabled}
-          className={`w-full appearance-none rounded-xl border bg-white px-4 py-3 pr-12 text-[15px] text-slate-900 shadow-sm transition-all duration-200 focus:outline-none ${
+          className={`w-full rounded-xl border bg-white px-4 py-3 text-[15px] text-slate-900 shadow-sm transition-all duration-200 focus:outline-none ${
             error
               ? "border-red-300 bg-red-50/80 focus:border-red-400 focus:ring-4 focus:ring-red-100"
               : "border-slate-200 hover:border-slate-300 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
@@ -1052,13 +1068,6 @@ export default function RegisterPage({
             </option>
           ))}
         </select>
-        <div
-          className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-lg border p-1.5 ${
-            error ? "border-red-200 bg-red-50 text-red-500" : "border-slate-200 bg-slate-50 text-[#017FE6]"
-          }`}
-        >
-          <ChevronDown size={16} />
-        </div>
       </div>
       {error && <p className="text-sm font-medium text-red-500">{error}</p>}
     </div>
@@ -1144,11 +1153,11 @@ export default function RegisterPage({
                           <User size={18} className="text-gray-600" />
                           <div className="text-left"><p className="font-semibold text-gray-800 text-sm">User</p><p className="text-xs text-gray-500">Rent vehicles</p></div>
                         </button>
-                        <button type="button" onClick={() => handleAccountSelect("renter")}
+                        <button type="button" onClick={() => handleAccountSelect("owner")}
                           className="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 hover:border-[#017FE6] transition">
                           <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center shrink-0" />
                           <Car size={18} className="text-gray-600" />
-                          <div className="text-left"><p className="font-semibold text-gray-800 text-sm">Owner</p><p className="text-xs text-gray-500">List vehicles</p></div>
+                          <div className="text-left"><p className="font-semibold text-gray-800 text-sm">Vehicle Owner</p><p className="text-xs text-gray-500">List vehicles after verification</p></div>
                         </button>
                       </div>
                     </div>
@@ -1329,7 +1338,6 @@ export default function RegisterPage({
                           ...prev,
                           idType: value,
                           idRegistered: false,
-                          challengeId: "",
                           selfieVerified: false,
                           selfieDataUrl: "",
                           selfieBase64Clean: "",
@@ -1357,14 +1365,21 @@ export default function RegisterPage({
                         title="Government ID (Front — full card)"
                         description="Upload a clear photo of a Philippine government ID showing the entire card with readable text and no cropped edges."
                       file={kyc.idCardFile}
-                      onPick={(f) => {
-                        setKyc((prev) => ({ ...prev, idCardFile: f, idRegistered: false, challengeId: "", selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "" }));
+                      onPick={async (f) => {
+                        try {
+                          await validateDocumentImageFile(f);
+                        } catch (validationError) {
+                          setStepErrors((prev) => ({ ...prev, idCardFile: validationError.message || "Please choose a valid ID image." }));
+                          if (idInputRef.current) idInputRef.current.value = "";
+                          return;
+                        }
+                        setKyc((prev) => ({ ...prev, idCardFile: f, idRegistered: false, selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "" }));
                         setKycUi((p) => ({ ...p, statusText: "" }));
                         setStepErrors({});
                         setCamError(""); setCamInfo(""); closeCamera();
                       }}
                       onRemove={() => { resetKyc(); closeCamera(); }}
-                      accept="image/*" inputRef={idInputRef} icon={Upload}
+                      accept="image/jpeg,image/png" inputRef={idInputRef} icon={Upload}
                       error={stepErrors.idCardFile}
                     />
 
@@ -1394,7 +1409,7 @@ export default function RegisterPage({
                             : kyc.selfieBase64Clean ? <><Check size={15} strokeWidth={3} aria-hidden="true" /> Retake Selfie</> : "3. Capture Selfie"}
                         </button>
 
-                        <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || !kyc.challengeId || kyc.selfieVerified} onClick={verifySelfie}
+                        <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || kyc.selfieVerified} onClick={verifySelfie}
                           className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${
                             kyc.selfieVerified ? "bg-green-500 text-white cursor-default" : "bg-green-600 text-white hover:opacity-95"
                           } disabled:opacity-50`}>
@@ -1460,7 +1475,8 @@ export default function RegisterPage({
                         { label: "Phone", value: form.phone || "—" },
                         { label: "ID Type", value: kyc.idType || "—" },
                         { label: "Account Type", value: "User (Renter)" },
-                        { label: "KYC Verified", value: kyc.selfieVerified ? "Verified" : "Not Verified", highlight: kyc.selfieVerified },
+                        { label: "Face Match", value: kyc.selfieVerified ? "Verified" : "Not Verified", highlight: kyc.selfieVerified },
+                        { label: "Document Review", value: formatDocumentStatus(documentReviewStatus), highlight: documentReviewStatus === "verified" },
                       ].map(({ label, value, highlight }, i, arr) => (
                         <React.Fragment key={label}>
                           <div className="flex items-center justify-between">

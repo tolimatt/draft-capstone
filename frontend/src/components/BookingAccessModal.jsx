@@ -1,5 +1,6 @@
 import React from "react";
 import { Car, LogIn, UserPlus, X } from "lucide-react";
+import ModalPortal from "./ModalPortal";
 
 export default function BookingAccessModal({
   isOpen,
@@ -11,8 +12,9 @@ export default function BookingAccessModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4 py-6">
-      <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-[2px]" onClick={onClose} />
+    <ModalPortal>
+    <div className="rp-modal-layer">
+      <button type="button" className="rp-modal-backdrop" onClick={onClose} aria-label="Close booking access dialog" />
 
       <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
         <div className="px-6 pt-5 pb-4 sm:px-7 border-b border-slate-200 bg-gradient-to-r from-[#0B75E7]/10 via-white to-white">
@@ -55,6 +57,7 @@ export default function BookingAccessModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 

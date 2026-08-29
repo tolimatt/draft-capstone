@@ -30,6 +30,25 @@ function normalizeChatContext(context = "") {
   };
 }
 
+function normalizeReportMedia(payload = {}) {
+  return {
+    ...payload,
+    reports: Array.isArray(payload?.reports)
+      ? payload.reports.map((report) => ({
+          ...report,
+          evidence: Array.isArray(report?.evidence)
+            ? report.evidence.map((item) => ({
+                ...item,
+                url: item.url && !/^https?:\/\//i.test(item.url)
+                  ? `${String(API_BASE_URL || "/api").replace(/\/$/, "")}${String(item.url).replace(/^\/api/, "")}`
+                  : item.url,
+              }))
+            : [],
+        }))
+      : [],
+  };
+}
+
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
   const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -63,10 +82,10 @@ async function request(endpoint, options = {}) {
       }
     }
 
-    if (
-      response.status === 401 ||
-      (response.status === 403 && /verify your email|verification is required/i.test(msg))
-    ) {
+    // A 403 means the current session is authenticated but is not allowed to
+    // perform this particular action (for example, KYC is still required).
+    // Only authentication failures should tear down the client session.
+    if (response.status === 401 || data.code === "EMAIL_VERIFICATION_REQUIRED") {
       localStorage.removeItem("token");
       sessionStorage.removeItem("token");
       clearSessionOwnerProfile();
@@ -118,20 +137,21 @@ const API = {
   resetPassword: (body) => request("/auth/reset-password", { method: "POST", body: JSON.stringify(body) }),
 
   kycRegisterFace: (body) => request("/kyc/id-register", { method: "POST", body: JSON.stringify(body) }),
-  kycBlinkChallenge: (body) => request("/kyc/selfie/challenge", { method: "POST", body: JSON.stringify(body) }),
   kycVerifySelfie: (body) => request("/kyc/selfie/verify", { method: "POST", body: JSON.stringify(body) }),
   kycGetStatus: () => request("/kyc/me"),
 
-  getPublicVehicles: (params = {}) => request(`/vehicles${buildQueryString(params)}`),
-  getPublicVehicleById: (id) => request(`/vehicles/${encodeURIComponent(id)}`),
+  getPublicVehicles: (params = {}) =>
+    request(`/vehicles${buildQueryString(params)}`, { cache: "no-store" }),
+  getPublicVehicleById: (id) =>
+    request(`/vehicles/${encodeURIComponent(id)}`, { cache: "no-store" }),
   getOwnerVehicles: () => request("/owner/vehicles"),
   createOwnerVehicle: (formData) => request("/owner/vehicles", { method: "POST", body: formData }),
   updateOwnerVehicle: (id, formData) => request(`/owner/vehicles/${id}`, { method: "PUT", body: formData }),
   deleteOwnerVehicle: (id) => request(`/owner/vehicles/${id}`, { method: "DELETE" }),
-  setOwnerVehicleAvailability: (id, availabilityStatus) =>
+  setOwnerVehicleAvailability: (id, availabilityStatus, availabilityHoldReason) =>
     request(`/owner/vehicles/${id}/availability`, {
       method: "PATCH",
-      body: JSON.stringify({ availabilityStatus }),
+      body: JSON.stringify({ availabilityStatus, availabilityHoldReason }),
     }),
 
   createBooking: (body) => request("/bookings", { method: "POST", body: JSON.stringify(body) }),
@@ -161,10 +181,6 @@ const API = {
       method: "POST",
       body: JSON.stringify(checkoutId ? { checkoutId } : {}),
     }),
-  recordBookingOnBlockchain: (id) =>
-    request(`/bookings/${id}/blockchain-record`, {
-      method: "POST",
-    }),
   requestBookingExtension: (id, body = {}) =>
     request(`/bookings/${id}/extension-request`, {
       method: "POST",
@@ -175,6 +191,10 @@ const API = {
       method: "POST",
       body: JSON.stringify(body || {}),
     }),
+  requestBookingReturn: (id) =>
+    request(`/bookings/${id}/return-request`, {
+      method: "POST",
+    }),
   cancelBooking: (id) => request(`/bookings/${id}/cancel`, { method: "PATCH" }),
   reviewBooking: (id, body) => request(`/bookings/${id}/review`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -182,6 +202,15 @@ const API = {
     request(`/owner/bookings/${id}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    }),
+  confirmOwnerVehicleReturn: (id) =>
+    request(`/owner/bookings/${id}/confirm-return`, {
+      method: "POST",
+    }),
+  reviewOwnerVehicleReturnRequest: (id, action, body = {}) =>
+    request(`/owner/bookings/${id}/return-request`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...body }),
     }),
   updateOwnerBookingPaymentStatus: (id, paymentStatus) =>
     request(`/owner/bookings/${id}/payment-status`, {
@@ -212,6 +241,24 @@ const API = {
   getOwnerReviews: () => request("/owner/reviews"),
   getOwnerEarnings: () => request("/owner/earnings"),
   getOwnerAnalytics: () => request("/owner/analytics"),
+
+  getAdminTransactions: (params = {}) => request(`/admin/transactions${buildQueryString(params)}`),
+
+  createReport: (formData) => request("/reports", { method: "POST", body: formData }),
+  reportChatMessage: (messageId, category) =>
+    request(`/reports/messages/${encodeURIComponent(messageId)}`, {
+      method: "POST",
+      body: JSON.stringify({ category }),
+    }),
+  getMyReports: () => request("/reports/mine").then(normalizeReportMedia),
+  getReport: (id) => request(`/reports/${encodeURIComponent(id)}`),
+  appealReport: (id, statement) =>
+    request(`/reports/${encodeURIComponent(id)}/appeal`, {
+      method: "POST",
+      body: JSON.stringify({ statement }),
+    }),
+  addReportInformation: (id, formData) =>
+    request(`/reports/${encodeURIComponent(id)}/information`, { method: "POST", body: formData }),
 
   getConversations: () => request("/chat/conversations"),
   getOwnerRenterThreads: () => request("/chat/owner/renters"),

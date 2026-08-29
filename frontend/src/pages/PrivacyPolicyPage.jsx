@@ -23,6 +23,7 @@ export default function PrivacyPolicyPage({
   onNavigateToChat,
   onNavigateToNotifications,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   onNavigateToTermsAndConditions,
   isLoggedIn,
   user,
@@ -44,6 +45,7 @@ export default function PrivacyPolicyPage({
         onNavigateToChat={onNavigateToChat}
         onNavigateToNotifications={onNavigateToNotifications}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         onLogout={onLogout}
       />
 

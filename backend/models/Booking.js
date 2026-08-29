@@ -87,7 +87,7 @@ const bookingSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-    blockchainGasFee: {
+    transactionFee: {
       type: Number,
       default: 0,
       min: 0,
@@ -105,6 +105,50 @@ const bookingSchema = new mongoose.Schema(
     actualReturnAt: {
       type: Date,
       default: null,
+    },
+    returnStatus: {
+      type: String,
+      enum: ["none", "requested", "confirmed", "declined"],
+      default: "none",
+      index: true,
+    },
+    returnRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    returnRequestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    returnConfirmedAt: {
+      type: Date,
+      default: null,
+    },
+    returnConfirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    returnReviewedAt: {
+      type: Date,
+      default: null,
+    },
+    returnReviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    returnReviewAction: {
+      type: String,
+      enum: ["", "confirm", "decline"],
+      default: "",
+    },
+    returnReviewNote: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
     },
     lateReturnIsOverdue: {
       type: Boolean,
@@ -126,7 +170,7 @@ const bookingSchema = new mongoose.Schema(
     },
     lateReturnAction: {
       type: String,
-      enum: ["none", "extend_requested", "proceed_late_return"],
+      enum: ["none", "extend_requested", "proceed_late_return", "return_confirmed"],
       default: "none",
     },
     lateReturnResolvedAt: {
@@ -370,76 +414,6 @@ const bookingSchema = new mongoose.Schema(
     reviewCreatedAt: {
       type: Date,
     },
-    blockchainTxHash: {
-      type: String,
-      trim: true,
-      default: null,
-      index: true,
-      sparse: true,
-    },
-    blockchainRecordedAt: {
-      type: Date,
-      default: null,
-    },
-    blockchain: {
-      network: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-      chainId: {
-        type: Number,
-        default: null,
-      },
-      contractAddress: {
-        type: String,
-        trim: true,
-        lowercase: true,
-        default: null,
-      },
-      version: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-      bookingKey: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-      bookingHash: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-      renterIdHash: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-      ownerId: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-      amountInCents: {
-        type: Number,
-        default: null,
-      },
-      paymentStatus: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-      paymentStatusCode: {
-        type: Number,
-        default: null,
-      },
-      blockNumber: {
-        type: Number,
-        default: null,
-      },
-    },
   },
   { timestamps: true }
 );
@@ -455,6 +429,8 @@ bookingSchema.index({ renter: 1, status: 1, updatedAt: -1 });
 bookingSchema.index({ owner: 1, status: 1, pickupAt: 1 });
 bookingSchema.index({ owner: 1, status: 1, updatedAt: -1 });
 bookingSchema.index({ owner: 1, updatedAt: -1 });
+bookingSchema.index({ paymentStatus: 1, createdAt: -1 });
+bookingSchema.index({ vehicle: 1, status: 1, actualReturnAt: 1 });
 bookingSchema.index(
   { vehicle: 1, status: 1, reviewCreatedAt: -1 },
   { partialFilterExpression: { reviewRating: { $exists: true } } }

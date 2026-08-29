@@ -169,6 +169,12 @@ export const bookingCreateLimiter = createLimiter({
   keyGenerator: keyByUserOrIp,
 });
 
+export const reportCreateLimiter = createLimiter({
+  max: 5,
+  messagePrefix: "Too many report submissions.",
+  keyGenerator: keyByUserOrIp,
+});
+
 // Payment verify limit
 export const paymentVerifyLimiter = createLimiter({
   max: 20,

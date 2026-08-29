@@ -178,11 +178,11 @@ const handleBookingOverdue = async (payload = {}) => {
       priority: "urgent",
       title: "Late return detected",
       message:
-        "Your booking is overdue. You can extend the rental or proceed with late return from your booking card.",
+        "Your booking is overdue. Request an extension or start the vehicle-return process from your booking card.",
       entityType: "booking",
       entityId: getBookingId(payload),
       dedupeKey: notificationKey(getRenterId(payload), NOTIFICATION_EVENTS.BOOKING_OVERDUE, getBookingId(payload)),
-      data: { ...data, actions: ["extend_rental", "proceed_late_return"] },
+      data: { ...data, actions: ["extend_rental", "request_vehicle_return"] },
     },
     {
       user: getOwnerId(payload),
@@ -280,6 +280,108 @@ const handleLateReturnProcessed = async (payload = {}) => {
       entityId: getBookingId(payload),
       dedupeKey: notificationKey(getRenterId(payload), NOTIFICATION_EVENTS.LATE_RETURN_PROCESSED, getBookingId(payload)),
       data,
+    },
+  ]);
+};
+
+const handleVehicleReturnRequested = async (payload = {}) => {
+  const actorName = displayName(payload.actor || payload.renter, "A renter");
+  const occurrence = toOptionalText(getBooking(payload).returnRequestedAt);
+  await sendBookingNotification(
+    payload,
+    getOwnerId(payload),
+    NOTIFICATION_EVENTS.VEHICLE_RETURN_REQUESTED,
+    {
+      title: "Vehicle return requested",
+      message: `${actorName} reported that the vehicle is ready to be returned. Confirm only after receiving it.`,
+      dedupeSuffix: occurrence,
+      data: bookingData(payload, {
+        status: payload.status || getBooking(payload).status,
+        returnStatus: "requested",
+        returnRequestedAt: getBooking(payload).returnRequestedAt,
+      }),
+    }
+  );
+};
+
+const handleVehicleReturnConfirmed = async (payload = {}) => {
+  const overdueMinutes = Number(payload.overdueMinutes || 0);
+  const lateReturnPenaltyFee = Number(payload.lateReturnPenaltyFee || 0);
+  const occurrence = toOptionalText(getBooking(payload).returnRequestedAt);
+  await NotificationService.sendMany([
+    {
+      user: getRenterId(payload),
+      type: "booking_status",
+      category: "booking",
+      event: NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED,
+      title: "Vehicle return confirmed",
+      message:
+        lateReturnPenaltyFee > 0
+          ? "The owner confirmed receipt of the vehicle and the final late-return fee was added."
+          : "The owner confirmed receipt of the vehicle.",
+      entityType: "booking",
+      entityId: getBookingId(payload),
+      dedupeKey: notificationKey(getRenterId(payload), NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED, getBookingId(payload), occurrence),
+      data: bookingData(payload, {
+        status: "completed",
+        returnStatus: "confirmed",
+        actualReturnAt: getBooking(payload).actualReturnAt,
+        overdueMinutes,
+      }),
+    },
+    {
+      user: getOwnerId(payload),
+      type: "booking_status",
+      category: "booking",
+      event: NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED,
+      title: "Vehicle under inspection/maintenance",
+      message: "The return is complete. Inspect or service the vehicle, then mark it available when it is rental-ready.",
+      entityType: "booking",
+      entityId: getBookingId(payload),
+      dedupeKey: notificationKey(getOwnerId(payload), NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED, getBookingId(payload), occurrence),
+      data: bookingData(payload, {
+        status: "completed",
+        returnStatus: "confirmed",
+        actualReturnAt: getBooking(payload).actualReturnAt,
+        overdueMinutes,
+      }),
+    },
+  ]);
+};
+
+const handleVehicleReturnDeclined = async (payload = {}) => {
+  const occurrence = toOptionalText(getBooking(payload).returnRequestedAt);
+  await NotificationService.sendMany([
+    {
+      user: getRenterId(payload),
+      type: "booking_status",
+      category: "booking",
+      event: NOTIFICATION_EVENTS.VEHICLE_RETURN_DECLINED,
+      priority: "important",
+      title: "Vehicle return request declined",
+      message: "The owner has not confirmed receipt of the vehicle. Your booking remains active and you may request return again when the handover is ready.",
+      entityType: "booking",
+      entityId: getBookingId(payload),
+      dedupeKey: notificationKey(getRenterId(payload), NOTIFICATION_EVENTS.VEHICLE_RETURN_DECLINED, getBookingId(payload), occurrence),
+      data: bookingData(payload, {
+        status: getBooking(payload).status,
+        returnStatus: "declined",
+      }),
+    },
+    {
+      user: getOwnerId(payload),
+      type: "booking_status",
+      category: "booking",
+      event: NOTIFICATION_EVENTS.VEHICLE_RETURN_DECLINED,
+      title: "Vehicle return request declined",
+      message: "The return request was declined and the rental remains active.",
+      entityType: "booking",
+      entityId: getBookingId(payload),
+      dedupeKey: notificationKey(getOwnerId(payload), NOTIFICATION_EVENTS.VEHICLE_RETURN_DECLINED, getBookingId(payload), occurrence),
+      data: bookingData(payload, {
+        status: getBooking(payload).status,
+        returnStatus: "declined",
+      }),
     },
   ]);
 };
@@ -477,6 +579,9 @@ export const registerNotificationHandlers = () => {
   subscribe(NOTIFICATION_EVENTS.BOOKING_OVERDUE, handleBookingOverdue);
   subscribe(NOTIFICATION_EVENTS.BOOKING_COMPLETED, handleBookingCompleted);
   subscribe(NOTIFICATION_EVENTS.LATE_RETURN_PROCESSED, handleLateReturnProcessed);
+  subscribe(NOTIFICATION_EVENTS.VEHICLE_RETURN_REQUESTED, handleVehicleReturnRequested);
+  subscribe(NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED, handleVehicleReturnConfirmed);
+  subscribe(NOTIFICATION_EVENTS.VEHICLE_RETURN_DECLINED, handleVehicleReturnDeclined);
 
   subscribe(NOTIFICATION_EVENTS.CANCELLATION_REQUESTED, handleCancellationRequested);
   subscribe(NOTIFICATION_EVENTS.CANCELLATION_APPROVED, handleCancellationApproved);

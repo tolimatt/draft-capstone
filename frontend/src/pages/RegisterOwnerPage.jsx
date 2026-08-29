@@ -5,7 +5,6 @@ import {
   Building2,
   Check,
   CheckCircle2,
-  ChevronDown,
   Eye,
   EyeOff,
   FileText,
@@ -19,16 +18,17 @@ import {
 } from "lucide-react";
 
 import {
-  captureFramesFromStream,
+  captureBase64FromStream,
   fileToBase64,
   getMimeFromDataUrl,
   startCamera,
   stopCamera,
   stripDataUrlPrefix,
+  validateDocumentImageFile,
+  validateSupportingDocumentFile,
 } from "../utils/cameraKyc";
 import {
   preRegisterIdFace,
-  preSelfieChallenge,
   preSelfieVerify,
   preVerifySupportingDocument,
   getPreKycSessionToken,
@@ -91,7 +91,6 @@ const initialKyc = {
   idType: "",
   idCardFile: null,
   idRegistered: false,
-  challengeId: "",
   selfieVerified: false,
   selfieDataUrl: "",
   selfieBase64Clean: "",
@@ -143,7 +142,7 @@ export default function RegisterOwnerPage({
   const [files, setFiles] = useState(initialFiles);
   const [kyc, setKyc] = useState(initialKyc);
   const [supportingDocType, setSupportingDocType] = useState("");
-  const [supportingDocStatus, setSupportingDocStatus] = useState({ verified: false, message: "" });
+  const [supportingDocStatus, setSupportingDocStatus] = useState({ submitted: false, message: "" });
 
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
@@ -469,14 +468,13 @@ export default function RegisterOwnerPage({
         setErrors((prev) => ({ ...prev, confirmPassword: "" }));
       }
       if (["businessEmail", "firstName", "lastName", "businessName", "permitNumber"].includes(name)) {
-        setSupportingDocStatus({ verified: false, message: "" });
+        setSupportingDocStatus({ submitted: false, message: "" });
         setErrors((prev) => ({ ...prev, supportingDocument: "" }));
       }
       if (["businessEmail", "firstName", "lastName"].includes(name)) {
         setKyc((prev) => ({
           ...prev,
           idRegistered: false,
-          challengeId: "",
           selfieVerified: false,
           selfieDataUrl: "",
           selfieBase64Clean: "",
@@ -599,24 +597,35 @@ export default function RegisterOwnerPage({
         permitNumber: "",
         supportingDocument: "",
       }));
-      setSupportingDocStatus({ verified: false, message: "" });
+      setSupportingDocStatus({ submitted: false, message: "" });
     },
     [form]
   );
 
-  const handleFile = useCallback((e) => {
+  const handleFile = useCallback(async (e) => {
     const { name, files: picked } = e.target;
-    setFiles((prev) => ({ ...prev, [name]: picked?.[0] || null }));
+    const file = picked?.[0] || null;
+    if (file) {
+      try {
+        await validateSupportingDocumentFile(file);
+      } catch (validationError) {
+        setFiles((prev) => ({ ...prev, [name]: null }));
+        setErrors((prev) => ({ ...prev, [name]: validationError.message || "Please choose a valid document." }));
+        e.target.value = "";
+        return;
+      }
+    }
+    setFiles((prev) => ({ ...prev, [name]: file }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
     if (name === "supportingDocument") {
-      setSupportingDocStatus({ verified: false, message: "" });
+      setSupportingDocStatus({ submitted: false, message: "" });
     }
   }, []);
 
   const handleSupportingDocTypeChange = useCallback((e) => {
     const value = String(e?.target?.value || "");
     setSupportingDocType(value);
-    setSupportingDocStatus({ verified: false, message: "" });
+    setSupportingDocStatus({ submitted: false, message: "" });
     setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "" }));
   }, []);
 
@@ -626,7 +635,6 @@ export default function RegisterOwnerPage({
       ...prev,
       idType: value,
       idRegistered: false,
-      challengeId: "",
       selfieVerified: false,
       selfieDataUrl: "",
       selfieBase64Clean: "",
@@ -705,7 +713,7 @@ export default function RegisterOwnerPage({
   }, [files.supportingDocument, supportingDocType]);
 
   const verifySupportingDoc = async () => {
-    if (supportingDocStatus.verified) return true;
+    if (supportingDocStatus.submitted) return true;
     if (!supportingDocType) {
       setErrors((prev) => ({ ...prev, supportingDocType: "Please select a document type." }));
       return false;
@@ -731,6 +739,7 @@ export default function RegisterOwnerPage({
     setSuccessMessage("");
     setFormError("");
     try {
+      await validateSupportingDocumentFile(files.supportingDocument);
       const dataUrl = await fileToBase64(files.supportingDocument);
       const clean = stripDataUrlPrefix(dataUrl);
       const mime = getMimeFromDataUrl(dataUrl);
@@ -749,13 +758,15 @@ export default function RegisterOwnerPage({
       if (!result.success) throw new Error(result.message || "Supporting document verification failed.");
 
       setSupportingDocStatus({
-        verified: true,
-        message: result.message || "Supporting document verified.",
+        submitted: true,
+        message:
+          result.message ||
+          "Supporting document queued for automated screening and Super Admin review.",
       });
       setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "" }));
       return true;
     } catch (error) {
-      setSupportingDocStatus({ verified: false, message: "" });
+      setSupportingDocStatus({ submitted: false, message: "" });
       setErrors((prev) => ({
         ...prev,
         supportingDocument: error?.message || "Supporting document verification failed.",
@@ -813,6 +824,7 @@ export default function RegisterOwnerPage({
     setKycUi((prev) => ({ ...prev, statusText: "Registering ID face..." }));
 
     try {
+      await validateDocumentImageFile(kyc.idCardFile);
       const dataUrl = await fileToBase64(kyc.idCardFile);
       const clean = stripDataUrlPrefix(dataUrl);
       const mime = getMimeFromDataUrl(dataUrl);
@@ -833,7 +845,6 @@ export default function RegisterOwnerPage({
       setKyc((prev) => ({
         ...prev,
         idRegistered: true,
-        challengeId: "",
         selfieVerified: false,
         selfieDataUrl: "",
         selfieBase64Clean: "",
@@ -919,23 +930,15 @@ export default function RegisterOwnerPage({
     setKycUi((prev) => ({ ...prev, statusText: "Capturing selfie..." }));
 
     try {
-      const frames = await captureFramesFromStream(cameraStream, { count: 3, intervalMs: 220 });
-      if (!frames.length) throw new Error("Failed to capture selfie.");
-      const cleanFrames = frames.map(stripDataUrlPrefix);
-      const lastDataUrl = frames[frames.length - 1];
-      const lastClean = cleanFrames[cleanFrames.length - 1];
+      const dataUrl = await captureBase64FromStream(cameraStream);
+      if (!dataUrl) throw new Error("Failed to capture selfie.");
+      const clean = stripDataUrlPrefix(dataUrl);
 
-      setKyc((prev) => ({ ...prev, selfieDataUrl: lastDataUrl, selfieBase64Clean: lastClean }));
-      setKycUi((prev) => ({ ...prev, statusText: "Checking selfie motion... please blink or move slightly." }));
-
-      const result = await preSelfieChallenge(form.businessEmail, cleanFrames, "owner");
-      if (!result.passed) throw new Error(result.message || "Selfie challenge failed.");
-
-      setKyc((prev) => ({ ...prev, challengeId: result.challenge_id }));
+      setKyc((prev) => ({ ...prev, selfieDataUrl: dataUrl, selfieBase64Clean: clean }));
       setStepErrors((prev) => ({ ...prev, selfieVerified: "" }));
       setKycUi((prev) => ({ ...prev, statusText: "Selfie captured. Click Verify to match with your ID." }));
     } catch (error) {
-      setKyc((prev) => ({ ...prev, selfieDataUrl: "", selfieBase64Clean: "", challengeId: "" }));
+      setKyc((prev) => ({ ...prev, selfieDataUrl: "", selfieBase64Clean: "" }));
       setStepErrors((prev) => ({ ...prev, selfieVerified: friendlyError(error.message) }));
       setKycUi((prev) => ({ ...prev, statusText: "" }));
     } finally {
@@ -945,7 +948,7 @@ export default function RegisterOwnerPage({
 
   const verifySelfie = async () => {
     if (!canAct()) return;
-    if (!kyc.challengeId || !kyc.selfieBase64Clean) {
+    if (!kyc.selfieBase64Clean) {
       setStepErrors((prev) => ({ ...prev, selfieVerified: "Capture a selfie first." }));
       return;
     }
@@ -954,7 +957,7 @@ export default function RegisterOwnerPage({
     setKycUi((prev) => ({ ...prev, statusText: "Verifying face match..." }));
 
     try {
-      const result = await preSelfieVerify(form.businessEmail, kyc.challengeId, kyc.selfieBase64Clean, "owner");
+      const result = await preSelfieVerify(form.businessEmail, kyc.selfieBase64Clean, "owner");
       if (!result.verified) throw new Error(result.message || "Face does not match ID.");
       setKyc((prev) => ({ ...prev, selfieVerified: true }));
       setStepErrors((prev) => ({ ...prev, selfieVerified: "" }));
@@ -1405,8 +1408,8 @@ export default function RegisterOwnerPage({
                 file={files.supportingDocument}
                 disabled={isLoading}
               />
-              {supportingDocStatus.verified && !errors.supportingDocument && (
-                <p className="text-xs text-emerald-600">{supportingDocStatus.message}</p>
+              {supportingDocStatus.submitted && !errors.supportingDocument && (
+                <p className="text-xs font-medium text-amber-700">{supportingDocStatus.message}</p>
               )}
             </>
           )}
@@ -1442,12 +1445,19 @@ export default function RegisterOwnerPage({
                   <input
                     ref={idInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png"
                     className="hidden"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
-                      setKyc((prev) => ({ ...prev, idCardFile: file, idRegistered: false, challengeId: "", selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "" }));
+                      try {
+                        await validateDocumentImageFile(file);
+                      } catch (validationError) {
+                        setStepErrors((prev) => ({ ...prev, idCardFile: validationError.message || "Please choose a valid ID image." }));
+                        e.target.value = "";
+                        return;
+                      }
+                      setKyc((prev) => ({ ...prev, idCardFile: file, idRegistered: false, selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "" }));
                       setKycUi((prev) => ({ ...prev, statusText: "" }));
                       setStepErrors({});
                       setCamError("");
@@ -1496,7 +1506,7 @@ export default function RegisterOwnerPage({
                   <button type="button" disabled={isLoading || !cameraStream || !kyc.idRegistered} onClick={captureSelfie} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.selfieBase64Clean ? "bg-blue-500 text-white" : "bg-gray-700 text-white hover:opacity-95"} disabled:opacity-50`}>
                     {isLoading && !kyc.selfieBase64Clean ? <><Loader size={15} className="animate-spin" /> Capturing...</> : kyc.selfieBase64Clean ? "3. Retake Selfie" : "3. Capture Selfie"}
                   </button>
-                  <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || !kyc.challengeId || kyc.selfieVerified} onClick={verifySelfie} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.selfieVerified ? "bg-green-500 text-white cursor-default" : "bg-green-600 text-white hover:opacity-95"} disabled:opacity-50`}>
+                  <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || kyc.selfieVerified} onClick={verifySelfie} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.selfieVerified ? "bg-green-500 text-white cursor-default" : "bg-green-600 text-white hover:opacity-95"} disabled:opacity-50`}>
                     {isLoading && !kyc.selfieVerified ? <><Loader size={15} className="animate-spin" /> Verifying...</> : kyc.selfieVerified ? "Face Verified" : "4. Verify Face Match"}
                   </button>
                 </div>
@@ -1708,7 +1718,7 @@ function SelectField({
           onChange={onChange}
           onBlur={onBlur}
           disabled={disabled}
-          className={`w-full h-11 appearance-none rounded-xl border px-4 pr-10 text-sm outline-none shadow-sm transition ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white text-gray-900"}`}
+          className={`w-full h-11 rounded-xl border px-4 text-sm outline-none shadow-sm transition ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white text-gray-900"}`}
         >
           <option value="">{fallbackPlaceholder}</option>
           {options.map((option) => (
@@ -1717,7 +1727,6 @@ function SelectField({
             </option>
           ))}
         </select>
-        <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500" />
       </div>
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
@@ -1804,7 +1813,7 @@ function FileInput({ label, helper, name, onChange, error, file, disabled = fals
         <span className={`text-sm truncate min-w-0 ${disabled ? "text-gray-400" : "text-gray-600"}`}>{file ? file.name : "No file selected"}</span>
         <label className={`inline-flex items-center gap-2 text-sm font-semibold flex-shrink-0 ${disabled ? "text-gray-400 cursor-not-allowed" : "text-[#017FE6] cursor-pointer hover:underline"}`}>
           <Upload size={16} /> Choose
-          <input type="file" name={name} accept="image/*,.pdf" onChange={onChange} disabled={disabled} className="hidden" />
+          <input type="file" name={name} accept="image/jpeg,image/png,application/pdf" onChange={onChange} disabled={disabled} className="hidden" />
         </label>
       </div>
       {error && <p className="text-xs text-red-500">{error}</p>}

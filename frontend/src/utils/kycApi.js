@@ -84,6 +84,23 @@ async function postPreKyc(path, email, role, body) {
   }
 }
 
+export async function getPreKycStatus(email, role = "user") {
+  const normalizedRole = normalizeRole(role);
+  const token = await getPreKycSessionToken(email, normalizedRole);
+  const res = await fetch(`${API_BASE_URL}/kyc/pre/status`, {
+    method: "GET",
+    headers: { "x-pre-kyc-token": token },
+    credentials: "include",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const error = new Error(data.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+  return data;
+}
+
 // Step 1: save the ID face
 export async function preRegisterIdFace(
   email,
@@ -105,19 +122,10 @@ export async function preRegisterIdFace(
   });
 }
 
-// Step 2: run the blink check
-export async function preSelfieChallenge(email, framesBase64, role = "user") {
-  return postPreKyc("/kyc/pre/selfie/challenge", email, role, {
-    email,
-    frames_base64: framesBase64,
-  });
-}
-
-// Step 3: match the selfie with the ID
-export async function preSelfieVerify(email, challengeId, selfieImageBase64, role) {
+// Step 2: match one captured selfie with the ID
+export async function preSelfieVerify(email, selfieImageBase64, role) {
   return postPreKyc("/kyc/pre/selfie/verify", email, role, {
     email,
-    challenge_id: challengeId,
     selfie_image_base64: selfieImageBase64,
     role,
   });

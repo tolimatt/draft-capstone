@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import API from "../utils/api";
 import { requestLiveCountersRefresh } from "../utils/liveCounters";
 import { getSocket } from "../utils/socket";
+import ModalPortal from "./ModalPortal";
 
 const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
 const TWO_DAYS_IN_MS = 2 * ONE_DAY_IN_MS;
@@ -41,7 +42,7 @@ export default function RenterNotificationsModal({
   onViewAllNotifications,
 }) {
   const [dailyNotifications, setDailyNotifications] = useState([]);
-  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
   const [notificationsUpdating, setNotificationsUpdating] = useState(false);
   const [notificationsError, setNotificationsError] = useState("");
 
@@ -136,10 +137,9 @@ export default function RenterNotificationsModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[75] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center p-4"
-      onClick={onClose}
-    >
+    <ModalPortal lockScroll={false}>
+    <div className="rp-modal-layer">
+      <button type="button" className="rp-modal-backdrop" onClick={onClose} aria-label="Close notifications dialog" />
       <div
         className="relative w-full max-w-2xl bg-white border border-slate-200 rounded-2xl shadow-[0_25px_80px_rgba(15,23,42,0.25)] overflow-hidden"
         onClick={(event) => event.stopPropagation()}
@@ -162,15 +162,13 @@ export default function RenterNotificationsModal({
 
         <div className="px-5 py-4 max-h-[55vh] overflow-y-auto">
           {notificationsError && <p className="text-sm text-rose-600 mb-3">{notificationsError}</p>}
-          {notificationsLoading && <p className="text-sm text-slate-600">Loading notifications...</p>}
-
           {!notificationsLoading && !notificationsError && dailyNotifications.length === 0 && (
             <p className="text-sm text-slate-600">
               No notifications in the last 24 hours or unread notifications from the last 2 days.
             </p>
           )}
 
-          <div className="space-y-3">
+          {!notificationsLoading && <div className="space-y-3">
             {dailyNotifications.map((notification) => {
               const isUnread = !isNotificationRead(notification);
               return (
@@ -197,7 +195,7 @@ export default function RenterNotificationsModal({
                 </article>
               );
             })}
-          </div>
+          </div>}
         </div>
 
         <div className="px-5 py-4 border-t border-slate-200 flex items-center justify-end gap-2">
@@ -214,5 +212,6 @@ export default function RenterNotificationsModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

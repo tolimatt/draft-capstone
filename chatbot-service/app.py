@@ -75,7 +75,7 @@ FILIPINO_TOKENS = {
     "kasama",
     "kayo",
     "kamusta",
-    "kanila",
+    "kanila",   
     "kapag",
     "katao",
     "kotse",

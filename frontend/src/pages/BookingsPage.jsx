@@ -4,6 +4,7 @@ import {
   CarFront,
   CheckCircle2,
   Clock3,
+  Flag,
   History,
   MapPin,
   MessageCircle,
@@ -32,6 +33,10 @@ import {
   getDurationMinutesBetween,
 } from "../utils/dateUtils";
 import { resolveAssetUrl } from "../utils/media";
+import ReportIssueModal from "../components/ReportIssueModal";
+import MessageReportModal from "../components/MessageReportModal";
+import ChatMessageInput from "../components/ChatMessageInput";
+import ModalPortal from "../components/ModalPortal";
 
 const statusStyles = {
   pending: "bg-amber-100 text-amber-800 border border-amber-200",
@@ -43,14 +48,14 @@ const statusStyles = {
 };
 
 const DOWNPAYMENT_RATE = 0.3;
-const ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
+const CURRENT_BOOKING_STATUSES = ["pending", "confirmed", "extended"];
 const PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
 
 const bookingMatchesView = (booking, view) => {
   const status = String(booking?.status || "").toLowerCase();
-  if (view === "active") return ACTIVE_BOOKING_STATUSES.includes(status);
-  if (view === "past") return PAST_BOOKING_STATUSES.includes(status);
-  if (view === "all") return !["cancelled", "rejected"].includes(status);
+  if (view === "current") return CURRENT_BOOKING_STATUSES.includes(status);
+  if (view === "history") return PAST_BOOKING_STATUSES.includes(status);
+  if (view === "all") return true;
   return status === view;
 };
 
@@ -78,8 +83,8 @@ const getBookingDisplayState = (booking) => {
 };
 
 const renterViewMeta = {
-  active: { label: "Active trips", description: "Your upcoming and current rentals", icon: CalendarDays },
-  past: { label: "Past trips", description: "Completed and cancelled rentals", icon: History },
+  current: { label: "Current bookings", description: "Your pending, upcoming, and active rentals", icon: CalendarDays },
+  history: { label: "Booking history", description: "Your completed, cancelled, and declined rentals", icon: History },
   all: { label: "All bookings", description: "Every reservation in one place", icon: CarFront },
   pending: { label: "Awaiting approval", description: "Reservations waiting on the owner", icon: Clock3 },
   confirmed: { label: "Confirmed trips", description: "Ready for your next drive", icon: CheckCircle2 },
@@ -219,13 +224,23 @@ const getExtensionRequestInfo = (booking) => {
   };
 };
 
+const getReturnRequestInfo = (booking) => {
+  const vehicleReturn = booking?.returnRequest || booking?.return_request || {};
+  return {
+    status: String(vehicleReturn?.status || "none").trim().toLowerCase(),
+    requestedAt: vehicleReturn?.requestedAt || null,
+    confirmedAt: vehicleReturn?.confirmedAt || booking?.actualReturnAt || null,
+    reviewNote: String(vehicleReturn?.reviewNote || "").trim(),
+  };
+};
+
 const getWalkInStatusMessage = (booking) => {
   const status = getWalkInStatus(booking);
   if (status === "requested") {
     return "Walk-in request pending owner approval.";
   }
   if (status === "approved") {
-    return "Walk-in request approved. Settle remaining balance with owner, then wait for owner confirmation.";
+    return "Your walk-in payment request has been approved. Please pay the remaining balance directly to the owner.";
   }
   if (status === "rejected") {
     return "Walk-in request was rejected by owner. You can request again or pay online.";
@@ -250,15 +265,19 @@ export default function BookingsPage({
   onOpenNotificationsModal,
   onNavigateToBookingHistory,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   onLogout,
 }) {
   const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("current");
   const [bookingPage, setBookingPage] = useState({ hasMore: false, nextCursor: null });
   const [loadingMore, setLoadingMore] = useState(false);
   const [reviewDrafts, setReviewDrafts] = useState({});
+  const [reportBooking, setReportBooking] = useState(null);
+  const [reportNotice, setReportNotice] = useState("");
+  const [chatReportMessage, setChatReportMessage] = useState(null);
   const [chatBooking, setChatBooking] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatText, setChatText] = useState("");
@@ -287,7 +306,7 @@ export default function BookingsPage({
     note: "",
   });
   const [extensionSubmitting, setExtensionSubmitting] = useState(false);
-  const [lateReturnSubmittingId, setLateReturnSubmittingId] = useState("");
+  const [returnRequestSubmittingId, setReturnRequestSubmittingId] = useState("");
   const [paymentPreferences, setPaymentPreferences] = useState({
     scope: "downpayment",
     channel: "ewallet",
@@ -302,7 +321,7 @@ export default function BookingsPage({
     try {
       const bookingResponse = await API.getMyBookings({
         view: statusFilter,
-        limit: 25,
+        limit: 10,
         ...(cursor ? { cursor } : {}),
       });
       const normalized = (bookingResponse.bookings || []).map((booking) =>
@@ -523,20 +542,20 @@ export default function BookingsPage({
     }
   };
 
-  const handleProceedLateReturn = async (booking) => {
+  const handleRequestVehicleReturn = async (booking) => {
     if (!booking?._id) return;
     try {
-      setLateReturnSubmittingId(booking._id);
+      setReturnRequestSubmittingId(booking._id);
       setError("");
-      const response = await API.proceedLateReturn(booking._id);
+      const response = await API.requestBookingReturn(booking._id);
       if (response.booking) {
         upsertBooking(response.booking);
       }
-      setPaymentNotice(response.message || "Late return was processed.");
+      setPaymentNotice(response.message || "Vehicle return requested.");
     } catch (err) {
-      setError(err.message || "Failed to process late return.");
+      setError(err.message || "Failed to request vehicle return.");
     } finally {
-      setLateReturnSubmittingId("");
+      setReturnRequestSubmittingId("");
     }
   };
 
@@ -561,15 +580,20 @@ export default function BookingsPage({
   };
 
   const sendChatMessage = async () => {
-    if (!chatBooking?.owner?._id || !chatText.trim()) return;
+    const nextText = chatText.trim();
+    if (!chatBooking?.owner?._id || !nextText) return;
+
+    // Do not let this request clear a newer follow-up draft when it resolves.
+    setChatText("");
+    setChatError("");
     try {
       const response = await API.sendMessageToUser(chatBooking.owner._id, {
-        text: chatText.trim(),
+        text: nextText,
         bookingId: chatBooking._id,
       });
       setChatMessages((prev) => appendUniqueMessage(prev, response.message));
-      setChatText("");
     } catch (err) {
+      setChatText((currentDraft) => currentDraft || nextText);
       setChatError(err.message || "Failed to send message.");
     }
   };
@@ -722,10 +746,13 @@ export default function BookingsPage({
     }
     const isPartial = String(booking.paymentStatus || "").toLowerCase() === "partial";
     const walkInStatus = getWalkInStatus(booking);
-    const hasActiveWalkIn = ["requested", "approved"].includes(walkInStatus);
+    if (isPartial && ["requested", "approved"].includes(walkInStatus)) {
+      setPaymentNotice(getWalkInStatusMessage(booking));
+      return;
+    }
     setPaymentPreferences({
       scope: isPartial ? "full" : "downpayment",
-      channel: isPartial && !hasActiveWalkIn ? "walkin" : "ewallet",
+      channel: isPartial ? "walkin" : "ewallet",
     });
     setPaymentConfirmBooking(booking);
   };
@@ -742,7 +769,9 @@ export default function BookingsPage({
         return;
       }
       if (walkInStatus === "approved") {
-        setPaymentNotice("Walk-in request already approved. Please settle with owner for confirmation.");
+        setPaymentNotice(
+          "Your walk-in payment request has already been approved. Please pay the remaining balance directly to the owner."
+        );
         return;
       }
       if (walkInStatus === "completed") {
@@ -817,18 +846,13 @@ export default function BookingsPage({
           if (paymentCaptured) {
             requestLiveCountersRefresh();
             const paidBooking = response.booking || null;
-            const blockchainWarning = response?.blockchain?.warning || "";
             if (paymentStatus === "partial") {
               const remaining = paidBooking
                 ? moneyWithCents(getPaymentRemainingAmount(paidBooking))
                 : moneyWithCents(0);
               setPaymentNotice(`Downpayment successful. Remaining balance: ${remaining}.`);
-            } else if (paidBooking?.blockchainTxHash) {
-              setPaymentNotice("Payment successful. Booking has been recorded on blockchain.");
-            } else if (blockchainWarning) {
-              setPaymentNotice(`Payment successful. Blockchain recording is pending: ${blockchainWarning}`);
             } else {
-              setPaymentNotice("Payment successful. Blockchain recording is being processed automatically.");
+              setPaymentNotice("Payment successful.");
             }
             return;
           }
@@ -906,6 +930,7 @@ export default function BookingsPage({
           onNavigateToNotifications={onNavigateToNotifications}
           onOpenNotificationsModal={onOpenNotificationsModal}
           onNavigateToAccountSettings={onNavigateToAccountSettings}
+          onNavigateToReports={onNavigateToReports}
           isAIOpen={showAI}
           onShowAI={() => setShowAI(true)}
           onLogout={onLogout}
@@ -971,6 +996,7 @@ export default function BookingsPage({
         onNavigateToNotifications={onNavigateToNotifications}
         onOpenNotificationsModal={onOpenNotificationsModal}
         onNavigateToAccountSettings={onNavigateToAccountSettings}
+        onNavigateToReports={onNavigateToReports}
         isAIOpen={showAI}
         onShowAI={() => setShowAI(true)}
         onLogout={onLogout}
@@ -987,9 +1013,9 @@ export default function BookingsPage({
 
         <div className="flex w-full gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm sm:w-fit">
           {[
-            { id: "all", label: "All Bookings" },
-            { id: "active", label: "Active Bookings" },
-            { id: "pending", label: "Pending Bookings" },
+            { id: "current", label: "Current" },
+            { id: "history", label: "History" },
+            { id: "all", label: "All" },
           ].map((filter) => (
             <button
               key={filter.id}
@@ -1006,9 +1032,9 @@ export default function BookingsPage({
           ))}
         </div>
 
-        {loading && <p className="text-sm text-gray-600">Loading bookings...</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
         {paymentNotice && <p className="text-sm text-emerald-700">{paymentNotice}</p>}
+        {reportNotice && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{reportNotice}</p>}
 
         {!loading && !error && filteredBookings.length === 0 && (
           <div className="rp-minimal-card border-dashed p-10 text-center">
@@ -1018,17 +1044,28 @@ export default function BookingsPage({
           </div>
         )}
 
-        <div className="space-y-4">
+        {!loading && <div className="space-y-4">
           {filteredBookings.map((booking) => {
             const lateReturnInfo = getLateReturnInfo(booking);
             const extensionInfo = getExtensionRequestInfo(booking);
+            const returnRequestInfo = getReturnRequestInfo(booking);
+            const walkInStatus = getWalkInStatus(booking);
             const ownerDisplayName = getOwnerDisplayName(booking);
             const displayState = getBookingDisplayState(booking);
+            const hasActiveWalkInBalanceSettlement =
+              String(booking.paymentStatus || "").toLowerCase() === "partial" &&
+              ["requested", "approved"].includes(walkInStatus);
             const isPaymentEligibleStatus = ["confirmed", "extended", "completed"].includes(
               String(booking.status || "").toLowerCase()
             );
             const canResolveOverdue =
               lateReturnInfo.isOverdue && ["confirmed", "extended"].includes(String(booking.status || "").toLowerCase());
+            const pickupAtMs = booking.pickupAt ? new Date(booking.pickupAt).getTime() : Number.NaN;
+            const canRequestVehicleReturn =
+              ["confirmed", "extended"].includes(String(booking.status || "").toLowerCase()) &&
+              Number.isFinite(pickupAtMs) &&
+              Date.now() >= pickupAtMs &&
+              ["none", "declined"].includes(returnRequestInfo.status);
             const vehicleImage = resolveAssetUrl(booking.vehicle?.imageUrl || booking.vehicle?.images?.[0] || "");
 
             return (
@@ -1119,6 +1156,22 @@ export default function BookingsPage({
                   Your extension request was rejected. Original return schedule still applies.
                 </div>
               )}
+              {returnRequestInfo.status === "requested" && (
+                <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  Vehicle return requested. The vehicle remains unavailable while waiting for owner confirmation.
+                </div>
+              )}
+              {returnRequestInfo.status === "confirmed" && (
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  The owner confirmed receipt of the vehicle.
+                </div>
+              )}
+              {returnRequestInfo.status === "declined" && (
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  The owner declined the vehicle return request. The booking remains active and you may request return again when the handover is ready.
+                  {returnRequestInfo.reviewNote ? ` Note: ${returnRequestInfo.reviewNote}` : ""}
+                </div>
+              )}
 
               <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
                 <div className="mr-auto flex min-w-0 max-w-full items-center gap-2">
@@ -1131,9 +1184,11 @@ export default function BookingsPage({
                   >
                     <MessageCircle size={15} /> Chat owner
                   </button>
+                  <button type="button" onClick={() => setReportBooking(booking)} className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100"><Flag size={15} />Report issue</button>
                 </div>
 
                 {["unpaid", "partial"].includes(String(booking.paymentStatus || "").toLowerCase()) &&
+                  !hasActiveWalkInBalanceSettlement &&
                   !["cancelled", "rejected"].includes(booking.status) && (
                     <button
                       onClick={() => handlePayNow(booking)}
@@ -1162,7 +1217,8 @@ export default function BookingsPage({
                     </p>
                   )}
 
-                {["pending", "confirmed", "extended"].includes(booking.status) && (
+                {["pending", "confirmed", "extended"].includes(booking.status) &&
+                  returnRequestInfo.status !== "requested" && (
                   <button
                     onClick={() => setCancellationModalBooking(booking)}
                     className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100"
@@ -1171,23 +1227,23 @@ export default function BookingsPage({
                   </button>
                 )}
 
-                {canResolveOverdue && (
-                  <>
+                {canResolveOverdue && returnRequestInfo.status === "none" && (
                     <button
                       onClick={() => openExtensionModal(booking)}
-                      disabled={extensionInfo.status === "requested" || lateReturnSubmittingId === booking._id}
+                      disabled={extensionInfo.status === "requested" || returnRequestSubmittingId === booking._id}
                       className="px-3 py-2 rounded-lg bg-violet-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Extend Rental Time
                     </button>
+                )}
+                {canRequestVehicleReturn && (
                     <button
-                      onClick={() => handleProceedLateReturn(booking)}
-                      disabled={lateReturnSubmittingId === booking._id || extensionInfo.status === "requested"}
-                      className="px-3 py-2 rounded-lg bg-rose-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                      onClick={() => handleRequestVehicleReturn(booking)}
+                      disabled={returnRequestSubmittingId === booking._id || extensionInfo.status === "requested"}
+                      className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      {lateReturnSubmittingId === booking._id ? "Processing..." : "Proceed with Late Return"}
+                      {returnRequestSubmittingId === booking._id ? "Requesting..." : "Request Vehicle Return"}
                     </button>
-                  </>
                 )}
 
                 {booking.status === "completed" && !booking.reviewRating && (
@@ -1262,7 +1318,7 @@ export default function BookingsPage({
             </article>
             );
           })}
-        </div>
+        </div>}
 
         {bookingPage.hasMore && (
           <div className="flex justify-center">
@@ -1272,7 +1328,7 @@ export default function BookingsPage({
               disabled={loadingMore}
               className="rounded-lg border border-[#017FE6] px-4 py-2 text-sm font-medium text-[#017FE6] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loadingMore ? "Loading..." : "Load more bookings"}
+              {loadingMore ? "Loading..." : "Load more"}
             </button>
           </div>
         )}
@@ -1355,9 +1411,10 @@ export default function BookingsPage({
                     !message.isDeleted &&
                     activeChatMessageActionId === String(message._id);
                   return (
-                    <div key={message._id} className={`group flex ${isMe ? "justify-end" : "justify-start"}`}>
-                      <div
-                        className={`relative max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[74%] ${
+                    <div key={message._id} className={`group flex items-start ${isMe ? "justify-end" : "justify-start"}`}>
+                      <div className={`flex min-w-0 max-w-[82%] flex-col sm:max-w-[74%] ${isMe ? "items-end" : "items-start"}`}>
+                        <div
+                        className={`relative max-w-full rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
                           isMe
                             ? "rounded-br-md bg-[#017FE6] text-white"
                             : "rounded-bl-md border border-slate-200 bg-white text-slate-800"
@@ -1404,7 +1461,7 @@ export default function BookingsPage({
                             </div>
                           </div>
                         ) : (
-                          <p className={`whitespace-pre-wrap break-words ${message.isDeleted ? "italic opacity-85" : ""}`}>
+                          <p className={`max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${message.isDeleted ? "italic opacity-85" : ""}`}>
                             {message.text}
                           </p>
                         )}
@@ -1446,6 +1503,18 @@ export default function BookingsPage({
                             </button>
                           </div>
                         )}
+                        </div>
+                        {!isMe && !message.isDeleted && (
+                          <button
+                            type="button"
+                            onClick={() => setChatReportMessage(message)}
+                            className="mt-1 inline-flex h-7 w-7 self-end items-center justify-center rounded-full border border-rose-200 bg-white text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                            aria-label="Report this message"
+                            title="Report message"
+                          >
+                            <Flag size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1454,17 +1523,13 @@ export default function BookingsPage({
 
               <div className="border-t border-slate-200 bg-white p-3">
                 <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 focus-within:border-[#0B75E7] focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-100">
-                  <input
-                    className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                  <ChatMessageInput
+                    textareaClassName="max-h-28 min-h-10 bg-transparent px-3 pb-4 pt-2 text-sm leading-5 text-slate-900 outline-none placeholder:text-slate-400"
+                    containerClassName="min-w-0 flex-1"
                     placeholder="Type your message"
                     value={chatText}
-                    onChange={(e) => setChatText(e.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        sendChatMessage();
-                      }
-                    }}
+                    onChange={setChatText}
+                    onSend={sendChatMessage}
                   />
                   <button
                     onClick={sendChatMessage}
@@ -1594,153 +1659,180 @@ export default function BookingsPage({
       )}
 
       {paymentConfirmBooking && (
-        <>
+        <ModalPortal>
           <div
-            className="fixed inset-0 bg-slate-900/45 backdrop-blur-[2px] z-[70]"
-            onClick={() => {
-              if (!payingBookingId) setPaymentConfirmBooking(null);
-            }}
-          />
-          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
-            <div className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white border border-slate-200 shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
-              <div className="px-6 pt-5 pb-4 border-b border-slate-200 bg-gradient-to-r from-[#0B75E7]/10 via-white to-white">
-                <h3 className="text-lg font-semibold text-slate-900">Confirm Payment</h3>
-                <p className="text-sm text-slate-600 mt-1">
-                  Review your payment before continuing.
-                </p>
-              </div>
-
-              <div className="px-6 py-5">
-              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-                Payment reminder: complete payment within the booked rental duration, or request walk-in settlement
-                upon return.
-              </div>
-              <div className="rounded-xl border p-4 space-y-2 text-sm">
-                <Line label="Rental Amount" value={money(getVehicleRateForPayment(paymentConfirmBooking))} />
-                <Line label="Transaction Fee" value={moneyWithCents(getTransactionFee())} />
-                <Line label="Already Paid" value={moneyWithCents(confirmPaidAmount)} />
-                <Line
-                  label="Total Amount Payable"
-                  value={moneyWithCents(confirmTotalPayable)}
-                  strong
-                />
-                <Line label="Remaining Balance" value={moneyWithCents(confirmRemainingAmount)} />
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <p className="text-sm font-semibold text-gray-800">Pay Now Option</p>
-                {confirmIsPartial ? (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                    A downpayment is already recorded. You may pay the remaining balance online or request walk-in
-                    payment approval.
+            className="rp-modal-layer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-payment-title"
+          >
+            <button
+              type="button"
+              className="rp-modal-backdrop"
+              onClick={payingBookingId ? undefined : () => setPaymentConfirmBooking(null)}
+              aria-label="Close payment confirmation"
+            />
+            <section className="relative z-10 flex max-h-[94dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.3)] sm:max-h-[90dvh] sm:rounded-3xl">
+              <header className="shrink-0 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-[#017FE6]">
+                      <WalletCards size={21} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#017FE6]">
+                        Booking payment
+                      </p>
+                      <h2 id="confirm-payment-title" className="mt-0.5 text-lg font-bold text-slate-900">
+                        Confirm payment
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">Review your payment before continuing.</p>
+                    </div>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        checked={paymentPreferences.scope === "downpayment"}
-                        onChange={() =>
-                          setPaymentPreferences((prev) => ({ ...prev, scope: "downpayment" }))
-                        }
-                      />
-                      <span className="text-sm text-gray-700">
-                        Downpayment (30%): {moneyWithCents(roundCurrency(confirmTotalPayable * DOWNPAYMENT_RATE))}
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        checked={paymentPreferences.scope === "full"}
-                        onChange={() => setPaymentPreferences((prev) => ({ ...prev, scope: "full" }))}
-                      />
-                      <span className="text-sm text-gray-700">
-                        Full Payment: {moneyWithCents(confirmRemainingAmount)}
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <p className="text-sm font-semibold text-gray-800">Payment Method</p>
-                <div className="space-y-2">
-                  <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={paymentPreferences.channel === "ewallet"}
-                      onChange={() => setPaymentPreferences((prev) => ({ ...prev, channel: "ewallet" }))}
-                    />
-                    <span className="text-sm text-gray-700">E-wallet (GCash / Maya)</span>
-                  </label>
-                  <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={paymentPreferences.channel === "card"}
-                      onChange={() => setPaymentPreferences((prev) => ({ ...prev, channel: "card" }))}
-                    />
-                    <span className="text-sm text-gray-700">Credit / Debit Card</span>
-                  </label>
-                  {confirmIsPartial && (
-                    <label
-                      className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
-                        confirmCanRequestWalkIn ? "cursor-pointer" : "opacity-70 cursor-not-allowed"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        checked={paymentPreferences.channel === "walkin"}
-                        disabled={!confirmCanRequestWalkIn}
-                        onChange={() => setPaymentPreferences((prev) => ({ ...prev, channel: "walkin" }))}
-                      />
-                      <span className="text-sm text-gray-700">
-                        Request Walk-in Payment (owner must approve before confirmation)
-                      </span>
-                    </label>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPaymentConfirmBooking(null)}
+                    disabled={Boolean(payingBookingId)}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Close payment confirmation"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
-                {confirmWalkInStatus === "requested" && (
-                  <p className="text-xs text-amber-700">
-                    Walk-in request is already pending owner approval.
-                  </p>
-                )}
-                {confirmWalkInStatus === "approved" && (
-                  <p className="text-xs text-emerald-700">
-                    Walk-in request already approved. Settle with owner and wait for owner confirmation.
-                  </p>
-                )}
-                {confirmWalkInStatus === "rejected" && (
-                  <p className="text-xs text-rose-700">
-                    Your previous walk-in request was rejected. You may submit a new request.
-                  </p>
-                )}
-                {confirmIsWalkIn && confirmCanRequestWalkIn && (
-                  <p className="text-xs text-amber-700">
-                    This will send a walk-in payment request to the owner. No online charge will happen now.
-                  </p>
-                )}
+              </header>
+
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-slate-50 p-4 sm:p-6">
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                  Payment reminder: complete payment within the booked rental duration, or request walk-in settlement
+                  upon return.
+                </div>
+
+                <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
+                  <Line label="Rental Amount" value={money(getVehicleRateForPayment(paymentConfirmBooking))} />
+                  <Line label="Transaction Fee" value={moneyWithCents(getTransactionFee())} />
+                  <Line label="Already Paid" value={moneyWithCents(confirmPaidAmount)} />
+                  <Line label="Total Amount Payable" value={moneyWithCents(confirmTotalPayable)} strong />
+                  <Line label="Remaining Balance" value={moneyWithCents(confirmRemainingAmount)} />
+                </section>
+
+                <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-sm font-semibold text-slate-800">Pay Now Option</p>
+                  {confirmIsPartial ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+                      A downpayment is already recorded. You may pay the remaining balance online or request walk-in
+                      payment approval.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 transition hover:border-blue-300 hover:bg-blue-50/50">
+                        <input
+                          type="radio"
+                          checked={paymentPreferences.scope === "downpayment"}
+                          onChange={() =>
+                            setPaymentPreferences((prev) => ({ ...prev, scope: "downpayment" }))
+                          }
+                        />
+                        <span className="text-sm text-slate-700">
+                          Downpayment (30%): {moneyWithCents(roundCurrency(confirmTotalPayable * DOWNPAYMENT_RATE))}
+                        </span>
+                      </label>
+                      <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 transition hover:border-blue-300 hover:bg-blue-50/50">
+                        <input
+                          type="radio"
+                          checked={paymentPreferences.scope === "full"}
+                          onChange={() => setPaymentPreferences((prev) => ({ ...prev, scope: "full" }))}
+                        />
+                        <span className="text-sm text-slate-700">
+                          Full Payment: {moneyWithCents(confirmRemainingAmount)}
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-sm font-semibold text-slate-800">Payment Method</p>
+                  <div className="space-y-2">
+                    <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 transition hover:border-blue-300 hover:bg-blue-50/50">
+                      <input
+                        type="radio"
+                        checked={paymentPreferences.channel === "ewallet"}
+                        onChange={() => setPaymentPreferences((prev) => ({ ...prev, channel: "ewallet" }))}
+                      />
+                      <span className="text-sm text-slate-700">E-wallet (GCash / Maya)</span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 transition hover:border-blue-300 hover:bg-blue-50/50">
+                      <input
+                        type="radio"
+                        checked={paymentPreferences.channel === "card"}
+                        onChange={() => setPaymentPreferences((prev) => ({ ...prev, channel: "card" }))}
+                      />
+                      <span className="text-sm text-slate-700">Credit / Debit Card</span>
+                    </label>
+                    {confirmIsPartial && (
+                      <label
+                        className={`flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 transition ${
+                          confirmCanRequestWalkIn
+                            ? "cursor-pointer hover:border-blue-300 hover:bg-blue-50/50"
+                            : "cursor-not-allowed opacity-70"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          checked={paymentPreferences.channel === "walkin"}
+                          disabled={!confirmCanRequestWalkIn}
+                          onChange={() => setPaymentPreferences((prev) => ({ ...prev, channel: "walkin" }))}
+                        />
+                        <span className="text-sm text-slate-700">
+                          Request Walk-in Payment (owner must approve before confirmation)
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                  {confirmWalkInStatus === "requested" && (
+                    <p className="text-xs text-amber-700">Walk-in request is already pending owner approval.</p>
+                  )}
+                  {confirmWalkInStatus === "approved" && (
+                    <p className="text-xs text-emerald-700">
+                      Your walk-in payment request has already been approved. Please pay the remaining balance
+                      directly to the owner.
+                    </p>
+                  )}
+                  {confirmWalkInStatus === "rejected" && (
+                    <p className="text-xs text-rose-700">
+                      Your previous walk-in request was rejected. You may submit a new request.
+                    </p>
+                  )}
+                  {confirmIsWalkIn && confirmCanRequestWalkIn && (
+                    <p className="text-xs text-amber-700">
+                      This will send a walk-in payment request to the owner. No online charge will happen now.
+                    </p>
+                  )}
+                </section>
+
+                <section className="space-y-1 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm">
+                  <Line label="Amount to Pay Now" value={moneyWithCents(confirmChargeAmount)} strong />
+                  <Line
+                    label="Balance After This Payment"
+                    value={moneyWithCents(confirmRemainingAfterPayment)}
+                  />
+                </section>
               </div>
 
-              <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm space-y-1">
-                <Line label="Amount to Pay Now" value={moneyWithCents(confirmChargeAmount)} strong />
-                <Line
-                  label="Balance After This Payment"
-                  value={moneyWithCents(confirmRemainingAfterPayment)}
-                />
-              </div>
-
-              <div className="mt-5 flex justify-end gap-2">
+              <footer className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
                 <button
+                  type="button"
                   onClick={() => setPaymentConfirmBooking(null)}
                   disabled={Boolean(payingBookingId)}
-                  className="rp-btn-secondary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="rp-btn-secondary px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={confirmAndStartPayment}
                   disabled={Boolean(payingBookingId)}
-                  className="rp-btn-primary px-4 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="rp-btn-primary px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {payingBookingId
                     ? "Processing..."
@@ -1748,11 +1840,10 @@ export default function BookingsPage({
                       ? "Request Walk-in Approval"
                       : "Proceed to Pay"}
                 </button>
-              </div>
-              </div>
-            </div>
+              </footer>
+            </section>
           </div>
-        </>
+        </ModalPortal>
       )}
 
       {extensionModalBooking && (
@@ -1883,6 +1974,13 @@ export default function BookingsPage({
         isOpen={showAI}
         onClose={() => setShowAI(false)}
         onViewAvailableVehicles={onNavigateToVehicles}
+      />
+      <ReportIssueModal booking={reportBooking} perspective="renter" onClose={() => setReportBooking(null)} onSubmitted={(report) => setReportNotice(`Report ${report.caseReference} was submitted for administrator review.`)} />
+      <MessageReportModal
+        message={chatReportMessage}
+        senderName={chatBooking ? getOwnerDisplayName(chatBooking) : "this owner"}
+        onClose={() => setChatReportMessage(null)}
+        onReported={(report) => setReportNotice(`Message reported as ${report.caseReference}. Only that message was included.`)}
       />
     </div>
   );

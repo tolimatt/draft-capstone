@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import ModalPortal from "./ModalPortal";
 
 const LAST_UPDATED = "March 16, 2026";
 
@@ -164,13 +165,9 @@ export default function LegalPolicyModal({
   const { heading, description, sections } = getDocumentConfig(documentType);
 
   return (
-    <div
-      className="fixed inset-0 z-[90] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={heading}
-    >
+    <ModalPortal lockScroll={false}>
+    <div className="rp-modal-layer" role="dialog" aria-modal="true" aria-label={heading}>
+      <button type="button" className="rp-modal-backdrop" onClick={onClose} aria-label="Close legal policy dialog" />
       <div
         className="w-full max-w-3xl bg-white border border-slate-200 rounded-2xl shadow-[0_25px_80px_rgba(15,23,42,0.30)] overflow-hidden"
         onClick={(event) => event.stopPropagation()}
@@ -238,5 +235,6 @@ export default function LegalPolicyModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

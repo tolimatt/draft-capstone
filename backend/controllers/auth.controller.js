@@ -11,7 +11,6 @@ import LoginChallenge from "../models/LoginChallenge.js";
 import LoginActivity from "../models/LoginActivity.js";
 import sendEmail from "../utils/sendEmail.js";
 import { auditLog } from "../middleware/auditLogger.middleware.js";
-import { isValidWalletAddress, normalizeAddress } from "../utils/blockchainBooking.js";
 import {
   getMissingPreKycDocs,
   getPendingPreKycDocs,
@@ -20,6 +19,7 @@ import {
 import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
 import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
 import { verifyPreKycSession } from "../utils/preKycSession.js";
+import { releaseExpiredModerationSuspension } from "../utils/accountModeration.js";
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 45);
@@ -64,7 +64,7 @@ const blacklistUntilTokenExpiry = (token) => {
 
 function signToken(user) {
   return jwt.sign(
-    { id: user._id, role: user.role },
+    { id: user._id, role: user.role, sessionVersion: Number(user.sessionVersion || 0) },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRE || "7d" }
   );
@@ -150,8 +150,9 @@ const buildSafeUserResponse = (user) => {
     avatar: user.avatar || "",
     role: user.role,
     isVerified: user.isVerified || false,
+    isDisabled: Boolean(user.isDisabled),
+    isArchived: Boolean(user.isArchived),
     kycStatus: user.kycStatus,
-    walletAddress: user.walletAddress || null,
     phone: user.phone || "",
     dateOfBirth: user.dateOfBirth || "",
     gender: user.gender || "",
@@ -202,13 +203,6 @@ const getDuplicateKeyDetails = (error) => {
 
   if (duplicateField === "phone") {
     return { field: "phone", message: "This phone number is already registered." };
-  }
-
-  if (duplicateField === "walletAddress") {
-    return {
-      field: "walletAddress",
-      message: "This wallet address is already linked to another account.",
-    };
   }
 
   return { field: "account", message: "A unique field already exists." };
@@ -381,7 +375,6 @@ export const registerUser = async (req, res) => {
       email,
       password,
       role,
-      walletAddress,
       phone,
       dateOfBirth,
       gender,
@@ -487,15 +480,6 @@ export const registerUser = async (req, res) => {
       return sendFieldError(res, 400, "password", passwordMessage);
     }
 
-    let normalizedWalletAddress;
-    const walletAddressText = toText(walletAddress);
-    if (walletAddressText) {
-      if (!isValidWalletAddress(walletAddressText)) {
-        return sendFieldError(res, 400, "walletAddress", "Wallet address is invalid.");
-      }
-      normalizedWalletAddress = normalizeAddress(walletAddressText);
-    }
-
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
     const user = await User.create({
@@ -504,7 +488,6 @@ export const registerUser = async (req, res) => {
       password: hashedPassword,
       role: requestedRole,
       kycStatus: "approved",
-      walletAddress: normalizedWalletAddress,
       phone: normalizedPhone || undefined,
       dateOfBirth: toText(dateOfBirth) || undefined,
       gender: toText(gender) || undefined,
@@ -655,6 +638,28 @@ export const loginUser = async (req, res) => {
       auditLog.security("AUTH", "Login failed: wrong password", { email: normalizedEmail, ip: req.ip });
       return sendFieldError(res, 401, "password", "Invalid password.", {
         code: "INVALID_PASSWORD",
+      });
+    }
+
+    await releaseExpiredModerationSuspension(user);
+
+    if (user.isArchived) {
+      clearAuthCookie(res);
+      auditLog.security("AUTH", "Archived account attempted login", { userId: user._id.toString(), ip: req.ip });
+      return sendFieldError(res, 403, "email", "This account has been archived. Contact the RentifyPro administrator.", {
+        code: "ACCOUNT_ARCHIVED",
+      });
+    }
+
+    if (user.isDisabled) {
+      clearAuthCookie(res);
+      auditLog.security("AUTH", "Disabled account attempted login", {
+        userId: user._id.toString(),
+        email: normalizedEmail,
+        ip: req.ip,
+      });
+      return sendFieldError(res, 403, "email", "This account has been disabled. Contact the RentifyPro administrator.", {
+        code: "ACCOUNT_DISABLED",
       });
     }
 
@@ -1402,20 +1407,6 @@ export const updateProfile = async (req, res) => {
         user[field] = toText(req.body[field]) || undefined;
       }
     });
-
-    if (Object.prototype.hasOwnProperty.call(req.body, "walletAddress")) {
-      const walletAddress = toText(req.body.walletAddress);
-      if (!walletAddress) {
-        user.set("walletAddress", undefined);
-      } else if (!isValidWalletAddress(walletAddress)) {
-        return res.status(400).json({
-          success: false,
-          message: "Wallet address is invalid.",
-        });
-      } else {
-        user.walletAddress = normalizeAddress(walletAddress);
-      }
-    }
 
     await user.save();
 

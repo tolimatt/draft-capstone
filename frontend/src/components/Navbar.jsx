@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Car, Menu, MessageCircle, Settings, X } from "lucide-react";
+import { Bell, Car, Flag, Menu, MessageCircle, Settings, X } from "lucide-react";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../utils/liveCounters";
@@ -35,6 +35,7 @@ export default function Navbar({
   onNavigateToNotifications,
   onOpenNotificationsModal,
   onNavigateToAccountSettings,
+  onNavigateToReports,
   onShowAI,
   onLogout,
 }) {
@@ -326,6 +327,14 @@ export default function Navbar({
                     setShowProfileMenu(false);
                     onNavigateToBookingHistory?.();
                   }}
+                  onReports={
+                    typeof onNavigateToReports === "function"
+                      ? () => {
+                          setShowProfileMenu(false);
+                          onNavigateToReports();
+                        }
+                      : undefined
+                  }
                   onLogout={() => {
                     setShowProfileMenu(false);
                     onLogout?.();
@@ -429,6 +438,7 @@ function ProfileMenu({
   onClose,
   onAccountSettings,
   onBookingHistory,
+  onReports,
   onLogout,
 }) {
   const menuRef = useRef(null);
@@ -507,6 +517,14 @@ function ProfileMenu({
           >
             <Car size={18} /> My Bookings
           </button>
+          {onReports && (
+            <button
+              onClick={onReports}
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-[#017FE6]/10"
+            >
+              <Flag size={18} /> My Reports
+            </button>
+          )}
           <button
             onClick={onLogout}
             className="flex w-full items-center gap-3 px-4 py-3.5 text-sm font-medium text-red-500 transition-colors hover:bg-red-50"
