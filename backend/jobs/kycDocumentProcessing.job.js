@@ -79,7 +79,7 @@ const processClaimedDocument = async (document) => {
   const status = allowAutomaticApproval ? "verified" : "pending_review";
   const now = new Date();
   await PreKycDocument.updateOne(
-    { _id: document._id, status: "processing" },
+    { _id: document._id, status: "processing", fileHash: document.fileHash, processingLockedAt: document.processingLockedAt },
     {
       $set: {
         status,
@@ -116,7 +116,7 @@ const handleProcessingFailure = async (document, error) => {
     ? "Automated screening is temporarily unavailable. The request will retry automatically."
     : "Automated screening was unavailable. A Super Admin must review this document manually.";
   await PreKycDocument.updateOne(
-    { _id: document._id },
+    { _id: document._id, status: "processing", fileHash: document.fileHash, processingLockedAt: document.processingLockedAt },
     {
       $set: {
         status,

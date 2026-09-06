@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import API from "../../utils/api";
 import { getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
+import OwnerPageHeader from "../components/OwnerPageHeader";
 const money = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
 const HIDDEN_MONEY = "\u20b1\u2022\u2022\u2022\u2022\u2022\u2022";
 const getBookingAmountPayable = (booking) => {
@@ -109,24 +110,22 @@ export default function Earnings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Earnings & Revenue</h1>
-          <p className="text-sm text-gray-600">
-            Income per booking, driver breakdown, and monthly revenue.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setIsEarningsVisible((visible) => !visible)}
-          className="inline-flex w-fit items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40"
-          aria-label={isEarningsVisible ? "Hide earnings amounts" : "Show earnings amounts"}
-          aria-pressed={isEarningsVisible}
-        >
-          {isEarningsVisible ? <EyeOff size={18} /> : <Eye size={18} />}
-          {isEarningsVisible ? "Hide amounts" : "Show amounts"}
-        </button>
-      </div>
+      <OwnerPageHeader
+        title="Earnings & Revenue"
+        description="Review income per booking, driver breakdowns, and monthly revenue."
+        actions={(
+          <button
+            type="button"
+            onClick={() => setIsEarningsVisible((visible) => !visible)}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40"
+            aria-label={isEarningsVisible ? "Hide earnings amounts" : "Show earnings amounts"}
+            aria-pressed={isEarningsVisible}
+          >
+            {isEarningsVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+            {isEarningsVisible ? "Hide amounts" : "Show amounts"}
+          </button>
+        )}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard title="Total Earnings" value={displayMoney(summary.totalEarnings)} />

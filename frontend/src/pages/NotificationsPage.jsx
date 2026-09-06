@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Navbar from "../components/Navbar";
 import NotificationActionMenu from "../components/NotificationActionMenu";
+import NotificationDetailsModal from "../components/NotificationDetailsModal";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
 import { requestLiveCountersRefresh } from "../utils/liveCounters";
@@ -22,6 +23,7 @@ const DELETE_ALL_CONFIRMATION_MESSAGE =
   "\u201cAre you sure you want to delete all read messages? This action can\u2019t be undone.\u201d";
 const DELETE_NOTIFICATION_CONFIRMATION_MESSAGE =
   "\u201cAre you sure you want to permanently delete this notification? This action can\u2019t be undone.\u201d";
+const BOOKING_NAVIGATION_STORAGE_KEY = "rentifypro:booking-navigation";
 
 export default function NotificationsPage({
   isLoggedIn,
@@ -213,6 +215,23 @@ export default function NotificationsPage({
     setSelectedNotification(notificationToShow);
   };
 
+  const openSelectedBooking = () => {
+    try {
+      const data = selectedNotification?.data || {};
+      sessionStorage.setItem(
+        BOOKING_NAVIGATION_STORAGE_KEY,
+        JSON.stringify({
+          view: data.feeStatus === "final" ? "history" : "current",
+          bookingId: data.bookingId || selectedNotification?.entityId || "",
+        })
+      );
+    } catch {
+      // Navigation still works when browser storage is unavailable.
+    }
+    setSelectedNotification(null);
+    onNavigateToBookingHistory?.();
+  };
+
   return (
     <div className="rp-renter-page min-h-screen">
       <Navbar
@@ -233,7 +252,7 @@ export default function NotificationsPage({
         onLogout={onLogout}
       />
 
-      <div className="rp-page-shell mx-auto max-w-5xl px-6 pb-16 pt-24">
+      <div className="rp-page-shell mx-auto max-w-5xl px-4 pb-16 pt-24 sm:px-6">
         <div className="rp-page-header mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <span className="rp-page-eyebrow">Activity center</span>
@@ -363,41 +382,12 @@ export default function NotificationsPage({
         </div>
       )}
 
-      {selectedNotification && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center p-4"
-          onClick={() => setSelectedNotification(null)}
-        >
-          <div
-            className="relative w-full max-w-2xl bg-white border border-slate-200 rounded-2xl shadow-[0_25px_80px_rgba(15,23,42,0.25)] overflow-hidden"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3 bg-gradient-to-r from-[#0B75E7]/10 via-white to-white">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Notification Details</h2>
-              </div>
-              <button
-                onClick={() => setSelectedNotification(null)}
-                className="rp-btn-secondary px-3 py-1.5 text-sm"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="px-5 py-4 space-y-4">
-              <div>
-                <p className="text-xs text-slate-500">Notification</p>
-                <p className="text-sm font-semibold text-slate-900">{selectedNotification.title}</p>
-              </div>
-
-              <div>
-                <p className="text-xs text-slate-500">Content</p>
-                <p className="text-sm text-slate-700">{selectedNotification.message}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <NotificationDetailsModal
+        notification={selectedNotification}
+        viewerRole={user?.role || "user"}
+        onClose={() => setSelectedNotification(null)}
+        onOpenBookings={openSelectedBooking}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
+  TriangleAlert,
   ArrowLeft,
   FileUp,
   FileWarning,
@@ -11,6 +11,7 @@ import {
 import API from "../utils/api";
 import EvidenceFilePicker from "./EvidenceFilePicker";
 import { validateReportEvidenceFiles } from "../utils/fileValidation";
+import OwnerPageHeader from "../owner/components/OwnerPageHeader";
 
 const titleCase = (value) =>
   String(value || "")
@@ -27,7 +28,7 @@ const statusTone = (status) => ({
   closed: "bg-emerald-50 text-emerald-700",
 }[status] || "bg-slate-100 text-slate-700");
 
-export default function ReportsCenter({ onBack, embedded = false }) {
+export default function ReportsCenter({ onBack, embedded = false, ownerHeader = false }) {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -61,6 +62,13 @@ export default function ReportsCenter({ onBack, embedded = false }) {
     () => filter === "all" ? reports : reports.filter((item) => item.perspective === filter),
     [filter, reports]
   );
+
+  useEffect(() => {
+    if (loading || !window.location.hash.startsWith("#report-")) return;
+    const id = window.location.hash.slice(1);
+    const target = document.getElementById(id);
+    target?.scrollIntoView({ block: "start" });
+  }, [loading, visible]);
 
   const submitAppeal = async (report) => {
     if (appealText.trim().length < 20) {
@@ -114,12 +122,24 @@ export default function ReportsCenter({ onBack, embedded = false }) {
 
   return (
     <section className={embedded ? "space-y-5" : "min-h-screen bg-slate-50 px-4 py-8 sm:px-6"}>
-      <div className="mx-auto max-w-6xl space-y-5">
+      <div className={ownerHeader ? "space-y-5" : "mx-auto max-w-6xl space-y-5"}>
+        {ownerHeader ? (
+          <OwnerPageHeader
+            eyebrow="Trust & safety"
+            title="Reports and Appeals"
+            description="Track reports you submitted and moderation decisions involving your account."
+            actions={(
+              <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <RefreshCw size={18} strokeWidth={2} className={loading ? "animate-spin" : ""} aria-hidden="true" />Refresh
+              </button>
+            )}
+          />
+        ) : (
         <header className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div className="flex items-start gap-3">
             {onBack ? (
               <button type="button" onClick={onBack} aria-label="Go back" className="mt-0.5 rounded-xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50">
-                <ArrowLeft size={19} />
+                <ArrowLeft size={18} strokeWidth={2} />
               </button>
             ) : null}
             <div>
@@ -129,9 +149,10 @@ export default function ReportsCenter({ onBack, embedded = false }) {
             </div>
           </div>
           <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />Refresh
+            <RefreshCw size={18} strokeWidth={2} className={loading ? "animate-spin" : ""} aria-hidden="true" />Refresh
           </button>
         </header>
+        )}
 
         <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm sm:w-fit">
           {[["all", "All"], ["submitted", "Submitted"], ["received", "Received"]].map(([id, label]) => (
@@ -142,9 +163,9 @@ export default function ReportsCenter({ onBack, embedded = false }) {
         </div>
 
         {notice ? <p className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{notice}</p> : null}
-        {error ? <p className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><AlertTriangle size={17} />{error}</p> : null}
-        {loading ? <div className="flex min-h-64 items-center justify-center rounded-3xl border border-slate-200 bg-white"><LoaderCircle size={30} className="animate-spin text-blue-600" /></div> : null}
-        {!loading && !visible.length ? (
+        {error ? <p className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><TriangleAlert size={18} strokeWidth={2} aria-hidden="true" />{error}</p> : null}
+        {loading ? <div className="flex min-h-64 items-center justify-center rounded-3xl border border-slate-200 bg-white"><LoaderCircle size={32} strokeWidth={2} className="animate-spin text-blue-600" aria-hidden="true" /></div> : null}
+        {!loading && !error && !visible.length ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
             <FileWarning size={32} className="mx-auto text-slate-300" />
             <h2 className="mt-3 font-bold text-slate-900">No reports in this view</h2>
@@ -155,7 +176,7 @@ export default function ReportsCenter({ onBack, embedded = false }) {
         {!loading ? (
           <div className="space-y-4">
             {visible.map((report) => (
-              <article key={report._id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+              <article id={`report-${report._id}`} key={report._id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">{report.caseReference} · {report.perspective}</p>
@@ -197,6 +218,7 @@ export default function ReportsCenter({ onBack, embedded = false }) {
                   </div>
                 ) : null}
 
+                {report.informationRequest && report.status === "awaiting_information" && <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><strong>Requested information:</strong> {report.informationRequest}</p>}
                 {report.perspective === "submitted" && report.status === "awaiting_information" ? (
                   <InformationForm
                     open={respondingId === report._id}
@@ -222,7 +244,7 @@ export default function ReportsCenter({ onBack, embedded = false }) {
                         <div className="flex gap-2">
                           <button type="button" onClick={() => setAppealingId("")} disabled={submitting} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Cancel</button>
                           <button type="button" onClick={() => void submitAppeal(report)} disabled={submitting} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-                            {submitting ? <LoaderCircle size={16} className="animate-spin" /> : <Send size={16} />}Submit appeal
+                            {submitting ? <LoaderCircle size={18} strokeWidth={2} className="animate-spin" aria-hidden="true" /> : <Send size={18} strokeWidth={2} aria-hidden="true" />}Submit appeal
                           </button>
                         </div>
                       </div>
@@ -250,7 +272,7 @@ function InformationForm({ open, text, files, submitting, onOpen, onCancel, onTe
           <div className="flex gap-2">
             <button type="button" onClick={onCancel} disabled={submitting} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold">Cancel</button>
             <button type="button" onClick={onSubmit} disabled={submitting} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-              {submitting ? <LoaderCircle size={16} className="animate-spin" /> : <FileUp size={16} />}Submit information
+              {submitting ? <LoaderCircle size={18} strokeWidth={2} className="animate-spin" aria-hidden="true" /> : <FileUp size={18} strokeWidth={2} aria-hidden="true" />}Submit information
             </button>
           </div>
         </div>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CarFront, Check, Clock3, CreditCard, Flag, MapPin, X, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, CarFront, CircleCheck, CircleX, Clock3, CreditCard, Flag, MapPin, X, Users } from "lucide-react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { getTransactionFee } from "../../utils/fees";
@@ -7,6 +7,9 @@ import { formatDurationMinutes, getDurationHoursFromMinutes, getDurationMinutesB
 import { resolveAssetUrl } from "../../utils/media";
 import ReportIssueModal from "../../components/ReportIssueModal";
 import ModalPortal from "../../components/ModalPortal";
+import OwnerPageHeader from "../components/OwnerPageHeader";
+import RequestFeedback from "../../components/RequestFeedback";
+import { bookingStatusLabel, bookingGuidance } from "../../utils/workflowStatus";
 
 const statusFilters = [
   { id: "action", label: "Needs Action" },
@@ -39,8 +42,7 @@ const toTitleCase = (value = "") =>
   String(value)
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
-const normalizeBookingStatus = (booking) =>
-  booking?.status === "rejected" ? { ...booking, status: "cancelled" } : booking;
+const normalizeBookingStatus = (booking) => booking;
 const ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
 const PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
 const bookingNeedsOwnerAction = (booking) => {
@@ -67,14 +69,38 @@ const getWalkInStatus = (booking) =>
     .trim()
     .toLowerCase();
 
-const getLateReturnInfo = (booking) => {
+const getLateReturnInfo = (booking, currentTimeMs = Date.now()) => {
   const lateReturn = booking?.lateReturn || booking?.late_return || {};
-  const overdueMinutes = Number(lateReturn?.overdueMinutes || 0);
+  const storedOverdueMinutes = Number(lateReturn?.overdueMinutes || 0);
+  const returnAtMs = booking?.returnAt ? new Date(booking.returnAt).getTime() : Number.NaN;
+  const graceMinutes = Number(lateReturn?.graceMinutes ?? booking?.lateReturnPolicy?.graceMinutes ?? 0);
+  const isFinal =
+    String(lateReturn?.action || "").toLowerCase() === "return_confirmed" ||
+    String(booking?.status || "").toLowerCase() === "completed" ||
+    String(booking?.returnRequest?.status || booking?.return_request?.status || "").toLowerCase() === "confirmed";
+  const liveOverdueMinutes =
+    Boolean(lateReturn?.isOverdue) && !isFinal && Number.isFinite(returnAtMs)
+      ? Math.max(0, Math.round((currentTimeMs - returnAtMs - Math.max(0, graceMinutes) * 60000) / 60000))
+      : 0;
+  const overdueMinutes = Math.max(
+    Number.isFinite(storedOverdueMinutes) ? storedOverdueMinutes : 0,
+    liveOverdueMinutes
+  );
   const penaltyFee = Number(lateReturn?.penaltyFee || booking?.lateReturnPenaltyFee || 0);
+  const penaltyRatePerHour = Number(lateReturn?.penaltyRatePerHour || booking?.lateReturnPenaltyRatePerHour || 0);
+  const providedEstimate = Number(lateReturn?.estimatedPenaltyFee);
+  const estimatedPenaltyFee =
+    !isFinal && penaltyRatePerHour > 0
+      ? penaltyRatePerHour * (Math.max(0, overdueMinutes) / 60)
+      : Number.isFinite(providedEstimate) && providedEstimate >= 0
+      ? providedEstimate
+      : penaltyRatePerHour * (Math.max(0, overdueMinutes) / 60);
   return {
     isOverdue: Boolean(lateReturn?.isOverdue),
     overdueMinutes: Number.isFinite(overdueMinutes) && overdueMinutes > 0 ? Math.round(overdueMinutes) : 0,
     penaltyFee: Number.isFinite(penaltyFee) && penaltyFee > 0 ? penaltyFee : 0,
+    estimatedPenaltyFee: Number.isFinite(estimatedPenaltyFee) && estimatedPenaltyFee > 0 ? estimatedPenaltyFee : 0,
+    penaltyRatePerHour: Number.isFinite(penaltyRatePerHour) && penaltyRatePerHour > 0 ? penaltyRatePerHour : 0,
   };
 };
 
@@ -161,17 +187,29 @@ export default function Bookings() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [bookingActions, setBookingActions] = useState({});
+  const [actionErrors, setActionErrors] = useState({});
+  const actionLocks = useRef(new Set());
+  const requestSequence = useRef(0);
   const [statusFilter, setStatusFilter] = useState("action");
+  const [bookingClock, setBookingClock] = useState(() => Date.now());
   const [bookingPage, setBookingPage] = useState({ hasMore: false, nextCursor: null });
   const [loadingMore, setLoadingMore] = useState(false);
-  const [walkInActionBookingId, setWalkInActionBookingId] = useState("");
   const [reportBooking, setReportBooking] = useState(null);
   const [reportNotice, setReportNotice] = useState("");
   const [returnReview, setReturnReview] = useState(null);
   const [returnReviewNote, setReturnReviewNote] = useState("");
 
-  const loadBookings = useCallback(async ({ cursor = null, append = false } = {}) => {
+  useEffect(() => {
+    const timer = window.setInterval(() => setBookingClock(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const loadBookings = useCallback(async ({ cursor = null, append = false, background = false } = {}) => {
+    const sequence = ++requestSequence.current;
     if (append) setLoadingMore(true);
+    else if (background) setRefreshing(true);
     else setLoading(true);
     setError("");
     try {
@@ -181,18 +219,24 @@ export default function Bookings() {
         ...(cursor ? { cursor } : {}),
       });
       const mapped = (response.bookings || []).map(normalizeBookingStatus);
+      if (sequence !== requestSequence.current) return;
       setBookings((previous) => (append ? [...previous, ...mapped] : mapped));
       setBookingPage(response.page || { hasMore: false, nextCursor: null });
     } catch (err) {
+      if (sequence !== requestSequence.current) return;
       setError(err.message || "Failed to load bookings.");
     } finally {
-      if (append) setLoadingMore(false);
-      else setLoading(false);
+      if (sequence === requestSequence.current) {
+        setLoadingMore(false);
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [statusFilter]);
 
   useEffect(() => {
     loadBookings();
+    return () => { requestSequence.current += 1; };
   }, [loadBookings]);
 
   useEffect(() => {
@@ -220,85 +264,45 @@ export default function Bookings() {
     [bookings, statusFilter]
   );
 
-  const updateBookingStatus = async (bookingId, nextStatus) => {
+  const runBookingAction = async (bookingId, action, label, fallback) => {
+    if (actionLocks.current.has(bookingId)) return false;
+    actionLocks.current.add(bookingId);
+    setBookingActions((previous) => ({ ...previous, [bookingId]: label }));
+    setActionErrors((previous) => ({ ...previous, [bookingId]: "" }));
+    setReportNotice("");
     try {
-      const response = await API.updateOwnerBookingStatus(bookingId, nextStatus);
-      const normalized = normalizeBookingStatus(response.booking);
-      setBookings((prev) =>
-        prev.map((booking) =>
-          booking._id === bookingId ? normalized : booking
-        )
-      );
-    } catch (err) {
-      setError(err.message || "Failed to update booking status.");
-    }
-  };
-
-  const updatePaymentStatus = async (bookingId, paymentStatus) => {
-    try {
-      const response = await API.updateOwnerBookingPaymentStatus(bookingId, paymentStatus);
-      const normalized = normalizeBookingStatus(response.booking);
-      setBookings((prev) =>
-        prev.map((booking) =>
-          booking._id === bookingId ? normalized : booking
-        )
-      );
-    } catch (err) {
-      setError(err.message || "Failed to update payment status.");
-    }
-  };
-
-  const reviewExtensionRequest = async (bookingId, action) => {
-    try {
-      setWalkInActionBookingId(bookingId);
-      const response = await API.reviewOwnerBookingExtensionRequest(bookingId, action);
-      const normalized = normalizeBookingStatus(response.booking);
-      setBookings((prev) => prev.map((booking) => (booking._id === bookingId ? normalized : booking)));
-    } catch (err) {
-      setError(err.message || "Failed to review extension request.");
+      const response = await action();
+      if (response.booking) setBookings((previous) => previous.map((booking) => booking._id === bookingId ? response.booking : booking));
+      setReportNotice(response.message || fallback);
+      return true;
+    } catch (error) {
+      setActionErrors((previous) => ({ ...previous, [bookingId]: error.message || "The update could not be completed. Refresh this booking and try again." }));
+      return false;
     } finally {
-      setWalkInActionBookingId("");
+      actionLocks.current.delete(bookingId);
+      setBookingActions((previous) => { const next = { ...previous }; delete next[bookingId]; return next; });
     }
   };
 
-  const reviewCancellationRequest = async (bookingId, action) => {
-    try {
-      setWalkInActionBookingId(bookingId);
-      const response = await API.reviewOwnerBookingCancellationRequest(bookingId, action);
-      const normalized = normalizeBookingStatus(response.booking);
-      setBookings((prev) => prev.map((booking) => (booking._id === bookingId ? normalized : booking)));
-    } catch (err) {
-      setError(err.message || "Failed to review cancellation request.");
-    } finally {
-      setWalkInActionBookingId("");
-    }
-  };
+  const updateBookingStatus = (id, status) => runBookingAction(id,
+    () => API.updateOwnerBookingStatus(id, status),
+    status === "confirmed" ? "Approving booking..." : status === "rejected" ? "Rejecting booking..." : "Updating booking...",
+    "Booking " + bookingStatusLabel(status).toLowerCase() + ".");
 
-  const reviewWalkInRequest = async (bookingId, action) => {
-    try {
-      setWalkInActionBookingId(bookingId);
-      const response = await API.reviewOwnerWalkInPaymentRequest(bookingId, action);
-      const normalized = normalizeBookingStatus(response.booking);
-      setBookings((prev) => prev.map((booking) => (booking._id === bookingId ? normalized : booking)));
-    } catch (err) {
-      setError(err.message || "Failed to review walk-in request.");
-    } finally {
-      setWalkInActionBookingId("");
-    }
-  };
+  const updatePaymentStatus = (id, status) => runBookingAction(id,
+    () => API.updateOwnerBookingPaymentStatus(id, status), "Updating payment...", "Payment status updated.");
 
-  const confirmWalkInPayment = async (bookingId) => {
-    try {
-      setWalkInActionBookingId(bookingId);
-      const response = await API.confirmOwnerWalkInPayment(bookingId);
-      const normalized = normalizeBookingStatus(response.booking);
-      setBookings((prev) => prev.map((booking) => (booking._id === bookingId ? normalized : booking)));
-    } catch (err) {
-      setError(err.message || "Failed to confirm walk-in payment.");
-    } finally {
-      setWalkInActionBookingId("");
-    }
-  };
+  const reviewExtensionRequest = (id, action) => runBookingAction(id,
+    () => API.reviewOwnerBookingExtensionRequest(id, action), "Reviewing extension...", "Extension decision saved.");
+
+  const reviewCancellationRequest = (id, action) => runBookingAction(id,
+    () => API.reviewOwnerBookingCancellationRequest(id, action), "Reviewing cancellation...", "Cancellation decision saved.");
+
+  const reviewWalkInRequest = (id, action) => runBookingAction(id,
+    () => API.reviewOwnerWalkInPaymentRequest(id, action), "Reviewing walk-in payment...", "Walk-in decision saved.");
+
+  const confirmWalkInPayment = (id) => runBookingAction(id,
+    () => API.confirmOwnerWalkInPayment(id), "Confirming payment...", "Walk-in payment confirmed.");
 
   const openReturnReview = (booking, action) => {
     setReturnReview({ booking, action });
@@ -309,30 +313,19 @@ export default function Bookings() {
     const bookingId = returnReview?.booking?._id;
     const action = returnReview?.action;
     if (!bookingId || !["confirm", "decline"].includes(action)) return;
-    try {
-      setWalkInActionBookingId(bookingId);
-      setError("");
-      const response = await API.reviewOwnerVehicleReturnRequest(bookingId, action, {
-        note: returnReviewNote,
-      });
-      const normalized = normalizeBookingStatus(response.booking);
-      setBookings((prev) => prev.map((booking) => (booking._id === bookingId ? normalized : booking)));
-      setReportNotice(response.message || `Vehicle return request ${action === "confirm" ? "confirmed" : "declined"}.`);
-      setReturnReview(null);
-      setReturnReviewNote("");
-    } catch (err) {
-      setError(err.message || "Failed to review vehicle return request.");
-    } finally {
-      setWalkInActionBookingId("");
-    }
+    const saved = await runBookingAction(bookingId,
+      () => API.reviewOwnerVehicleReturnRequest(bookingId, action, { note: returnReviewNote }),
+      "Saving return decision...", "Vehicle return decision saved.");
+    if (saved) { setReturnReview(null); setReturnReviewNote(""); }
   };
 
   return (
     <div className="space-y-6">
-      <div className="border-b border-slate-200 pb-5">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Booking management</h1>
-        <p className="mt-1 text-sm text-slate-500">Review renter requests, active rentals, and payment activity.</p>
-      </div>
+      <OwnerPageHeader
+        title="Booking Management"
+        description="Review renter requests, active rentals, and payment activity."
+        actions={<button type="button" disabled={loading || refreshing || loadingMore} onClick={() => loadBookings({ background: true })} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{refreshing ? "Refreshing..." : "Refresh"}</button>}
+      />
 
       <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
         {statusFilters.map((status) => (
@@ -350,11 +343,11 @@ export default function Bookings() {
         ))}
       </div>
 
-      {error && <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-      {reportNotice && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{reportNotice}</p>}
-      {!loading && !filteredBookings.length && (
+      <RequestFeedback loading={loading || refreshing} label={refreshing ? "Refreshing bookings..." : "Loading bookings..."} error={error} onRetry={() => loadBookings({ background: bookings.length > 0 })} />
+      {reportNotice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{reportNotice}</p>}
+      {!loading && !error && !filteredBookings.length && (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#017FE6]"><CarFront size={26} /></div>
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#017FE6]"><CarFront size={24} strokeWidth={2} aria-hidden="true" /></div>
           <h2 className="mt-4 text-lg font-bold text-slate-900">Your queue is clear</h2>
           <p className="mt-1 text-sm text-slate-500">No bookings match this view right now. New renter activity will appear here.</p>
         </div>
@@ -362,7 +355,12 @@ export default function Bookings() {
 
       {!loading && <div className="space-y-4">
         {filteredBookings.map((booking) => {
-          const lateReturnInfo = getLateReturnInfo(booking);
+          const lateReturnInfo = getLateReturnInfo(booking, bookingClock);
+          const isEstimatedLatePenalty = lateReturnInfo.penaltyFee <= 0 && lateReturnInfo.estimatedPenaltyFee > 0;
+          const displayedLatePenalty =
+            lateReturnInfo.penaltyFee > 0 ? lateReturnInfo.penaltyFee : lateReturnInfo.estimatedPenaltyFee;
+          const displayedTotalPayment =
+            getPayableAmount(booking) + (isEstimatedLatePenalty ? displayedLatePenalty : 0);
           const extensionInfo = getExtensionRequestInfo(booking);
           const returnRequestInfo = getReturnRequestInfo(booking);
           const cancellationInfo = getCancellationRequestInfo(booking);
@@ -376,13 +374,13 @@ export default function Bookings() {
                   {vehicleImage ? (
                     <img src={vehicleImage} alt={booking.vehicle?.name || "Vehicle"} className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
                   ) : (
-                    <div className="flex h-full items-center justify-center text-[#017FE6]"><CarFront size={30} /></div>
+                    <div className="flex h-full items-center justify-center text-[#017FE6]"><CarFront size={32} strokeWidth={2} aria-hidden="true" /></div>
                   )}
                 </div>
                 <div className="min-w-0 py-1">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Booking #{String(booking._id || "").slice(-6).toUpperCase()}</p>
                   <h3 className="mt-1 truncate text-xl font-bold text-slate-900">{booking.vehicle?.name || "Vehicle"}</h3>
-                  <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-slate-500"><Users size={14} className="text-slate-400" /> {booking.renter?.name || booking.renter?.email || "Renter details unavailable"}</p>
+                  <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-slate-500"><Users size={16} strokeWidth={2} className="text-slate-400" aria-hidden="true" /> {booking.renter?.name || booking.renter?.email || "Renter details unavailable"}</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 lg:justify-end">
@@ -391,7 +389,7 @@ export default function Bookings() {
                     statusStyles[booking.status] || "bg-gray-100 text-gray-700"
                   }`}
                 >
-                  {toTitleCase(booking.status)}
+                  {bookingStatusLabel(booking.status)}
                 </span>
                 <span
                   className={`text-xs px-2 py-1 rounded-full ${
@@ -442,6 +440,9 @@ export default function Bookings() {
               </div>
             </div>
 
+            <p className="mt-3 text-sm text-slate-600">{bookingGuidance(booking, "owner")}</p>
+            <RequestFeedback error={actionErrors[booking._id]} />
+            {bookingActions[booking._id] && <p role="status" className="mt-2 text-sm text-blue-700">{bookingActions[booking._id]}</p>}
             <div className="mt-5 grid grid-cols-1 gap-3 border-y border-slate-100 py-4 text-sm md:grid-cols-2 xl:grid-cols-4">
               <Info icon={CalendarDays} title="Pickup" value={formatDateTime(booking.pickupAt)} />
               <Info icon={CalendarDays} title="Return" value={formatDateTime(booking.returnAt)} />
@@ -458,16 +459,25 @@ export default function Bookings() {
               />
               <Info title="Base Amount" value={money(booking.baseAmount)} />
               <Info
-                title="Late Penalty"
-                value={lateReturnInfo.penaltyFee > 0 ? money(lateReturnInfo.penaltyFee) : money(0)}
+                title={isEstimatedLatePenalty ? "Estimated Late Penalty" : "Late Penalty"}
+                value={money(displayedLatePenalty)}
               />
-              <Info icon={CreditCard} title="Total Payment" value={money(getPayableAmount(booking))} />
+              <Info
+                icon={CreditCard}
+                title={isEstimatedLatePenalty ? "Estimated Total Payment" : "Total Payment"}
+                value={money(displayedTotalPayment)}
+              />
             </div>
 
             {lateReturnInfo.isOverdue && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Overdue return notice: renter has not returned the vehicle on time (overdue by{" "}
                 {formatDurationMinutes(lateReturnInfo.overdueMinutes)}).
+                {lateReturnInfo.penaltyFee > 0
+                  ? ` Final late charge: ${money(lateReturnInfo.penaltyFee)}.`
+                  : lateReturnInfo.estimatedPenaltyFee > 0
+                    ? ` Estimated late charge: ${money(lateReturnInfo.estimatedPenaltyFee)} at ${money(lateReturnInfo.penaltyRatePerHour)} per overdue hour.`
+                    : " The snapshotted booking policy has no monetary late charge."}
               </div>
             )}
 
@@ -502,12 +512,14 @@ export default function Bookings() {
                   <>
                     <button
                       onClick={() => updateBookingStatus(booking._id, "confirmed")}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm"
                     >
                       Approve
                     </button>
                     <button
                       onClick={() => updateBookingStatus(booking._id, "rejected")}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm"
                     >
                       Reject
@@ -518,14 +530,14 @@ export default function Bookings() {
                   <>
                     <button
                       onClick={() => openReturnReview(booking, "confirm")}
-                      disabled={walkInActionBookingId === booking._id || extensionInfo.status === "requested"}
+                      disabled={Boolean(bookingActions[booking._id]) || extensionInfo.status === "requested"}
                       className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Confirm Vehicle Received
                     </button>
                     <button
                       onClick={() => openReturnReview(booking, "decline")}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg border border-rose-200 bg-white text-rose-700 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Decline Return Request
@@ -545,14 +557,14 @@ export default function Bookings() {
                   <>
                     <button
                       onClick={() => reviewExtensionRequest(booking._id, "approve")}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-violet-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Approve Extension
                     </button>
                     <button
                       onClick={() => reviewExtensionRequest(booking._id, "reject")}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-rose-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Reject Extension
@@ -563,14 +575,14 @@ export default function Bookings() {
                   <>
                     <button
                       onClick={() => reviewCancellationRequest(booking._id, "approve")}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-amber-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Approve Cancellation
                     </button>
                     <button
                       onClick={() => reviewCancellationRequest(booking._id, "reject")}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-slate-700 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Keep Booking
@@ -582,14 +594,14 @@ export default function Bookings() {
                   <>
                     <button
                       onClick={() => reviewWalkInRequest(booking._id, "approve")}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Approve Walk-in
                     </button>
                     <button
                       onClick={() => reviewWalkInRequest(booking._id, "reject")}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-rose-600 text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Reject Walk-in
@@ -600,7 +612,7 @@ export default function Bookings() {
                   String(booking.paymentStatus || "").toLowerCase() === "partial" && (
                     <button
                       onClick={() => confirmWalkInPayment(booking._id)}
-                      disabled={walkInActionBookingId === booking._id}
+                      disabled={Boolean(bookingActions[booking._id])}
                       className="px-3 py-2 rounded-lg bg-[#017FE6] text-white text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       Confirm Walk-in Received
@@ -617,7 +629,7 @@ export default function Bookings() {
                 {getWalkInStatus(booking) === "completed" && (
                   <p className="w-full text-xs text-green-700">Walk-in payment has been confirmed.</p>
                 )}
-                <button type="button" onClick={() => setReportBooking(booking)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"><Flag size={15} />Report renter</button>
+                <button type="button" onClick={() => setReportBooking(booking)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"><Flag size={18} strokeWidth={2} aria-hidden="true" />Report renter</button>
                 {extensionInfo.status === "approved" && (
                   <p className="w-full text-xs text-violet-700">
                     Extension approved. Updated return schedule is now {formatDateTime(booking.returnAt)}.
@@ -647,7 +659,7 @@ export default function Bookings() {
                 <select
                   className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-[#017FE6]"
                   value={booking.paymentStatus}
-                  disabled={walkInActionBookingId === booking._id}
+                  disabled={Boolean(bookingActions[booking._id])}
                   onChange={(e) => updatePaymentStatus(booking._id, e.target.value)}
                 >
                   <option value="unpaid">Unpaid</option>
@@ -677,10 +689,11 @@ export default function Bookings() {
       <ReturnReviewModal
         review={returnReview}
         note={returnReviewNote}
-        loading={Boolean(returnReview?.booking?._id) && walkInActionBookingId === returnReview?.booking?._id}
+        error={actionErrors[returnReview?.booking?._id]}
+        loading={Boolean(returnReview?.booking?._id) && Boolean(bookingActions[returnReview?.booking?._id])}
         onNoteChange={setReturnReviewNote}
         onClose={() => {
-          if (walkInActionBookingId) return;
+          if (bookingActions[returnReview?.booking?._id]) return;
           setReturnReview(null);
           setReturnReviewNote("");
         }}
@@ -690,7 +703,7 @@ export default function Bookings() {
   );
 }
 
-function ReturnReviewModal({ review, note, loading, onNoteChange, onClose, onSubmit }) {
+function ReturnReviewModal({ review, note, loading, error, onNoteChange, onClose, onSubmit }) {
   if (!review?.booking) return null;
   const confirming = review.action === "confirm";
   const vehicleName = review.booking.vehicle?.name || "this vehicle";
@@ -703,7 +716,7 @@ function ReturnReviewModal({ review, note, loading, onNoteChange, onClose, onSub
           <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
             <div className="flex items-start gap-3">
               <span className={`mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${confirming ? "bg-blue-100 text-blue-700" : "bg-rose-100 text-rose-700"}`}>
-                {confirming ? <Check size={21} /> : <X size={21} />}
+                {confirming ? <CircleCheck size={24} strokeWidth={2} aria-hidden="true" /> : <CircleX size={24} strokeWidth={2} aria-hidden="true" />}
               </span>
               <div>
                 <h2 id="return-review-title" className="text-lg font-bold text-slate-900">
@@ -736,6 +749,7 @@ function ReturnReviewModal({ review, note, loading, onNoteChange, onClose, onSub
           </div>
 
           <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+            {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
             <button type="button" onClick={onClose} disabled={loading} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               Cancel
             </button>
@@ -752,7 +766,7 @@ function ReturnReviewModal({ review, note, loading, onNoteChange, onClose, onSub
 function Info({ title, value, icon: Icon }) {
   return (
     <div className="rounded-xl bg-slate-50 p-3">
-      <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">{Icon && <Icon size={13} className="text-[#017FE6]" />}{title}</p>
+      <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">{Icon && <Icon size={16} strokeWidth={2} className="text-[#017FE6]" aria-hidden="true" />}{title}</p>
       <p className="mt-1 font-semibold text-slate-800">{value}</p>
     </div>
   );

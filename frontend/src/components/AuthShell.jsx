@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CircleCheck } from "lucide-react";
 
 const DEFAULT_HIGHLIGHTS = [
   "Realtime booking and trip updates",
@@ -75,7 +75,7 @@ export default function AuthShell({
                 <div className="mt-7 space-y-3">
                   {highlights.map((item) => (
                     <div key={item} className="flex items-center gap-3 text-sm text-slate-100">
-                      <CheckCircle2 size={16} className="text-blue-200" />
+                      <CircleCheck size={16} strokeWidth={2} className="text-blue-200" aria-hidden="true" />
                       <span>{item}</span>
                     </div>
                   ))}

@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Flag,
-  MessageSquare,
-  MoreHorizontal,
+  MessageCircle,
   Pin,
   Search,
   Send,
@@ -21,6 +20,7 @@ import {
 import ModalPortal from "../../components/ModalPortal";
 import MessageReportModal from "../../components/MessageReportModal";
 import ChatMessageInput from "../../components/ChatMessageInput";
+import OwnerPageHeader from "../components/OwnerPageHeader";
 
 const getId = (value) => String(value?._id || value || "");
 
@@ -539,22 +539,13 @@ export default function Messages() {
 
   return (
     <div className="owner-messages-page">
-      <div className="rp-chat-page-header rp-surface owner-messages-page-header">
-        <div className="rp-chat-page-heading">
-          <span className="rp-chat-page-icon" aria-hidden="true">
-            <MessageSquare size={22} />
-          </span>
-          <div>
-            <p className="rp-chat-eyebrow">Owner inbox</p>
-            <h1>Messages</h1>
-            <p>Keep renter conversations, booking questions, and vehicle updates in one place.</p>
-          </div>
-        </div>
-        <span className="rp-chat-live-pill">
-          <span aria-hidden="true" />
-          Real-time messaging
-        </span>
-      </div>
+      <OwnerPageHeader
+        className="owner-messages-page-header"
+        eyebrow="Owner inbox"
+        title="Messages"
+        description="Keep renter conversations, booking questions, and vehicle updates in one place."
+        actions={<span className="rp-owner-page-header__status">Real-time messaging</span>}
+      />
       {reportNotice && <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800" role="status">{reportNotice}</div>}
 
       <div className="owner-messages-shell">
@@ -625,7 +616,7 @@ export default function Messages() {
                     className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50 lg:hidden"
                     aria-label="Back to renters"
                   >
-                    <ArrowLeft size={16} />
+                    <ArrowLeft size={18} strokeWidth={2} />
                   </button>
                 )}
                 <AvatarCircle
@@ -646,7 +637,7 @@ export default function Messages() {
                 onClick={() => setShowDeleteConversationConfirm(true)}
                 className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-lg border border-rose-100 bg-white px-3 text-xs font-medium text-rose-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
               >
-                <Trash2 size={14} />
+                <Trash2 size={18} strokeWidth={2} aria-hidden="true" />
                 <span className="hidden sm:inline">Delete</span>
               </button>
             </div>
@@ -710,7 +701,7 @@ export default function Messages() {
                   aria-label="Send message"
                   title="Send message"
                 >
-                  <Send size={17} />
+                  <Send size={18} strokeWidth={2} />
                 </button>
               </div>
             </div>
@@ -929,7 +920,7 @@ function MessageBubble({
               aria-label="Report this message"
               title="Report message"
             >
-              <Flag size={13} />
+              <Flag size={16} strokeWidth={2} />
             </button>
           )}
         </div>
@@ -964,12 +955,12 @@ function EmptyConversationState({ showBackButton, onBack, error }) {
           className="absolute left-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
           aria-label="Back to renters"
         >
-          <ArrowLeft size={16} />
+          <ArrowLeft size={18} strokeWidth={2} />
         </button>
       )}
       <div className="max-w-md">
         <div className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full border border-[#dfe6ee] bg-white text-[#017FE6]">
-          <MessageSquare size={22} />
+          <MessageCircle size={24} strokeWidth={2} aria-hidden="true" />
         </div>
         <h2 className="text-lg font-semibold tracking-normal text-[#111827]">
           Start a conversation
@@ -1031,7 +1022,7 @@ function PinStatusToast({ message }) {
   return (
     <div className="owner-pin-toast" role="status" aria-live="polite">
       <span className="owner-pin-toast-icon" aria-hidden="true">
-        <Pin size={15} className="-rotate-45" />
+        <Pin size={16} strokeWidth={2} className="-rotate-45" />
       </span>
       <span>{message}</span>
     </div>

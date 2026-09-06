@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import {
-  CalendarCheck2,
-  Car,
+  CalendarDays,
+  CarFront,
   ChevronRight,
   Clock3,
-  FileCheck2,
-  UserRound,
+  FileText,
+  User,
   Users,
 } from "lucide-react";
 import {
@@ -33,7 +33,7 @@ const tooltipStyle = {
 export default function DashboardView({ vehicles, customers, documents, bookings = [], period, onSelect }) {
   const platformCustomers = customers.filter((customer) => customer.role !== "Admin");
   const renters = platformCustomers.filter((customer) => customer.role === "Renter").length;
-  const operators = platformCustomers.filter((customer) => customer.role === "Operator").length;
+  const operators = platformCustomers.filter((customer) => customer.role === "Vehicle Owner").length;
   const available = vehicles.filter((vehicle) => vehicle.status === "Available").length;
   const unavailable = vehicles.length - available;
   const activeRentals = bookings.filter((booking) => booking.isActive).length;
@@ -57,10 +57,10 @@ export default function DashboardView({ vehicles, customers, documents, bookings
     <div className="space-y-3">
       <section aria-label="Platform operations statistics" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <DashboardKpiCard label="Renters" value={renters} actionLabel="View renters" onAction={() => onSelect("customers", { role: "Renter" })} icon={Users} tone="blue" />
-        <DashboardKpiCard label="Operators" value={operators} actionLabel="View operators" onAction={() => onSelect("customers", { role: "Operator" })} icon={UserRound} tone="blue" />
-        <DashboardKpiCard label="Vehicles" value={vehicles.length} actionLabel="View vehicles" onAction={() => onSelect("vehicles")} icon={Car} tone="blue" />
-        <DashboardKpiCard label="Active Rentals" value={activeRentals} actionLabel="View rentals" onAction={() => onSelect("bookings", { status: "Active" })} icon={CalendarCheck2} tone="green" />
-        <DashboardKpiCard label="Pending Reviews" value={pendingDocuments} actionLabel="Review documents" onAction={() => onSelect("documents", { status: "Pending Review" })} icon={FileCheck2} tone="amber" />
+        <DashboardKpiCard label="Vehicle Owners" value={operators} actionLabel="View operators" onAction={() => onSelect("customers", { role: "Vehicle Owner" })} icon={User} tone="blue" />
+        <DashboardKpiCard label="Vehicles" value={vehicles.length} actionLabel="View vehicles" onAction={() => onSelect("vehicles")} icon={CarFront} tone="blue" />
+        <DashboardKpiCard label="Active Rentals" value={activeRentals} actionLabel="View rentals" onAction={() => onSelect("bookings", { status: "Active" })} icon={CalendarDays} tone="green" />
+        <DashboardKpiCard label="Pending Reviews" value={pendingDocuments} actionLabel="Review documents" onAction={() => onSelect("documents", { status: "Pending Review" })} icon={FileText} tone="amber" />
         <DashboardKpiCard label="Overdue Returns" value={overdueRentals} actionLabel="View overdue" onAction={() => onSelect("bookings", { status: "Overdue" })} icon={Clock3} tone="red" />
       </section>
 
@@ -107,7 +107,7 @@ export default function DashboardView({ vehicles, customers, documents, bookings
                 ))}
               </ul>
             </div>
-          ) : <EmptyState icon={Car} title="No fleet data" description="Registered vehicle availability will appear here." />}
+          ) : <EmptyState icon={CarFront} title="No fleet data" description="Registered vehicle availability will appear here." />}
         </DashboardCard>
       </section>
 
@@ -121,7 +121,7 @@ export default function DashboardView({ vehicles, customers, documents, bookings
             <table className="w-full min-w-[820px] border-collapse">
               <caption className="sr-only">Recent RentifyPro booking operations</caption>
               <thead className="bg-slate-50">
-                <tr>{["Booking", "Renter", "Vehicle", "Operator", "Pickup", "Return", "Status"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr>
+                <tr>{["Booking", "Renter", "Vehicle", "Vehicle Owner", "Pickup", "Return", "Status"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {recentBookings.map((booking) => (
@@ -137,7 +137,7 @@ export default function DashboardView({ vehicles, customers, documents, bookings
                 ))}
               </tbody>
             </table>
-            {!recentBookings.length ? <EmptyState icon={CalendarCheck2} title="No bookings found" description="New platform bookings will appear here." /> : null}
+            {!recentBookings.length ? <EmptyState icon={CalendarDays} title="No bookings found" description="New platform bookings will appear here." /> : null}
           </div>
         </DashboardCard>
       </section>
@@ -227,7 +227,7 @@ function DashboardKpiCard({ label, value, actionLabel, onAction, icon: Icon, ton
           <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${tones[tone] || tones.blue}`}><Icon size={20} aria-hidden="true" /></div>
           <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-950">{value}</p></div>
         </div>
-        <button type="button" onClick={onAction} className="group mt-auto flex w-full items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><span>{actionLabel}</span><ChevronRight size={15} className="transition group-hover:translate-x-0.5" /></button>
+        <button type="button" onClick={onAction} className="group mt-auto flex w-full items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><span>{actionLabel}</span><ChevronRight size={16} strokeWidth={2} className="transition group-hover:translate-x-0.5" aria-hidden="true" /></button>
       </div>
     </article>
   );
@@ -238,10 +238,10 @@ function DashboardCard({ title, description, children, footerLabel, onFooterClic
     <article className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div><h2 className="text-base font-bold text-slate-950">{title}</h2>{description ? <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p> : null}</div>
-        {headerActionLabel ? <button type="button" onClick={onHeaderAction} className="group mt-0.5 inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><span>{headerActionLabel}</span><ChevronRight size={16} className="transition group-hover:translate-x-0.5" /></button> : null}
+        {headerActionLabel ? <button type="button" onClick={onHeaderAction} className="group mt-0.5 inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><span>{headerActionLabel}</span><ChevronRight size={18} strokeWidth={2} className="transition group-hover:translate-x-0.5" aria-hidden="true" /></button> : null}
       </div>
       {children}
-      {footerLabel ? <button type="button" onClick={onFooterClick} className="mt-4 flex w-full items-center justify-between border-t border-slate-100 pt-4 text-sm font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><span>{footerLabel}</span><ChevronRight size={17} /></button> : null}
+      {footerLabel ? <button type="button" onClick={onFooterClick} className="mt-4 flex w-full items-center justify-between border-t border-slate-100 pt-4 text-sm font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><span>{footerLabel}</span><ChevronRight size={18} strokeWidth={2} aria-hidden="true" /></button> : null}
     </article>
   );
 }

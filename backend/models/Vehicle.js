@@ -66,6 +66,22 @@ const vehicleSchema = new mongoose.Schema(
       enum: ["hourly", "daily"],
       default: "hourly",
     },
+    lateReturnFeeType: {
+      type: String,
+      enum: ["percentage", "fixed_hourly"],
+      default: "percentage",
+    },
+    lateReturnFeeValue: {
+      type: Number,
+      min: [0, "Late-return fee value must be zero or greater."],
+      default: 25,
+    },
+    lateReturnGraceMinutes: {
+      type: Number,
+      min: [0, "Late-return grace period must be zero or greater."],
+      max: [1440, "Late-return grace period cannot exceed 1,440 minutes."],
+      default: 0,
+    },
     location: {
       type: String,
       required: [true, "Location is required."],

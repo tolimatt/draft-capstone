@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import NotificationActionMenu from "../../components/NotificationActionMenu";
+import NotificationDetailsModal from "../../components/NotificationDetailsModal";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { requestLiveCountersRefresh } from "../../utils/liveCounters";
 import ModalPortal from "../../components/ModalPortal";
+import OwnerPageHeader from "../components/OwnerPageHeader";
 
 const formatDateTime = (value) =>
   value
@@ -29,6 +31,7 @@ export default function Notifications() {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
   const [confirmationAction, setConfirmationAction] = useState(null);
+  const [selectedNotification, setSelectedNotification] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
 
   const unreadCount = useMemo(
@@ -82,10 +85,24 @@ export default function Notifications() {
           notification._id === notificationId ? response.notification : notification
         )
       );
+      setSelectedNotification((previous) =>
+        previous?._id === notificationId ? response.notification : previous
+      );
       requestLiveCountersRefresh();
+      return response.notification;
     } catch (err) {
       setError(err.message || "Failed to update notification.");
+      return null;
     }
+  };
+
+  const openNotificationDetails = async (notification) => {
+    let notificationToShow = notification;
+    if (!showArchived && !isNotificationRead(notification)) {
+      const updatedNotification = await markAsRead(notification._id);
+      if (updatedNotification) notificationToShow = updatedNotification;
+    }
+    setSelectedNotification(notificationToShow);
   };
 
   const markAllAsRead = async () => {
@@ -129,6 +146,7 @@ export default function Notifications() {
     try {
       await API.archiveNotification(notificationId);
       setNotifications((previous) => previous.filter((notification) => notification._id !== notificationId));
+      setSelectedNotification((previous) => (previous?._id === notificationId ? null : previous));
       requestLiveCountersRefresh();
     } catch (err) {
       setError(err.message || "Failed to archive notification.");
@@ -143,6 +161,7 @@ export default function Notifications() {
     try {
       await API.restoreNotification(notificationId);
       setNotifications((previous) => previous.filter((notification) => notification._id !== notificationId));
+      setSelectedNotification((previous) => (previous?._id === notificationId ? null : previous));
       requestLiveCountersRefresh();
     } catch (err) {
       setError(err.message || "Failed to restore notification.");
@@ -157,6 +176,7 @@ export default function Notifications() {
     try {
       await API.deleteNotification(notificationId);
       setNotifications((previous) => previous.filter((notification) => notification._id !== notificationId));
+      setSelectedNotification((previous) => (previous?._id === notificationId ? null : previous));
       requestLiveCountersRefresh();
     } catch (err) {
       setError(err.message || "Failed to delete notification.");
@@ -178,14 +198,11 @@ export default function Notifications() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
-          <p className="text-sm text-gray-600">
-            {unreadCount} unread notification{unreadCount === 1 ? "" : "s"}.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+      <OwnerPageHeader
+        title="Notifications"
+        description={`${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}.`}
+        actions={(
+          <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
           <button onClick={() => setShowArchived((value) => !value)} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm">
             {showArchived ? "Active" : "Archive"}
           </button>
@@ -205,8 +222,9 @@ export default function Notifications() {
             Mark all as read
           </button>
           </>}
-        </div>
-      </div>
+          </div>
+        )}
+      />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!loading && !notifications.length && (
@@ -251,6 +269,7 @@ export default function Notifications() {
                 <NotificationActionMenu
                   isUnread={isUnread}
                   isArchived={showArchived}
+                  onViewDetails={() => openNotificationDetails(notification)}
                   onMarkAsRead={() => markAsRead(notification._id)}
                   onArchive={() => archiveNotification(notification._id)}
                   onRestore={() => restoreNotification(notification._id)}
@@ -294,6 +313,12 @@ export default function Notifications() {
         </div>
         </ModalPortal>
       )}
+
+      <NotificationDetailsModal
+        notification={selectedNotification}
+        viewerRole="owner"
+        onClose={() => setSelectedNotification(null)}
+      />
     </div>
   );
 }

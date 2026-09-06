@@ -1,5 +1,6 @@
+import { getSessionUser } from "../utils/sessionStore";
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import API from "../utils/api";
 import { BOOKING_REPORT_CATEGORY_GROUPS } from "../data/reportCategories";
 import ReportCategorySelect from "./ReportCategorySelect";
@@ -12,6 +13,7 @@ export default function ReportIssueModal({ booking, perspective = "renter", onCl
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState([]);
   const [error, setError] = useState("");
+  const [existingReport, setExistingReport] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -25,6 +27,7 @@ export default function ReportIssueModal({ booking, perspective = "renter", onCl
     setDescription("");
     setFiles([]);
     setError("");
+    setExistingReport(null);
   }, [booking?._id, perspective]);
 
   if (!booking) return null;
@@ -37,6 +40,7 @@ export default function ReportIssueModal({ booking, perspective = "renter", onCl
   const submit = async (event) => {
     event.preventDefault();
     setError("");
+    setExistingReport(null);
     if (!category) return setError("Select the issue that best describes what happened.");
     if (description.trim().length < 20) return setError("Please provide at least 20 characters of incident details.");
     try {
@@ -56,6 +60,7 @@ export default function ReportIssueModal({ booking, perspective = "renter", onCl
       onSubmitted?.(response.report);
       onClose?.();
     } catch (requestError) {
+      if (requestError.details?.code === "DUPLICATE_REPORT") setExistingReport(requestError.details.reportId || "");
       setError(requestError.message || "The report could not be submitted.");
     } finally {
       setSubmitting(false);
@@ -77,7 +82,8 @@ export default function ReportIssueModal({ booking, perspective = "renter", onCl
       <ReportCategorySelect label="Booking issue" placeholder="Select a booking-related category" groups={categoryGroups} value={category} onChange={setCategory} disabled={submitting} />
       <label className="block"><span className="mb-1.5 block text-sm font-semibold text-slate-800">Incident details</span><textarea value={description} onChange={(event) => setDescription(event.target.value.slice(0, 3000))} rows={6} placeholder="Explain what happened, when it occurred, and any relevant booking details." className="w-full resize-y rounded-xl border border-slate-300 px-3 py-2.5 text-sm leading-6 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /><span className="mt-1 block text-right text-xs text-slate-400">{description.length}/3000</span></label>
       <EvidenceFilePicker files={files} onChange={setFiles} onError={setError} disabled={submitting} />
-      {error ? <p role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700"><AlertTriangle size={17} className="mt-0.5 shrink-0" />{error}</p> : null}
+      {error ? <p role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700"><TriangleAlert size={18} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />{error}</p> : null}
+      {existingReport !== null && <a href={(getSessionUser()?.role === "owner" ? "/owner-dashboard?tab=Reports" : "/reports") + (existingReport ? "#report-" + encodeURIComponent(existingReport) : "")} className="inline-block text-sm font-semibold text-blue-700 underline">View existing report</a>}
     </ReportModalFrame>
   );
 }

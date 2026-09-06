@@ -1,4 +1,4 @@
-import { UserRound, Users } from "lucide-react";
+import { User, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { EmptyState, FilterSelect, SearchField, StatCard, StatusBadge, TableFooter } from "../components/AdminUI";
 
@@ -34,15 +34,15 @@ export default function CustomersView({ customers, adminEmail, initialRole = "Al
     <div className="space-y-5">
       <section aria-label="Customer statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total Customers" value={visibleCustomers.length} description="All customer accounts" icon={Users} />
-        <StatCard label="Active Customers" value={active} description="Verified and active" icon={UserRound} tone="green" />
-        <StatCard label="Pending Verification" value={pending} description="Awaiting account review" icon={UserRound} tone="amber" />
-        <StatCard label="Inactive / Suspended" value={inactive} description="Restricted accounts" icon={UserRound} tone="red" />
+        <StatCard label="Active Customers" value={active} description="Verified and active" icon={User} tone="green" />
+        <StatCard label="Pending Verification" value={pending} description="Awaiting account review" icon={User} tone="amber" />
+        <StatCard label="Inactive / Suspended" value={inactive} description="Restricted accounts" icon={User} tone="red" />
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="grid gap-4 border-b border-slate-200 p-4 lg:grid-cols-[minmax(260px,1.4fr)_190px_210px_190px_auto] lg:items-end">
           <SearchField label="Search Customers" value={search} onChange={setSearch} placeholder="Search by name, email, or phone..." />
-          <FilterSelect label="Role" value={role} onChange={setRole} options={["All Roles", "Renter", "Operator"]} />
+          <FilterSelect label="Role" value={role} onChange={setRole} options={["All Roles", "Renter", "Vehicle Owner"]} />
           <FilterSelect label="Status" value={status} onChange={setStatus} options={["All Statuses", "Active", "Pending Verification", "Inactive", "Suspended"]} />
           <label className="block"><span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">Joined From</span><input type="date" value={joined} onChange={(event) => setJoined(event.target.value)} className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-700 outline-none hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>
           <button type="button" onClick={clearFilters} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Clear Filters</button>

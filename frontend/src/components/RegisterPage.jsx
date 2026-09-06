@@ -1,3 +1,5 @@
+import PreKycReviewNotice from "./PreKycReviewNotice";
+import { documentStatusLabel as formatDocumentStatus } from "../utils/workflowStatus";
 // User registration
 // Step 1: personal details
 // Step 2: ID and selfie check
@@ -18,12 +20,11 @@ import {
   preRegisterIdFace,
   preSelfieVerify,
   getPreKycSessionToken,
-  getPreKycStatus,
 } from "../utils/kycApi";
 
 import {
-  Mail, Phone, User, Loader, Upload, CheckCircle2,
-  ArrowLeft, ArrowRight, ShieldCheck, Car, Check, Calendar, MapPin,
+  Mail, Phone, User, Loader, Upload, CircleCheck,
+  ArrowLeft, ArrowRight, ShieldCheck, CarFront, Check, Calendar, MapPin,
 } from "lucide-react";
 
 import FormInput from "./FormInput";
@@ -40,14 +41,6 @@ const ACTION_COOLDOWN_MS = 2000;
 const RATE_LIMIT_FALLBACK_SECONDS = 5 * 60;
 const REGISTER_RATE_LIMIT_STORAGE_KEY = "rentifypro.registerRateLimitUntil";
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
-const formatDocumentStatus = (status) => ({
-  queued: "Queued",
-  processing: "Screening",
-  retry_wait: "Retrying",
-  pending_review: "Awaiting Super Admin",
-  verified: "Approved",
-  rejected: "Resubmission Required",
-}[status] || "Not uploaded");
 const normalizePhMobileInput = (value = "") => {
   const digits = String(value || "").replace(/\D/g, "");
   if (!digits) return "";
@@ -798,23 +791,6 @@ export default function RegisterPage({
     }
   };
 
-  useEffect(() => {
-    if (!kyc.idRegistered || !form.email) return undefined;
-    let cancelled = false;
-    const refreshStatus = async () => {
-      try {
-        const payload = await getPreKycStatus(form.email, "user");
-        const idDocument = payload?.documents?.find((document) => document.docType === "id");
-        if (!cancelled && idDocument?.status) setDocumentReviewStatus(idDocument.status);
-      } catch {
-        // Registration remains usable if a background status refresh is temporarily unavailable.
-      }
-    };
-    void refreshStatus();
-    const timer = window.setInterval(() => void refreshStatus(), 10_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [form.email, kyc.idRegistered]);
-
   // KYC step 2: capture selfie
 
   const captureSelfie = async () => {
@@ -1107,7 +1083,7 @@ export default function RegisterPage({
                     <div className="flex flex-col items-center gap-1">
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
                         step > s ? "bg-[#017FE6] text-white" : step === s ? "bg-[#017FE6] text-white ring-4 ring-blue-100" : "bg-gray-100 text-gray-400"
-                      }`}>{step > s ? <Check size={15} strokeWidth={3} /> : s}</div>
+                      }`}>{step > s ? <Check size={16} strokeWidth={2} aria-hidden="true" /> : s}</div>
                       <span className="text-[10px] font-medium text-gray-400 hidden sm:block">
                         {STEP_LABELS[s - 1]}
                       </span>
@@ -1121,7 +1097,7 @@ export default function RegisterPage({
         {successMessage && (
           <div className="mb-5 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white">
-              <CheckCircle2 size={18} />
+              <CircleCheck size={18} strokeWidth={2} aria-hidden="true" />
             </div>
             <p className="text-sm font-medium text-emerald-700">{successMessage}</p>
           </div>
@@ -1148,7 +1124,7 @@ export default function RegisterPage({
                         <button type="button" onClick={() => handleAccountSelect("user")}
                           className={`flex items-center gap-3 p-3 rounded-xl border-2 transition ${accountType === "user" ? "border-[#017FE6] bg-blue-50" : "border-gray-200 hover:border-[#017FE6]"}`}>
                           <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 text-xs ${accountType === "user" ? "border-[#017FE6] bg-[#017FE6] text-white" : "border-gray-300"}`}>
-                            {accountType === "user" && <Check size={13} strokeWidth={3} aria-hidden="true" />}
+                            {accountType === "user" && <Check size={16} strokeWidth={2} aria-hidden="true" />}
                           </div>
                           <User size={18} className="text-gray-600" />
                           <div className="text-left"><p className="font-semibold text-gray-800 text-sm">User</p><p className="text-xs text-gray-500">Rent vehicles</p></div>
@@ -1156,7 +1132,7 @@ export default function RegisterPage({
                         <button type="button" onClick={() => handleAccountSelect("owner")}
                           className="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 hover:border-[#017FE6] transition">
                           <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center shrink-0" />
-                          <Car size={18} className="text-gray-600" />
+                          <CarFront size={18} strokeWidth={2} className="text-gray-600" aria-hidden="true" />
                           <div className="text-left"><p className="font-semibold text-gray-800 text-sm">Vehicle Owner</p><p className="text-xs text-gray-500">List vehicles after verification</p></div>
                         </button>
                       </div>
@@ -1391,8 +1367,8 @@ export default function RegisterPage({
                             kyc.idRegistered ? "bg-green-500 text-white cursor-default" : "bg-gray-900 text-white hover:opacity-95"
                           } disabled:opacity-50`}>
                           {isLoading && !kyc.idRegistered
-                            ? <><Loader size={15} className="animate-spin" /> Processing...</>
-                            : kyc.idRegistered ? <><Check size={15} strokeWidth={3} aria-hidden="true" /> ID Registered</> : "1. Register ID"}
+                            ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Processing...</>
+                            : kyc.idRegistered ? <><Check size={16} strokeWidth={2} aria-hidden="true" /> ID Registered</> : "1. Register ID"}
                         </button>
 
                         <button type="button" disabled={isLoading || !kyc.idRegistered} onClick={kycUi.showCamera ? closeCamera : openCamera}
@@ -1405,8 +1381,8 @@ export default function RegisterPage({
                             kyc.selfieBase64Clean ? "bg-blue-500 text-white" : "bg-gray-700 text-white hover:opacity-95"
                           } disabled:opacity-50`}>
                           {isLoading && !kyc.selfieBase64Clean
-                            ? <><Loader size={15} className="animate-spin" /> Capturing...</>
-                            : kyc.selfieBase64Clean ? <><Check size={15} strokeWidth={3} aria-hidden="true" /> Retake Selfie</> : "3. Capture Selfie"}
+                            ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Capturing...</>
+                            : kyc.selfieBase64Clean ? <><Check size={16} strokeWidth={2} aria-hidden="true" /> Retake Selfie</> : "3. Capture Selfie"}
                         </button>
 
                         <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || kyc.selfieVerified} onClick={verifySelfie}
@@ -1414,8 +1390,8 @@ export default function RegisterPage({
                             kyc.selfieVerified ? "bg-green-500 text-white cursor-default" : "bg-green-600 text-white hover:opacity-95"
                           } disabled:opacity-50`}>
                           {isLoading && !kyc.selfieVerified
-                            ? <><Loader size={15} className="animate-spin" /> Verifying...</>
-                            : kyc.selfieVerified ? <><Check size={15} strokeWidth={3} aria-hidden="true" /> Face Verified</> : "4. Verify Face Match"}
+                            ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Verifying...</>
+                            : kyc.selfieVerified ? <><Check size={16} strokeWidth={2} aria-hidden="true" /> Face Verified</> : "4. Verify Face Match"}
                         </button>
                       </div>
 
@@ -1489,6 +1465,8 @@ export default function RegisterPage({
                     </div>
                   </>
                 )}
+
+                <PreKycReviewNotice email={form.email} enabled={kyc.idRegistered} onIdStatus={setDocumentReviewStatus} onResubmit={() => setStep(2)} />
 
                 {/* navigation */}
                 <div className="flex items-center gap-3 pt-1">

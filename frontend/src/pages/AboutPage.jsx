@@ -29,7 +29,7 @@ import Navbar from "../components/Navbar";
   const [isTyping, setIsTyping] = useState(false);
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="rp-renter-page min-h-screen bg-white">
       <Navbar
         activePage="about"
         isLoggedIn={isLoggedIn}
@@ -52,7 +52,7 @@ import Navbar from "../components/Navbar";
 
 
                   {/* content */}
-            <div className="pt-28 pb-20 px-6 bg-white">
+            <div className="rp-about-page-content pt-24 pb-16 px-4 bg-white sm:pt-28 sm:pb-20 sm:px-6">
               {/* header */}
               <div className="text-center mb-12">
                 <h1 className="text-3xl font-bold text-gray-900">
@@ -64,7 +64,7 @@ import Navbar from "../components/Navbar";
               </div>
 
               {/* story */}
-              <div className="max-w-4xl mx-auto bg-white border rounded-xl shadow-sm p-8 mb-14">
+              <div className="max-w-4xl mx-auto bg-white border rounded-xl shadow-sm p-5 mb-12 sm:p-8 sm:mb-14">
                 <h2 className="text-xl font-semibold mb-4">
                   Our <span className="text-[#017FE6]">Story</span>
                 </h2>
@@ -241,10 +241,10 @@ import Navbar from "../components/Navbar";
       </footer>
 
         {showAI && (
-    <div className="
-      fixed bottom-4 right-4
-      w-[95vw] sm:w-[400px]
-      h-[70vh] sm:h-[450px]
+    <div className="rp-legacy-ai-chat
+      fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))]
+      w-[calc(100vw-2rem)] sm:w-[400px]
+      h-[70dvh] sm:h-[450px]
       bg-white rounded-2xl shadow-2xl
       z-50 overflow-hidden
       flex flex-col
@@ -259,7 +259,14 @@ import Navbar from "../components/Navbar";
           Online
         </p>
       </div>
-      <button onClick={() => setShowAI(false)}>X</button>
+      <button
+        type="button"
+        onClick={() => setShowAI(false)}
+        className="flex h-10 w-10 items-center justify-center rounded-xl transition hover:bg-white/10"
+        aria-label="Close Rentify AI"
+      >
+        X
+      </button>
     </div>
 
     {/* chat body */}

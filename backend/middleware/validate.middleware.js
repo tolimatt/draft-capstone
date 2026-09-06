@@ -268,6 +268,10 @@ export const validateObjectIdParam = (paramName = "id") => (req, _res, next) => 
 
 const AVAILABILITY_STATUSES = new Set(["available", "unavailable"]);
 const COVER_DISPLAY_MODES = new Set(["auto", "photo", "cutout"]);
+const LATE_RETURN_FEE_TYPES = new Set(["percentage", "fixed_hourly"]);
+const MAX_LATE_RETURN_PERCENTAGE = 100;
+const MAX_LATE_RETURN_FIXED_HOURLY = 100000;
+const MAX_LATE_RETURN_GRACE_MINUTES = 1440;
 const BOOKING_STATUSES = new Set(["pending", "confirmed", "extended", "completed", "cancelled", "rejected"]);
 const PAYMENT_STATUSES = new Set(["unpaid", "partial", "paid", "refunded"]);
 
@@ -340,6 +344,19 @@ const sanitizeVehicleBody = (req, { isUpdate = false } = {}) => {
     req.body.coverDisplayMode = "auto";
   }
 
+  if (hasOwn(req.body, "lateReturnFeeType")) {
+    req.body.lateReturnFeeType = toText(req.body.lateReturnFeeType).toLowerCase();
+  } else if (!isUpdate) {
+    req.body.lateReturnFeeType = "percentage";
+  }
+
+  if (!isUpdate && !hasOwn(req.body, "lateReturnFeeValue")) {
+    req.body.lateReturnFeeValue = 25;
+  }
+  if (!isUpdate && !hasOwn(req.body, "lateReturnGraceMinutes")) {
+    req.body.lateReturnGraceMinutes = 0;
+  }
+
   if (req.body.driverOptionEnabled !== undefined) {
     req.body.driverOptionEnabled = parseBoolean(req.body.driverOptionEnabled, false);
   } else if (!isUpdate) {
@@ -348,6 +365,43 @@ const sanitizeVehicleBody = (req, { isUpdate = false } = {}) => {
 
   if (!req.body.availabilityStatus) req.body.availabilityStatus = "available";
   return req.body;
+};
+
+const validateLateReturnPolicy = (body, errors, { required = false } = {}) => {
+  const hasType = body.lateReturnFeeType !== undefined;
+  const hasValue = body.lateReturnFeeValue !== undefined;
+  const hasGrace = body.lateReturnGraceMinutes !== undefined;
+  if (!required && !hasType && !hasValue && !hasGrace) return;
+
+  if (!LATE_RETURN_FEE_TYPES.has(body.lateReturnFeeType)) {
+    errors.lateReturnFeeType = "Late-return fee type must be percentage or fixed hourly.";
+  }
+
+  const feeValue = Number(body.lateReturnFeeValue);
+  const maxValue =
+    body.lateReturnFeeType === "fixed_hourly"
+      ? MAX_LATE_RETURN_FIXED_HOURLY
+      : MAX_LATE_RETURN_PERCENTAGE;
+  if (!Number.isFinite(feeValue) || feeValue < 0 || feeValue > maxValue) {
+    errors.lateReturnFeeValue =
+      body.lateReturnFeeType === "fixed_hourly"
+        ? "Fixed late-return fee must be between 0 and 100,000 per hour."
+        : "Late-return percentage must be between 0 and 100.";
+  } else {
+    body.lateReturnFeeValue = feeValue;
+  }
+
+  const graceMinutes = Number(body.lateReturnGraceMinutes);
+  if (
+    !Number.isFinite(graceMinutes) ||
+    !Number.isInteger(graceMinutes) ||
+    graceMinutes < 0 ||
+    graceMinutes > MAX_LATE_RETURN_GRACE_MINUTES
+  ) {
+    errors.lateReturnGraceMinutes = "Late-return grace period must be a whole number from 0 to 1,440 minutes.";
+  } else {
+    body.lateReturnGraceMinutes = graceMinutes;
+  }
 };
 
 export const validateVehicleCreate = async (req, res, next) => {
@@ -392,6 +446,8 @@ export const validateVehicleCreate = async (req, res, next) => {
   } else {
     body.driverDailyRate = 0;
   }
+
+  validateLateReturnPolicy(body, errors, { required: true });
 
   const uploadedImages = Array.isArray(req.files) ? req.files.length : 0;
   const linkedImages = body.imageUrls.length;
@@ -469,6 +525,8 @@ export const validateVehicleUpdate = async (req, res, next) => {
       body.driverDailyRate = driverDailyRate;
     }
   }
+
+  validateLateReturnPolicy(body, errors);
 
   if (body.coverUploadIndex) {
     const coverUploadIndex = Number.parseInt(body.coverUploadIndex, 10);

@@ -56,6 +56,7 @@ const userSchema = new mongoose.Schema(
     archivedBy: { type: String, trim: true, default: "" },
     archiveReason: { type: String, trim: true, default: "" },
     sessionVersion: { type: Number, default: 0 },
+    kycStatusUpdatedAt: { type: Date },
     kycStatus: {
       type: String,
       enum: ["not_started", "id_uploaded", "challenge_passed", "approved", "rejected"],

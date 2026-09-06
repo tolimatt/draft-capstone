@@ -103,6 +103,7 @@ const serializeReport = (report, requester, { admin = false } = {}) => {
     evidence: serializeEvidence(raw, isAdmin || isReporter),
     appeal: raw.appeal?.submittedAt ? raw.appeal : null,
     informationResponses: isAdmin || isReporter ? raw.informationResponses || [] : [],
+    informationRequest: isAdmin || isReporter ? [...(raw.activity || [])].reverse().find((item) => item.action === "status_awaiting_information")?.note || "" : "",
     activity: isAdmin ? raw.activity : undefined,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
@@ -166,7 +167,7 @@ const revokeReportSanctions = async (report, adminId, reason) => {
       await Vehicle.updateOne({ _id: sanction.vehicle }, { $set: { availabilityStatus: sanction.metadata.previousAvailability } });
     }
     if (sanction.type === "kyc_reverification" && sanction.metadata?.previousKycStatus) {
-      await User.updateOne({ _id: sanction.user }, { $set: { kycStatus: sanction.metadata.previousKycStatus } });
+      await User.updateOne({ _id: sanction.user }, { $set: { kycStatus: sanction.metadata.previousKycStatus, kycStatusUpdatedAt: new Date() } });
     }
   }
   await syncUserModerationState(report.reportedUser?._id || report.reportedUser);
@@ -246,7 +247,7 @@ export const createReport = async (req, res, next) => {
     const existingReport = await Report.findOne({ sourceType: "booking", reporter: requesterId, booking: booking._id }).select("_id").lean();
     if (existingReport) {
       await cleanupReportEvidenceFiles(req.files);
-      return res.status(409).json({ success: false, message: "You already submitted a report for this booking." });
+      return res.status(409).json({ success: false, code: "DUPLICATE_REPORT", reportId: existingReport._id, message: "You already submitted a report for this booking. Open the existing report to follow its review." });
     }
     const report = await Report.create({
       reporter: requesterId,
@@ -274,7 +275,7 @@ export const createReport = async (req, res, next) => {
   } catch (error) {
     await cleanupReportEvidenceFiles(req.files);
     if (error?.code === 11000) {
-      return res.status(409).json({ success: false, message: "You already submitted a report for this booking." });
+      return res.status(409).json({ success: false, code: "DUPLICATE_REPORT", message: "You already submitted a report for this booking. Open Reports to follow its review." });
     }
     return next(error);
   }
@@ -299,7 +300,7 @@ export const createMessageReport = async (req, res, next) => {
 
     const reporterIsOwner = sameId(message.owner, req.user._id);
     const existingReport = await Report.findOne({ sourceType: "chat_message", reporter: req.user._id, reportedMessage: message._id }).select("_id").lean();
-    if (existingReport) return res.status(409).json({ success: false, message: "You already reported this message." });
+    if (existingReport) return res.status(409).json({ success: false, code: "DUPLICATE_REPORT", reportId: existingReport._id, message: "You already reported this message. Open the existing report to follow its review." });
     const report = await Report.create({
       sourceType: "chat_message",
       reporter: req.user._id,
@@ -327,7 +328,7 @@ export const createMessageReport = async (req, res, next) => {
     return res.status(201).json({ success: true, report: serializeReport(populated, req.user) });
   } catch (error) {
     if (error?.code === 11000) {
-      return res.status(409).json({ success: false, message: "You already reported this message." });
+      return res.status(409).json({ success: false, code: "DUPLICATE_REPORT", message: "You already reported this message. Open Reports to follow its review." });
     }
     return next(error);
   }
@@ -476,6 +477,9 @@ export const updateAdminReport = async (req, res, next) => {
     const report = await Report.findById(req.params.id);
     if (!report) return res.status(404).json({ success: false, message: "Report not found." });
     if (status) {
+      if (status === "awaiting_information" && text(req.body?.note).length < 10) {
+        return res.status(400).json({ success: false, message: "Explain what information the reporter needs to provide, using at least 10 characters." });
+      }
       if (!["open", "investigating", "awaiting_information"].includes(status)) {
         return res.status(400).json({ success: false, message: "Use a moderation decision to resolve a report." });
       }
@@ -572,7 +576,7 @@ export const decideAdminReport = async (req, res, next) => {
         metadata,
       });
       if (action === "kyc_reverification") {
-        await User.updateOne({ _id: report.reportedUser._id }, { $set: { kycStatus: "not_started" }, $inc: { sessionVersion: 1 } });
+        await User.updateOne({ _id: report.reportedUser._id }, { $set: { kycStatus: "not_started", kycStatusUpdatedAt: new Date() }, $inc: { sessionVersion: 1 } });
       }
       await sendCaseNotification(report.reportedUser._id, report, "Moderation decision issued", `${report.caseReference}: ${userVisibleReason}`, action === "permanent_ban" ? "urgent" : "important");
       await syncUserModerationState(report.reportedUser._id);

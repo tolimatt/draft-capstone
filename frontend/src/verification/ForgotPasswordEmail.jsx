@@ -2,7 +2,7 @@
 // Keep responses generic so the email is not exposed
 
 import React, { useState } from "react";
-import { Mail, Loader, ArrowLeft, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { Mail, Loader, ArrowLeft, ShieldCheck, CircleCheck } from "lucide-react";
 import API from "../utils/api";
 
 const EMAIL_REGEX = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
@@ -93,9 +93,9 @@ export default function ForgotPasswordEmail({ onNavigateToOTP, onNavigateToSignI
               </p>
             </div>
             <div className="space-y-3 text-sm text-blue-100">
-              <p className="flex items-center gap-2"><CheckCircle2 size={16} /> Protected recovery flow for your account</p>
-              <p className="flex items-center gap-2"><CheckCircle2 size={16} /> Domain validation before sending code</p>
-              <p className="flex items-center gap-2"><CheckCircle2 size={16} /> Immediate continuation to OTP verification</p>
+              <p className="flex items-center gap-2"><CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> Protected recovery flow for your account</p>
+              <p className="flex items-center gap-2"><CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> Domain validation before sending code</p>
+              <p className="flex items-center gap-2"><CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> Immediate continuation to OTP verification</p>
             </div>
           </div>
         </div>
@@ -161,7 +161,7 @@ export default function ForgotPasswordEmail({ onNavigateToOTP, onNavigateToSignI
                   className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#017FE6] to-[#0165B8] py-3 text-sm font-semibold text-white transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-65"
                 >
                   {isLoading ? (
-                    <><Loader size={17} className="animate-spin" /> Sending...</>
+                    <><Loader size={18} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Sending...</>
                   ) : (
                     "Send Verification Code"
                   )}
@@ -174,7 +174,7 @@ export default function ForgotPasswordEmail({ onNavigateToOTP, onNavigateToSignI
                 disabled={isLoading}
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 py-3 text-sm font-semibold text-slate-800 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <ArrowLeft size={17} /> Back to Sign In
+                <ArrowLeft size={18} strokeWidth={2} aria-hidden="true" /> Back to Sign In
               </button>
             </div>
 

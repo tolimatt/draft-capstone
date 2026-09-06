@@ -32,10 +32,14 @@ const DATA_KEYS = new Set([
   "walkInPaymentStatus", "cancellationStatus", "extensionStatus", "requestedReturnAt", "returnAt",
   "overdueMinutes", "isOverdue", "autoCompleted", "rating", "actions", "unreadCount", "actionUrl",
   "returnStatus", "returnRequestedAt", "actualReturnAt",
+  "vehicleName", "scheduledReturnAt", "graceMinutes", "lateReturnPenaltyRatePerHour",
+  "estimatedLateReturnPenaltyFee", "lateReturnPenaltyFee", "feeStatus", "rentalAmount",
+  "transactionFee", "totalAmountPayable", "paymentAmountPaid", "remainingBalance",
+  "paymentLocation", "paymentAction",
   "reportId", "caseReference", "sanctionType", "restrictedUntil",
 ]);
 
-const sanitizeData = (data = {}) => {
+export const sanitizeNotificationData = (data = {}) => {
   if (!data || typeof data !== "object" || Array.isArray(data)) return {};
   const clean = {};
   for (const [key, value] of Object.entries(data)) {
@@ -178,7 +182,7 @@ export const NotificationService = {
       return null;
     }
 
-    const safeData = sanitizeData(data);
+    const safeData = sanitizeNotificationData(data);
     const inferredEntity = resolveEntity(safeData);
     const resolvedEvent = resolveEvent({ type, event, title: normalizedTitle, data: safeData });
     const resolvedDedupeKey = resolveDedupeKey({

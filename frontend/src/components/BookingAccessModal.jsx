@@ -1,5 +1,5 @@
 import React from "react";
-import { Car, LogIn, UserPlus, X } from "lucide-react";
+import { CarFront, LogIn, UserPlus, X } from "lucide-react";
 import ModalPortal from "./ModalPortal";
 
 export default function BookingAccessModal({
@@ -50,7 +50,7 @@ export default function BookingAccessModal({
               onClick={onBrowseVehicles}
               className="rp-btn-secondary w-full py-2.5 text-sm flex items-center justify-center gap-2"
             >
-              <Car size={18} />
+              <CarFront size={18} strokeWidth={2} aria-hidden="true" />
               Continue Browsing Vehicles
             </button>
           </div>

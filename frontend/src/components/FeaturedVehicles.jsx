@@ -31,7 +31,7 @@ function VehicleCard({ vehicle, index, isLoggedIn, onViewDetails, onSignIn }) {
           </span>
         )}
         <span className="absolute top-4 right-4 bg-gray-900 text-white px-3 py-1 rounded-full text-sm font-semibold">
-          <Star size={14} className="inline-block text-yellow-400" fill="currentColor" aria-hidden="true" />
+          <Star size={16} strokeWidth={2} className="inline-block text-yellow-400" fill="currentColor" aria-hidden="true" />
           {vehicle.rating}
         </span>
 

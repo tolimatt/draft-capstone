@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, MessageSquarePlus, Send, X } from "lucide-react";
+import { LoaderCircle, MessageCirclePlus, Send, X } from "lucide-react";
 import API from "../utils/api";
 import { getSessionUser, SESSION_USER_UPDATED_EVENT } from "../utils/sessionStore";
 import { formatVehicleType } from "../utils/vehicleText";
@@ -522,13 +522,13 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
     <div
       role="dialog"
       aria-label="Rentify AI chatbot"
-      className="fixed bottom-4 right-4 z-[90] flex h-[76vh] max-h-[620px] w-[calc(100vw-2rem)] max-w-[440px] flex-col overflow-hidden rounded-[1.75rem] border border-blue-100/80 bg-white shadow-[0_30px_100px_rgba(2,32,71,0.3)]"
+      className="rp-ai-chat-dialog fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[90] flex h-[min(76dvh,620px)] max-h-[620px] w-[calc(100vw-2rem)] max-w-[440px] flex-col overflow-hidden rounded-[1.5rem] border border-blue-100/80 bg-white shadow-[0_20px_48px_rgba(2,32,71,0.2)] sm:bottom-4 sm:right-4 sm:rounded-[1.75rem] sm:shadow-[0_30px_100px_rgba(2,32,71,0.3)]"
     >
-      <div className="relative overflow-hidden bg-[linear-gradient(135deg,#0B75E7_0%,#056ED9_55%,#045FC3_100%)] px-4 py-4 text-white">
+      <div className="rp-ai-chat-header relative overflow-hidden bg-[linear-gradient(135deg,#0B75E7_0%,#056ED9_55%,#045FC3_100%)] px-4 py-4 text-white">
         <div className="pointer-events-none absolute -right-10 -top-14 h-36 w-36 rounded-full border border-white/10 bg-white/5" />
         <div className="pointer-events-none absolute -bottom-16 right-20 h-28 w-28 rounded-full border border-white/10" />
         <div className="relative flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="rp-ai-chat-title flex min-w-0 items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/25 bg-white/15 p-1 shadow-lg shadow-blue-950/15 backdrop-blur-sm">
               <img
                 src="/rentify-ai-logo-bubble-optimized.png"
@@ -547,7 +547,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="rp-ai-chat-actions flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={startNewConversation}
@@ -556,8 +556,8 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
               aria-label="Start a new chatbot conversation"
               title="Start a new chat"
             >
-              <MessageSquarePlus size={16} />
-              <span>New chat</span>
+              <MessageCirclePlus size={18} strokeWidth={2} aria-hidden="true" />
+              <span className="rp-ai-chat-new-label">New chat</span>
             </button>
             <button
               type="button"

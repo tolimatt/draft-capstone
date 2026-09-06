@@ -1,10 +1,11 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PreKycReviewNotice from "../components/PreKycReviewNotice";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Building2,
   Check,
-  CheckCircle2,
+  CircleCheck,
   Eye,
   EyeOff,
   FileText,
@@ -1091,7 +1092,7 @@ export default function RegisterOwnerPage({
             <React.Fragment key={s}>
               <div className="flex flex-col items-center gap-1">
                 <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition-all ${step > s ? "bg-[#017FE6] text-white" : step === s ? "bg-[#017FE6] text-white ring-4 ring-blue-100" : "bg-gray-100 text-gray-400"}`}>
-                  {step > s ? <Check size={15} strokeWidth={3} /> : s}
+                  {step > s ? <Check size={16} strokeWidth={2} aria-hidden="true" /> : s}
                 </div>
                 <span className="text-[10px] font-medium text-gray-400 hidden sm:block">{STEP_LABELS[s - 1]}</span>
               </div>
@@ -1102,7 +1103,7 @@ export default function RegisterOwnerPage({
 
         {successMessage && (
           <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 flex items-center gap-2">
-            <CheckCircle2 size={16} /> {successMessage}
+            <CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> {successMessage}
           </div>
         )}
 
@@ -1498,16 +1499,16 @@ export default function RegisterOwnerPage({
                 <p className="font-semibold text-gray-900 mb-3">Verification Steps</p>
                 <div className="grid grid-cols-2 gap-3">
                   <button type="button" disabled={isLoading || !kyc.idType || !kyc.idCardFile} onClick={registerId} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.idRegistered ? "bg-green-500 text-white cursor-default" : "bg-gray-900 text-white hover:opacity-95"} disabled:opacity-50`}>
-                    {isLoading && !kyc.idRegistered ? <><Loader size={15} className="animate-spin" /> Processing...</> : kyc.idRegistered ? "ID Registered" : "1. Register ID"}
+                    {isLoading && !kyc.idRegistered ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Processing...</> : kyc.idRegistered ? "ID Registered" : "1. Register ID"}
                   </button>
                   <button type="button" disabled={isLoading || !kyc.idRegistered} onClick={kycUi.showCamera ? closeCamera : openCamera} className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-[#017FE6] to-[#0165B8] hover:opacity-95 disabled:opacity-50 transition">
                     {kycUi.showCamera ? "Close Camera" : "2. Open Camera"}
                   </button>
                   <button type="button" disabled={isLoading || !cameraStream || !kyc.idRegistered} onClick={captureSelfie} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.selfieBase64Clean ? "bg-blue-500 text-white" : "bg-gray-700 text-white hover:opacity-95"} disabled:opacity-50`}>
-                    {isLoading && !kyc.selfieBase64Clean ? <><Loader size={15} className="animate-spin" /> Capturing...</> : kyc.selfieBase64Clean ? "3. Retake Selfie" : "3. Capture Selfie"}
+                    {isLoading && !kyc.selfieBase64Clean ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Capturing...</> : kyc.selfieBase64Clean ? "3. Retake Selfie" : "3. Capture Selfie"}
                   </button>
                   <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || kyc.selfieVerified} onClick={verifySelfie} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.selfieVerified ? "bg-green-500 text-white cursor-default" : "bg-green-600 text-white hover:opacity-95"} disabled:opacity-50`}>
-                    {isLoading && !kyc.selfieVerified ? <><Loader size={15} className="animate-spin" /> Verifying...</> : kyc.selfieVerified ? "Face Verified" : "4. Verify Face Match"}
+                    {isLoading && !kyc.selfieVerified ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Verifying...</> : kyc.selfieVerified ? "Face Verified" : "4. Verify Face Match"}
                   </button>
                 </div>
 
@@ -1540,6 +1541,8 @@ export default function RegisterOwnerPage({
               )}
             </>
           )}
+
+          <PreKycReviewNotice email={form.businessEmail} role="owner" enabled={kyc.idRegistered || supportingDocStatus.submitted} onResubmit={(type) => { if (type === "supporting") { setSupportingDocStatus({ submitted: false, message: "" }); setStep(2); } else setStep(3); }} />
 
           {step === 4 && (
             <>

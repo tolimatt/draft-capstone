@@ -5,9 +5,9 @@ import {
 } from "react";
 import {
   LayoutDashboard,
-  Car,
-  ClipboardList,
-  MessageSquare,
+  CarFront,
+  CalendarDays,
+  MessageCircle,
   Star,
   Wallet,
   BarChart3,
@@ -110,9 +110,9 @@ function Sidebar({
 
   const menuItems = [
     { id: "Dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "Vehicles", label: "My Vehicles", icon: Car },
-    { id: "Bookings", label: "Bookings", icon: ClipboardList },
-    { id: "Messages", label: "Messages", icon: MessageSquare, badge: unreadMessages },
+    { id: "Vehicles", label: "My Vehicles", icon: CarFront },
+    { id: "Bookings", label: "Bookings", icon: CalendarDays },
+    { id: "Messages", label: "Messages", icon: MessageCircle, badge: unreadMessages },
     { id: "Reviews", label: "Reviews", icon: Star },
     { id: "Earnings", label: "Earnings", icon: Wallet },
     { id: "Analytics", label: "Analytics", icon: BarChart3 },
@@ -223,7 +223,7 @@ function Sidebar({
                   : "text-gray-600 hover:bg-gray-100"
               }`}
             >
-              <item.icon className="w-5 h-5" />
+              <item.icon size={20} strokeWidth={2} aria-hidden="true" />
               <span className="text-sm font-medium flex-1">{item.label}</span>
               {item.badge > 0 && (
                 <span
@@ -246,7 +246,7 @@ function Sidebar({
             onClick={openLogoutModal}
             className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-red-600 hover:bg-red-50"
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut size={20} strokeWidth={2} aria-hidden="true" />
             Logout
           </div>
         </div>

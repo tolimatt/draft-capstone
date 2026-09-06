@@ -1,5 +1,6 @@
+import { getSessionUser } from "../utils/sessionStore";
 import { useEffect, useState } from "react";
-import { AlertTriangle, Flag, MessageSquareWarning } from "lucide-react";
+import { Flag, MessageCircleWarning, TriangleAlert } from "lucide-react";
 import API from "../utils/api";
 import { MESSAGE_REPORT_CATEGORY_GROUPS } from "../data/reportCategories";
 import ReportCategorySelect from "./ReportCategorySelect";
@@ -8,6 +9,7 @@ import ReportModalFrame from "./ReportModalFrame";
 export default function MessageReportModal({ message, senderName = "this user", onClose, onReported }) {
   const [category, setCategory] = useState("");
   const [error, setError] = useState("");
+  const [existingReport, setExistingReport] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -19,12 +21,14 @@ export default function MessageReportModal({ message, senderName = "this user", 
   useEffect(() => {
     setCategory("");
     setError("");
+    setExistingReport(null);
   }, [message?._id]);
 
   if (!message) return null;
 
   const submit = async (event) => {
     event.preventDefault();
+    setExistingReport(null);
     if (!category) {
       setError("Select why you are reporting this message.");
       return;
@@ -36,6 +40,7 @@ export default function MessageReportModal({ message, senderName = "this user", 
       onReported?.(response.report);
       onClose?.();
     } catch (requestError) {
+      if (requestError.details?.code === "DUPLICATE_REPORT") setExistingReport(requestError.details.reportId || "");
       setError(requestError.message || "The message could not be reported.");
     } finally {
       setSubmitting(false);
@@ -47,8 +52,8 @@ export default function MessageReportModal({ message, senderName = "this user", 
       titleId="message-report-title"
       title="Report this message"
       subtitle={`Report a message sent by ${senderName}.`}
-      headerIcon={<MessageSquareWarning size={22} />}
-      submitIcon={<Flag size={17} />}
+      headerIcon={<MessageCircleWarning size={24} strokeWidth={2} aria-hidden="true" />}
+      submitIcon={<Flag size={18} strokeWidth={2} aria-hidden="true" />}
       submitLabel="Report message"
       submittingLabel="Reporting..."
       submitting={submitting}
@@ -62,7 +67,8 @@ export default function MessageReportModal({ message, senderName = "this user", 
         <p className="mt-2 text-xs text-slate-500">Only this message will be attached to the report. The rest of the conversation is not included.</p>
       </div>
       <ReportCategorySelect label="Message violation" placeholder="Select a message-related category" groups={MESSAGE_REPORT_CATEGORY_GROUPS} value={category} onChange={setCategory} disabled={submitting} />
-      {error ? <p role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700"><AlertTriangle size={17} className="mt-0.5 shrink-0" />{error}</p> : null}
+      {error ? <p role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700"><TriangleAlert size={18} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />{error}</p> : null}
+      {existingReport !== null && <a href={(getSessionUser()?.role === "owner" ? "/owner-dashboard?tab=Reports" : "/reports") + (existingReport ? "#report-" + encodeURIComponent(existingReport) : "")} className="inline-block text-sm font-semibold text-blue-700 underline">View existing report</a>}
     </ReportModalFrame>
   );
 }

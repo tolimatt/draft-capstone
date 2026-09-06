@@ -5,13 +5,13 @@ import crypto from "crypto";
 import mongoose from "mongoose";
 import fs from "fs/promises";
 import path from "path";
-import User from "../models/User.js";
 import KycVerification from "../models/KycVerification.js";
 import PreKycDocument from "../models/PreKycDocument.js";
 import PreKycFace from "../models/PreKycFace.js";
 import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { ensureFaceServiceReady, isFaceServiceConnectionError } from "../utils/faceServiceManager.js";
 import { issuePreKycSession, renewPreKycSession } from "../utils/preKycSession.js";
+import { reconcileUserKyc, reviewKycDocument } from "../services/kycReview.service.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 const getFaceServiceUrl = () => {
@@ -108,9 +108,10 @@ const queuePreKycDocument = async ({
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedEmail || !normalizedSessionId || !docType || !fileMeta?.fileHash) return null;
 
-  const existing = await PreKycDocument.findOne({ email: normalizedEmail, docType }).select("status fileHash");
+  const existing = await PreKycDocument.findOne({ email: normalizedEmail, docType }).select("status fileHash sessionId");
   if (
     existing?.fileHash === fileMeta.fileHash &&
+    existing.sessionId === normalizedSessionId &&
     ["queued", "processing", "retry_wait", "pending_review", "verified"].includes(existing.status)
   ) {
     return existing;
@@ -372,6 +373,10 @@ export const registerIdFace = async (req, res) => {
         {
           user: req.user._id,
           status: "id_uploaded",
+          idDocumentHash: imageHash,
+          challengePassedAt: null,
+          verifiedAt: null,
+          faceMatchScore: 0,
           remarks: "ID face registered. Awaiting selfie verification.",
           idRegisteredAt: new Date(),
         },
@@ -410,7 +415,8 @@ export const selfieVerify = async (req, res) => {
     };
 
     const result = await proxyToFaceService("/api/kyc/selfie/verify", payload);
-    res.json(result);
+    const kyc = await reconcileUserKyc(req.user._id);
+    res.json({ ...result, kycStatus: kyc?.status || req.user.kycStatus, reviewRequired: Boolean(result.verified && kyc?.status !== "approved") });
   } catch (err) {
     return sendKycError(res, err, {
       logMessage: "Selfie verify failed",
@@ -444,14 +450,8 @@ export const internalUpdateStatus = async (req, res) => {
       return res.status(202).json({ message: "Pre-KYC callback acknowledged." });
     }
 
-    const approvedDocument = status === "approved"
-      ? await PreKycDocument.findOne({
-          sessionId: `user:${normalizedId}`,
-          docType: "id",
-          status: "verified",
-        }).select("_id")
-      : null;
-    const effectiveStatus = status === "approved" && !approvedDocument ? "challenge_passed" : status;
+    if (!["approved", "rejected"].includes(status)) return res.status(400).json({ message: "Invalid face verification result." });
+    const effectiveStatus = status === "approved" ? "challenge_passed" : "rejected";
 
     // kyc_cases is the durable record; User.kycStatus is its denormalized summary for authorization/UI.
     await KycVerification.findOneAndUpdate(
@@ -459,9 +459,10 @@ export const internalUpdateStatus = async (req, res) => {
       {
         user: normalizedId,
         status: effectiveStatus,
+        summarySyncPending: true,
         faceMatchScore: confidence || 0,
-        challengePassedAt: status === "approved" ? new Date() : undefined,
-        verifiedAt: effectiveStatus === "approved" ? new Date() : undefined,
+        challengePassedAt: status === "approved" ? new Date() : null,
+        verifiedAt: null,
         remarks:
           effectiveStatus === "approved"
             ? `Face and document verified with ${confidence}% face confidence.`
@@ -471,9 +472,8 @@ export const internalUpdateStatus = async (req, res) => {
       },
       { upsert: true }
     );
-    await User.findByIdAndUpdate(normalizedId, { kycStatus: effectiveStatus });
-
-    res.json({ message: `KYC status updated to ${effectiveStatus} for user ${normalizedId}` });
+    const kyc = await reconcileUserKyc(normalizedId);
+    res.json({ message: "Verification status updated.", status: kyc?.status || effectiveStatus });
   } catch (err) {
     return sendKycError(res, err, {
       logMessage: "Internal update failed",
@@ -487,7 +487,7 @@ export const internalUpdateStatus = async (req, res) => {
 // GET /api/kyc/me
 export const getMyKyc = async (req, res) => {
   try {
-    const kyc = await KycVerification.findOne({ user: req.user._id });
+    const kyc = await reconcileUserKyc(req.user._id);
     // During the collection-split rollout, User.kycStatus preserves the existing status
     // until the explicit migration has copied legacy kycverifications records.
     res.json(kyc || { status: req.user.kycStatus || "not_started" });
@@ -723,45 +723,7 @@ export const getKycReviewFile = async (req, res) => {
 export const decideKycReview = async (req, res) => {
   try {
     const action = String(req.body?.action || "").trim().toLowerCase();
-    const remarks = String(req.body?.remarks || "").trim().slice(0, 500);
-    if (!["approve", "reject"].includes(action)) {
-      return res.status(400).json({ success: false, message: "Action must be approve or reject." });
-    }
-
-    const review = await PreKycDocument.findOne({
-      _id: req.params.id,
-      status: { $in: ["queued", "processing", "retry_wait", "pending_review"] },
-    });
-    if (!review) {
-      return res.status(404).json({ success: false, message: "Reviewable document not found." });
-    }
-
-    review.status = action === "approve" ? "verified" : "rejected";
-    review.reason = remarks || (action === "approve" ? "Approved by an administrator." : "Rejected by an administrator.");
-    review.reviewedAt = new Date();
-    review.reviewedBy = req.user._id;
-    review.verifiedAt = action === "approve" ? new Date() : undefined;
-    await review.save();
-
-    if (action === "approve" && review.sessionId.startsWith("user:")) {
-      const userId = review.sessionId.slice("user:".length);
-      if (mongoose.Types.ObjectId.isValid(userId)) {
-        const kycCase = await KycVerification.findOne({ user: userId }).select("status faceMatchScore");
-        if (kycCase?.status === "challenge_passed") {
-          kycCase.status = "approved";
-          kycCase.verifiedAt = new Date();
-          kycCase.remarks = "Face match completed and document approved by an administrator.";
-          await kycCase.save();
-          await User.findByIdAndUpdate(userId, { kycStatus: "approved" });
-        }
-      }
-    }
-
-    auditLog.info("KYC", `Manual document review ${action}d`, {
-      userId: req.user._id.toString(),
-      reviewId: review._id.toString(),
-      docType: review.docType,
-    });
+    const review = await reviewKycDocument({ id: req.params.id, action, remarks: req.body?.remarks, reviewerId: req.user._id, reviewVersion: req.body?.reviewVersion });
     return res.json({ success: true, review });
   } catch (error) {
     return sendKycError(res, error, {

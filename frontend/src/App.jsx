@@ -472,6 +472,16 @@ const App = () => {
         return buildRouteWithQuery(baseRoute, { tab });
       }
 
+      if (currentPage === "booking-history") {
+        // Keep the provider return reference until BookingsPage verifies it.
+        return buildRouteWithQuery(baseRoute, {
+          bookingId: getQueryParam(window.location.search, "bookingId"),
+          payment: getQueryParam(window.location.search, "payment"),
+          checkoutId: getQueryParam(window.location.search, "checkoutId"),
+          checkout_session_id: getQueryParam(window.location.search, "checkout_session_id"),
+        });
+      }
+
       return baseRoute;
     })();
 

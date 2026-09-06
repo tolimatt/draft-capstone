@@ -28,7 +28,7 @@ export default function ReportModalFrame({
           <div className="flex items-start justify-between border-b border-slate-200 p-5 sm:p-6">
             <div className="flex min-w-0 gap-3">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
-                {headerIcon || <ShieldAlert size={22} />}
+                {headerIcon || <ShieldAlert size={24} strokeWidth={2} aria-hidden="true" />}
               </span>
               <div className="min-w-0">
                 <h2 id={titleId} className="text-xl font-bold text-slate-950">{title}</h2>
@@ -40,9 +40,9 @@ export default function ReportModalFrame({
               aria-label="Close report form"
               disabled={submitting}
               onClick={onClose}
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"
             >
-              <X size={19} />
+              <X size={18} strokeWidth={2} />
             </button>
           </div>
 
@@ -62,7 +62,7 @@ export default function ReportModalFrame({
               disabled={submitting}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
             >
-              {submitting ? <LoaderCircle size={17} className="animate-spin" /> : submitIcon || <ShieldAlert size={17} />}
+              {submitting ? <LoaderCircle size={18} strokeWidth={2} className="animate-spin" aria-hidden="true" /> : submitIcon || <ShieldAlert size={18} strokeWidth={2} aria-hidden="true" />}
               {submitting ? submittingLabel : submitLabel}
             </button>
           </div>

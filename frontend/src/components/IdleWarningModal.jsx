@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, Clock4 } from "lucide-react";
+import { Clock4, TriangleAlert } from "lucide-react";
 import ModalPortal from "./ModalPortal";
 
 const formatCountdown = (seconds) => {
@@ -27,7 +27,7 @@ export default function IdleWarningModal({
         <div className="border-b border-amber-100 bg-gradient-to-r from-amber-50 via-white to-white px-6 pb-4 pt-5 sm:px-7">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-amber-200">
-              <AlertTriangle size={20} className="text-amber-600" />
+              <TriangleAlert size={20} strokeWidth={2} className="text-amber-600" aria-hidden="true" />
             </div>
             <div>
               <h3 className="text-xl font-bold text-slate-900">Still there?</h3>

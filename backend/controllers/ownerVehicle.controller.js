@@ -1,6 +1,7 @@
 import Vehicle from "../models/Vehicle.js";
 import { hasActiveBookingForVehicle } from "../utils/vehicleAvailability.js";
 import { HOURLY_RATE_UNIT, getVehicleHourlyRate } from "../utils/pricing.js";
+import { getVehicleLateReturnPolicy } from "../utils/lateReturnPolicy.js";
 import {
   cleanupUploadedVehicleFiles,
   MAX_VEHICLE_IMAGES,
@@ -134,6 +135,7 @@ const serializeVehicle = (req, vehicle) => {
     : 0;
   const normalizedReviewCount = Number(vehicle.reviewCount);
   const reviewCount = Number.isFinite(normalizedReviewCount) ? normalizedReviewCount : normalizedReviews.length;
+  const lateReturnPolicy = getVehicleLateReturnPolicy(vehicle);
 
   return {
     _id: vehicle._id,
@@ -149,6 +151,10 @@ const serializeVehicle = (req, vehicle) => {
       unitField: "pricingUnit",
     }),
     pricingUnit: HOURLY_RATE_UNIT,
+    lateReturnFeeType: lateReturnPolicy.feeType,
+    lateReturnFeeValue: lateReturnPolicy.value,
+    lateReturnGraceMinutes: lateReturnPolicy.graceMinutes,
+    lateReturnPolicy,
     location: vehicle.location,
     availabilityStatus: vehicle.availabilityStatus,
     availabilityHoldReason: vehicle.availabilityHoldReason || "none",
@@ -215,6 +221,9 @@ export const createOwnerVehicle = async (req, res) => {
       description: req.body.description.trim(),
       dailyRentalRate: toNumeric(req.body.dailyRentalRate, 0),
       pricingUnit: HOURLY_RATE_UNIT,
+      lateReturnFeeType: req.body.lateReturnFeeType,
+      lateReturnFeeValue: toNumeric(req.body.lateReturnFeeValue, 25),
+      lateReturnGraceMinutes: toNumeric(req.body.lateReturnGraceMinutes, 0),
       location: req.body.location.trim(),
       availabilityStatus: req.body.availabilityStatus,
       availabilityHoldReason: req.body.availabilityStatus === "unavailable" ? "manual" : "none",
@@ -246,6 +255,18 @@ export const updateOwnerVehicle = async (req, res) => {
     if (req.body.dailyRentalRate !== undefined) {
       vehicle.dailyRentalRate = toNumeric(req.body.dailyRentalRate, 0);
       vehicle.pricingUnit = HOURLY_RATE_UNIT;
+    }
+    if (req.body.lateReturnFeeType !== undefined) {
+      vehicle.lateReturnFeeType = req.body.lateReturnFeeType;
+    }
+    if (req.body.lateReturnFeeValue !== undefined) {
+      vehicle.lateReturnFeeValue = toNumeric(req.body.lateReturnFeeValue, vehicle.lateReturnFeeValue ?? 25);
+    }
+    if (req.body.lateReturnGraceMinutes !== undefined) {
+      vehicle.lateReturnGraceMinutes = toNumeric(
+        req.body.lateReturnGraceMinutes,
+        vehicle.lateReturnGraceMinutes ?? 0
+      );
     }
     if (req.body.location !== undefined) vehicle.location = req.body.location.trim();
     if (req.body.coverDisplayMode !== undefined) {

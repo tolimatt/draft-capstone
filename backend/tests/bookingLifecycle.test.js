@@ -6,7 +6,11 @@ import { syncOneBookingLifecycle } from "../jobs/bookingLifecycle.job.js";
 import { hasActiveBookingForVehicle } from "../utils/vehicleAvailability.js";
 import { isOnlineBalancePaymentBlockedByWalkIn } from "../controllers/booking.controller.js";
 import { getOwnerBookings } from "../controllers/ownerDashboard.controller.js";
-import { validateVehicleAvailability } from "../middleware/validate.middleware.js";
+import { validateVehicleAvailability, validateVehicleUpdate } from "../middleware/validate.middleware.js";
+import {
+  createBookingLateReturnPolicySnapshot,
+  getEstimatedLateReturnPenaltyFee,
+} from "../utils/lateReturnPolicy.js";
 
 test("paid bookings become overdue without being auto-completed", async () => {
   const now = new Date("2026-08-28T12:00:00.000Z");
@@ -41,6 +45,32 @@ test("paid bookings become overdue without being auto-completed", async () => {
   assert.equal(booking.autoCompletedAt, null);
   assert.equal(booking.lateReturnIsOverdue, true);
   assert.equal(booking.lateReturnOverdueMinutes, 60);
+});
+
+test("a snapshotted grace period is excluded from overdue minutes", async () => {
+  const booking = {
+    status: "confirmed",
+    returnAt: new Date("2026-08-28T11:00:00.000Z"),
+    driverSelected: false,
+    vehicleDailyRate: 800,
+    driverDailyRate: 0,
+    rentalRateUnit: "hourly",
+    lateReturnFeeType: "percentage",
+    lateReturnFeeValue: 25,
+    lateReturnGraceMinutes: 15,
+    lateReturnPenaltyRatePerHour: 200,
+    lateReturnPenaltyFee: 0,
+    lateReturnIsOverdue: false,
+    lateReturnOverdueMinutes: 0,
+    lateReturnDetectedAt: null,
+    lateReturnNotifiedAt: new Date("2026-08-28T11:16:00.000Z"),
+    async save() {},
+  };
+
+  await syncOneBookingLifecycle(booking, new Date("2026-08-28T11:20:00.000Z"));
+
+  assert.equal(booking.lateReturnIsOverdue, true);
+  assert.equal(booking.lateReturnOverdueMinutes, 5);
 });
 
 test("vehicle locks are based on an unreturned booking, not scheduled time", async () => {
@@ -89,9 +119,56 @@ test("booking schema exposes the explicit return workflow", () => {
   assert.ok(Booking.schema.path("returnReviewAction"));
 });
 
+test("late-return policies are snapshotted with the booking-time rates", () => {
+  assert.deepEqual(
+    createBookingLateReturnPolicySnapshot({
+      vehicle: {
+        lateReturnFeeType: "percentage",
+        lateReturnFeeValue: 25,
+        lateReturnGraceMinutes: 15,
+      },
+      vehicleHourlyRate: 800,
+      driverHourlyRate: 100,
+      driverSelected: true,
+    }),
+    {
+      lateReturnFeeType: "percentage",
+      lateReturnFeeValue: 25,
+      lateReturnGraceMinutes: 15,
+      lateReturnPenaltyRatePerHour: 225,
+    }
+  );
+
+  assert.equal(
+    createBookingLateReturnPolicySnapshot({
+      vehicle: { lateReturnFeeType: "fixed_hourly", lateReturnFeeValue: 350, lateReturnGraceMinutes: 5 },
+      vehicleHourlyRate: 800,
+    }).lateReturnPenaltyRatePerHour,
+    350
+  );
+});
+
+test("active overdue bookings expose an estimated fee before final return confirmation", () => {
+  assert.equal(
+    getEstimatedLateReturnPenaltyFee({
+      lateReturnFeeType: "percentage",
+      lateReturnFeeValue: 25,
+      lateReturnGraceMinutes: 0,
+      lateReturnPenaltyRatePerHour: 200,
+      lateReturnPenaltyFee: 0,
+      lateReturnIsOverdue: true,
+      lateReturnOverdueMinutes: 280,
+    }),
+    933.33
+  );
+});
+
 test("vehicle schema supports an inspection availability hold", async () => {
   const { default: Vehicle } = await import("../models/Vehicle.js");
   assert.deepEqual(Vehicle.schema.path("availabilityHoldReason").enumValues, ["none", "manual", "inspection"]);
+  assert.deepEqual(Vehicle.schema.path("lateReturnFeeType").enumValues, ["percentage", "fixed_hourly"]);
+  assert.equal(Vehicle.schema.path("lateReturnFeeValue").defaultValue, 25);
+  assert.equal(Vehicle.schema.path("lateReturnGraceMinutes").defaultValue, 0);
 });
 
 test("owner action queue includes pending vehicle return requests", async () => {
@@ -175,4 +252,43 @@ test("vehicle availability validation accepts the inspection/maintenance hold", 
     () => { nextCalled = true; }
   );
   assert.equal(nextCalled, true);
+});
+
+test("vehicle updates validate bounded late-return policy settings", async () => {
+  let nextCalled = false;
+  const validRequest = {
+    body: {
+      lateReturnFeeType: "fixed_hourly",
+      lateReturnFeeValue: "350",
+      lateReturnGraceMinutes: "15",
+    },
+    files: [],
+  };
+  await validateVehicleUpdate(
+    validRequest,
+    { status() { return this; }, json() {} },
+    () => { nextCalled = true; }
+  );
+  assert.equal(nextCalled, true);
+  assert.equal(validRequest.body.lateReturnFeeValue, 350);
+  assert.equal(validRequest.body.lateReturnGraceMinutes, 15);
+
+  let invalidPayload;
+  await validateVehicleUpdate(
+    {
+      body: {
+        lateReturnFeeType: "percentage",
+        lateReturnFeeValue: "101",
+        lateReturnGraceMinutes: "0",
+      },
+      files: [],
+    },
+    {
+      status() { return this; },
+      json(payload) { invalidPayload = payload; },
+    },
+    () => {}
+  );
+  assert.equal(invalidPayload.success, false);
+  assert.match(invalidPayload.errors.lateReturnFeeValue, /between 0 and 100/);
 });

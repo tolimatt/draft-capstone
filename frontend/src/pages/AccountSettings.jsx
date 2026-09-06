@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
-  Car,
+  CarFront,
   ShieldCheck,
   User,
   Lock,
@@ -350,6 +350,9 @@ const AccountSettings = ({
   const [verificationMessage, setVerificationMessage] = useState("");
   const [verificationError, setVerificationError] = useState("");
   const [kycStatus, setKycStatus] = useState("");
+  const [kycRemarks, setKycRemarks] = useState("");
+  const [kycError, setKycError] = useState("");
+  const [kycLoading, setKycLoading] = useState(false);
   const [showKycStepper, setShowKycStepper] = useState(false);
   const [loginActivity, setLoginActivity] = useState([]);
   const [loginActivityLoading, setLoginActivityLoading] = useState(false);
@@ -744,10 +747,13 @@ const AccountSettings = ({
   };
 
   const loadKycStatus = async () => {
+    setKycLoading(true);
+    setKycError("");
     try {
       const response = await API.kycGetStatus();
       const nextStatus = response?.status || "not_started";
       setKycStatus(nextStatus);
+      setKycRemarks(response?.remarks || "");
 
       if (nextStatus === "approved") {
         try {
@@ -760,8 +766,10 @@ const AccountSettings = ({
           // Keep the authoritative KYC status visible even if profile refresh fails.
         }
       }
-    } catch {
-      setKycStatus("not_started");
+    } catch (error) {
+      setKycError(error.message || "Could not refresh verification. Try Refresh Status again.");
+    } finally {
+      setKycLoading(false);
     }
   };
 
@@ -1004,7 +1012,7 @@ const AccountSettings = ({
       />
 
       <div className="min-h-screen bg-transparent pt-24">
-        <div className="rp-page-shell mx-auto flex max-w-7xl flex-col gap-6 px-6 lg:flex-row">
+        <div className="rp-page-shell mx-auto flex max-w-7xl flex-col gap-6 px-4 sm:px-6 lg:flex-row">
           <aside className="w-full lg:w-72 space-y-6 lg:sticky top-24 self-start mt-4">
             <div className="rp-minimal-card space-y-1 p-5">
               {[
@@ -1013,7 +1021,7 @@ const AccountSettings = ({
                 { label: "Notifications Settings", icon: BellRing },
                 { label: "Verification", icon: ShieldCheck },
                 { label: "Login Activity", icon: Shield },
-                { label: "Become a Vehicle Owner", icon: Car },
+                { label: "Become a Vehicle Owner", icon: CarFront },
               ].map(({ label, icon: Icon }) => (
                 <button
                   key={label}
@@ -1675,16 +1683,20 @@ const AccountSettings = ({
                       onClick={() => setShowKycStepper((prev) => !prev)}
                       className="px-4 py-2 rounded-lg border text-sm font-semibold hover:bg-gray-100"
                     >
-                      {showKycStepper ? "Hide Verification Steps" : "Start Verification"}
+                      {showKycStepper ? "Hide Verification Steps" : kycStatus === "rejected" ? "Resubmit Document" : "Start Verification"}
                     </button>
                     <button
                       onClick={loadKycStatus}
+                      disabled={kycLoading}
                       className="px-4 py-2 rounded-lg border text-sm font-semibold hover:bg-gray-100"
                     >
-                      Refresh Status
+                      {kycLoading ? "Checking..." : "Refresh Status"}
                     </button>
                   </div>
 
+                  {kycError && <p role="alert" className="text-sm text-rose-700">{kycError}</p>}
+                  {kycRemarks && <p role="status" className="text-sm text-slate-600">{kycRemarks}</p>}
+                  {kycStatus === "challenge_passed" && <p className="text-sm text-amber-700">Your selfie passed. Document approval is still pending. Refresh your status after review.</p>}
                   {showKycStepper && (
                     <div className="pt-2">
                       <VerificationStepper onVerificationComplete={loadKycStatus} />

@@ -139,7 +139,7 @@ export default function TransactionRecords() {
           disabled={loading || refreshing}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+          <RefreshCw size={18} strokeWidth={2} className={refreshing ? "animate-spin" : ""} aria-hidden="true" />
           {refreshing ? "Refreshing..." : "Refresh"}
         </button>
       </div>
@@ -173,7 +173,8 @@ export default function TransactionRecords() {
           <label className="relative block w-full xl:max-w-md">
             <span className="sr-only">Search transaction records</span>
             <Search
-              size={17}
+              size={18}
+              strokeWidth={2}
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input

@@ -60,7 +60,7 @@ export default function EvidenceFilePicker({ files = [], onChange, onError, disa
             <li key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
               <span className="min-w-0 truncate">{file.name}</span>
               <button type="button" onClick={() => removeFile(index)} disabled={disabled} aria-label={`Remove ${file.name}`} className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50">
-                <X size={15} />
+                <X size={16} strokeWidth={2} />
               </button>
             </li>
           ))}

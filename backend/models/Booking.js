@@ -82,6 +82,22 @@ const bookingSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    lateReturnFeeType: {
+      type: String,
+      enum: ["percentage", "fixed_hourly", null],
+      default: null,
+    },
+    lateReturnFeeValue: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
+    lateReturnGraceMinutes: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 1440,
+    },
     lateReturnPenaltyFee: {
       type: Number,
       default: 0,

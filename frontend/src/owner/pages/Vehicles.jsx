@@ -5,11 +5,15 @@ import { isPhilippineLocation } from "../../utils/locationValidation";
 import VehicleCover from "../../components/VehicleCover";
 import ModalPortal from "../../components/ModalPortal";
 import { validateVehicleImageFiles } from "../../utils/fileValidation";
+import OwnerPageHeader from "../components/OwnerPageHeader";
 
 const createInitialForm = () => ({
   name: "",
   description: "",
   dailyRentalRate: "",
+  lateReturnFeeType: "percentage",
+  lateReturnFeeValue: "25",
+  lateReturnGraceMinutes: "0",
   location: "",
   availabilityStatus: "available",
   specType: "car",
@@ -36,6 +40,15 @@ const getVehicleOperationalStatus = (vehicle) => {
 
 const formatCurrency = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
 
+const formatLateReturnPolicy = (source = {}) => {
+  const policy = source.lateReturnPolicy || source;
+  const feeType = policy.feeType || source.lateReturnFeeType || "percentage";
+  const value = Number(policy.value ?? source.lateReturnFeeValue ?? 25);
+  const graceMinutes = Number(policy.graceMinutes ?? source.lateReturnGraceMinutes ?? 0);
+  const feeLabel = feeType === "fixed_hourly" ? `${formatCurrency(value)} / overdue hour` : `${value}% of hourly rate`;
+  return `${feeLabel} after ${graceMinutes} minute${graceMinutes === 1 ? "" : "s"} grace`;
+};
+
 const getFallbackCoverState = ({ existingImagePaths = [], newImageFiles = [] } = {}) => {
   if (existingImagePaths.length) {
     return { coverImagePath: existingImagePaths[0], coverUploadIndex: "" };
@@ -52,7 +65,7 @@ function VehicleFormSectionHeader({ step, icon: Icon, title, description }) {
   return (
     <div className="flex items-start gap-3 border-b border-slate-100 pb-4">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#017FE6]">
-        <Icon size={17} />
+        <Icon size={20} strokeWidth={2} aria-hidden="true" />
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
@@ -147,6 +160,7 @@ function VehicleModal({
   const listingChecks = [
     { label: "Listing details", complete: Boolean(form.name.trim() && form.location.trim() && form.description.trim()) },
     { label: "Rate and plate number", complete: Boolean(Number(form.dailyRentalRate) > 0 && form.specPlateNumber.trim()) },
+    { label: "Late-return policy", complete: Boolean(Number(form.lateReturnFeeValue) >= 0 && Number(form.lateReturnGraceMinutes) >= 0) },
     { label: "Vehicle specifications", complete: Boolean(form.specType && form.specSubType.trim() && Number(form.specSeats) > 0) },
     { label: "At least one vehicle photo", complete: Boolean(form.existingImages.length || form.newImageFiles.length) },
   ];
@@ -281,6 +295,61 @@ function VehicleModal({
                     onChange={(e) => setForm((prev) => ({ ...prev, specPlateNumber: e.target.value }))}
                   />
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                <div>
+                  <p className="text-sm font-bold text-amber-950">Late-return policy</p>
+                  <p className="mt-1 text-xs leading-5 text-amber-800">
+                    This policy is disclosed to renters and locked into each new booking. Editing it later affects only future bookings.
+                  </p>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <VehicleSelectField
+                    label="Fee type"
+                    value={form.lateReturnFeeType}
+                    onChange={(event) => setForm((prev) => ({ ...prev, lateReturnFeeType: event.target.value }))}
+                    options={[
+                      { value: "percentage", label: "Percentage" },
+                      { value: "fixed_hourly", label: "Fixed per hour" },
+                    ]}
+                  />
+                  <div>
+                    <label className={labelClass}>
+                      {form.lateReturnFeeType === "fixed_hourly" ? "Fee per overdue hour" : "Percentage"}
+                    </label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">
+                        {form.lateReturnFeeType === "fixed_hourly" ? "₱" : "%"}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={form.lateReturnFeeType === "fixed_hourly" ? "100000" : "100"}
+                        step="0.01"
+                        className={`${inputClass} pl-8`}
+                        value={form.lateReturnFeeValue}
+                        onChange={(event) => setForm((prev) => ({ ...prev, lateReturnFeeValue: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Grace period (minutes)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1440"
+                      step="1"
+                      className={inputClass}
+                      value={form.lateReturnGraceMinutes}
+                      onChange={(event) => setForm((prev) => ({ ...prev, lateReturnGraceMinutes: event.target.value }))}
+                    />
+                  </div>
+                </div>
+                <p className="mt-3 text-xs font-medium text-amber-900">
+                  Preview: {formatLateReturnPolicy(form)}
+                  {form.lateReturnFeeType === "percentage" ? ". A selected driver’s hourly rate is included in the percentage base." : "."}
+                </p>
               </div>
             </section>
 
@@ -551,7 +620,7 @@ function VehicleModal({
                         }
                         aria-label="Remove existing image"
                       >
-                        <X size={12} />
+                        <X size={16} strokeWidth={2} />
                       </button>
                       <button
                         type="button"
@@ -621,7 +690,7 @@ function VehicleModal({
                         }
                         aria-label="Remove new image"
                       >
-                        <X size={12} />
+                        <X size={16} strokeWidth={2} />
                       </button>
                       <button
                         type="button"
@@ -672,7 +741,7 @@ function VehicleModal({
                     />
                   ) : (
                     <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 text-center">
-                      <ImagePlus size={22} className="text-slate-400" />
+                      <ImagePlus size={24} strokeWidth={2} className="text-slate-400" aria-hidden="true" />
                       <p className="mt-2 text-xs font-medium text-slate-500">Your cover photo will appear here</p>
                     </div>
                   )}
@@ -683,11 +752,11 @@ function VehicleModal({
                   </p>
                   <h4 className="mt-1 truncate text-lg font-bold text-slate-900">{form.name.trim() || "Vehicle name"}</h4>
                   <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
-                    <MapPin size={13} className="shrink-0 text-[#017FE6]" />
+                    <MapPin size={16} strokeWidth={2} className="shrink-0 text-[#017FE6]" aria-hidden="true" />
                     <span className="truncate">{form.location.trim() || "Vehicle location"}</span>
                   </p>
                   <div className="mt-4 grid grid-cols-3 divide-x divide-slate-200 border-y border-slate-100 py-3 text-[11px] text-slate-600">
-                    <span className="flex items-center gap-1 pr-2"><Users size={13} />{form.specSeats || "-"} seats</span>
+                    <span className="flex items-center gap-1 pr-2"><Users size={16} strokeWidth={2} aria-hidden="true" />{form.specSeats || "-"} seats</span>
                     <span className="truncate px-2 text-center">{form.specTransmission || "-"}</span>
                     <span className="truncate pl-2 text-right">{form.specFuel || "-"}</span>
                   </div>
@@ -698,6 +767,9 @@ function VehicleModal({
                     </div>
                     {form.driverOptionEnabled && <span className="rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">Driver available</span>}
                   </div>
+                  <p className="mt-3 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] font-medium leading-4 text-amber-800">
+                    Late returns: {formatLateReturnPolicy(form)}
+                  </p>
                 </div>
               </div>
 
@@ -713,7 +785,7 @@ function VehicleModal({
                   {listingChecks.map((item) => (
                     <div key={item.label} className="flex items-center gap-2 text-xs">
                       <span className={`flex h-5 w-5 items-center justify-center rounded-full ${item.complete ? "bg-emerald-100 text-emerald-700" : "bg-white text-slate-300 ring-1 ring-slate-200"}`}>
-                        <Check size={12} strokeWidth={2.5} />
+                        <Check size={16} strokeWidth={2} aria-hidden="true" />
                       </span>
                       <span className={item.complete ? "font-medium text-slate-700" : "text-slate-500"}>{item.label}</span>
                     </div>
@@ -725,7 +797,7 @@ function VehicleModal({
 
           <div className="flex flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
             <div className="hidden items-center gap-2 text-xs text-slate-500 sm:flex">
-              <BadgeCheck size={15} className="text-[#017FE6]" />
+              <BadgeCheck size={16} strokeWidth={2} className="text-[#017FE6]" aria-hidden="true" />
               Changes are reviewed before they appear to renters.
             </div>
             <div className="flex justify-end gap-3">
@@ -818,6 +890,9 @@ function Vehicles() {
       name: vehicle.name || "",
       description: vehicle.description || "",
       dailyRentalRate: String(vehicle.dailyRentalRate ?? ""),
+      lateReturnFeeType: vehicle.lateReturnPolicy?.feeType || vehicle.lateReturnFeeType || "percentage",
+      lateReturnFeeValue: String(vehicle.lateReturnPolicy?.value ?? vehicle.lateReturnFeeValue ?? 25),
+      lateReturnGraceMinutes: String(vehicle.lateReturnPolicy?.graceMinutes ?? vehicle.lateReturnGraceMinutes ?? 0),
       location: vehicle.location || "",
       availabilityStatus: vehicle.availabilityStatus || "available",
       specType: vehicle.specs?.type || "car",
@@ -852,6 +927,9 @@ function Vehicles() {
     body.append("name", form.name);
     body.append("description", form.description);
     body.append("dailyRentalRate", String(form.dailyRentalRate));
+    body.append("lateReturnFeeType", form.lateReturnFeeType);
+    body.append("lateReturnFeeValue", String(form.lateReturnFeeValue));
+    body.append("lateReturnGraceMinutes", String(form.lateReturnGraceMinutes));
     body.append("location", form.location);
     body.append("availabilityStatus", form.availabilityStatus);
     body.append("specType", form.specType);
@@ -886,6 +964,25 @@ function Vehicles() {
         const message = "Only vehicle locations within the Philippines are allowed.";
         setModalError(message);
         setLocationError(message);
+        return;
+      }
+      const lateReturnFeeValue = Number(form.lateReturnFeeValue);
+      const lateReturnGraceMinutes = Number(form.lateReturnGraceMinutes);
+      const maxLateReturnFee = form.lateReturnFeeType === "fixed_hourly" ? 100000 : 100;
+      if (!Number.isFinite(lateReturnFeeValue) || lateReturnFeeValue < 0 || lateReturnFeeValue > maxLateReturnFee) {
+        setModalError(
+          form.lateReturnFeeType === "fixed_hourly"
+            ? "Late-return fee must be between ₱0 and ₱100,000 per overdue hour."
+            : "Late-return percentage must be between 0% and 100%."
+        );
+        return;
+      }
+      if (
+        !Number.isInteger(lateReturnGraceMinutes) ||
+        lateReturnGraceMinutes < 0 ||
+        lateReturnGraceMinutes > 1440
+      ) {
+        setModalError("Late-return grace period must be a whole number from 0 to 1,440 minutes.");
         return;
       }
       validateVehicleImageFiles(form.newImageFiles);
@@ -947,14 +1044,10 @@ function Vehicles() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Vehicle Management</h1>
-          <p className="text-sm text-gray-600">
-            Manage vehicle details, multiple images, availability, and driver options.
-          </p>
-        </div>
-      </div>
+      <OwnerPageHeader
+        title="Vehicle Management"
+        description="Manage vehicle details, images, availability, and driver options."
+      />
 
       <div className="bg-white border rounded-xl p-4 flex flex-col md:flex-row gap-3">
         <input
@@ -1019,21 +1112,21 @@ function Vehicles() {
               <p className="mt-2 text-sm text-slate-600 line-clamp-2">{vehicle.description}</p>
 
               <div className="mt-2 flex items-center gap-1 text-sm text-slate-500">
-                <MapPin size={14} className="text-[#0B75E7]" />
+                <MapPin size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
                 <span>{vehicle.location}</span>
               </div>
 
               <div className="mt-2 flex gap-4 text-sm text-slate-600">
                 <span className="flex items-center gap-1">
-                  <Users size={14} className="text-[#0B75E7]" />
+                  <Users size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
                   {vehicle.specs?.seats || "-"}
                 </span>
                 <span className="flex items-center gap-1">
-                  <Settings size={14} className="text-[#0B75E7]" />
+                  <Settings size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
                   {vehicle.specs?.transmission || "-"}
                 </span>
                 <span className="flex items-center gap-1">
-                  <Fuel size={14} className="text-[#0B75E7]" />
+                  <Fuel size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
                   {vehicle.specs?.fuel || "-"}
                 </span>
               </div>
@@ -1044,11 +1137,12 @@ function Vehicles() {
                 {formatCurrency(vehicle.dailyRentalRate)}
                 <span className="text-sm text-slate-500 font-medium"> / hour</span>
               </div>
+              <p className="mt-2 text-xs font-medium text-amber-700">Late returns: {formatLateReturnPolicy(vehicle)}</p>
 
               <div className="mt-auto pt-4">
                 <label className="mb-3 block">
                   <span className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.1em] text-slate-500">
-                    <Wrench size={13} /> Vehicle status
+                    <Wrench size={16} strokeWidth={2} aria-hidden="true" /> Vehicle status
                   </span>
                   <select
                     value={getVehicleOperationalStatus(vehicle)}

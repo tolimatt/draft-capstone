@@ -16,6 +16,8 @@ const kycVerificationSchema = new mongoose.Schema(
       default: "not_started",
     },
     faceMatchScore: { type: Number, default: 0 },
+    idDocumentHash: { type: String, default: "" },
+    summarySyncPending: { type: Boolean, default: false },
     remarks: { type: String, default: "" },
     idRegisteredAt: { type: Date },
     challengePassedAt: { type: Date },

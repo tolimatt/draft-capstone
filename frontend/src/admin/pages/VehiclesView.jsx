@@ -1,4 +1,4 @@
-import { Car, Eye, SlidersHorizontal, Tags, Wrench } from "lucide-react";
+import { CarFront, Eye, SlidersHorizontal, Tags, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 import { EmptyState, FilterSelect, SearchField, StatCard, StatusBadge, TableFooter } from "../components/AdminUI";
 
@@ -27,25 +27,25 @@ export default function VehiclesView({ vehicles, onView }) {
   return (
     <div className="space-y-5">
       <section aria-label="Vehicle statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Vehicles" value={vehicles.length} description="All registered vehicles" icon={Car} />
-        <StatCard label="Available" value={available} description="Ready for booking" icon={Car} tone="green" />
+        <StatCard label="Total Vehicles" value={vehicles.length} description="All registered vehicles" icon={CarFront} />
+        <StatCard label="Available" value={available} description="Ready for booking" icon={CarFront} tone="green" />
         <StatCard label="Unavailable" value={unavailable} description="Not currently rental-ready" icon={Wrench} tone="amber" />
         <StatCard label="Vehicle Types" value={types.length} description="Fleet classifications" icon={Tags} tone="slate" />
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="grid gap-4 border-b border-slate-200 p-4 lg:grid-cols-[minmax(280px,1.6fr)_220px_220px_auto] lg:items-end">
-          <SearchField value={search} onChange={setSearch} placeholder="Search by vehicle, plate number, operator, or location..." />
+          <SearchField value={search} onChange={setSearch} placeholder="Search by vehicle, plate number, vehicle owner, or location..." />
           <FilterSelect value={status} onChange={setStatus} options={["All Statuses", "Available", "Unavailable"]} />
           <FilterSelect value={type} onChange={setType} options={["All Types", ...types]} />
-          <button type="button" aria-expanded={moreFilters} onClick={() => setMoreFilters((current) => !current)} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-blue-200 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><SlidersHorizontal size={17} />More Filters</button>
+          <button type="button" aria-expanded={moreFilters} onClick={() => setMoreFilters((current) => !current)} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-blue-200 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><SlidersHorizontal size={18} strokeWidth={2} aria-hidden="true" />More Filters</button>
         </div>
         {moreFilters ? <div className="border-b border-slate-200 bg-slate-50/60 p-4"><div className="max-w-xs"><FilterSelect label="Category" value={category} onChange={setCategory} options={["All Categories", ...categories]} /></div></div> : null}
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] border-collapse">
             <caption className="sr-only">Registered RentifyPro vehicles</caption>
-            <thead className="bg-slate-50"><tr>{["Vehicle", "Plate No.", "Category", "Operator", "Location", "Rental Rate", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
+            <thead className="bg-slate-50"><tr>{["Vehicle", "Plate No.", "Category", "Vehicle Owner", "Location", "Rental Rate", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((vehicle) => (
                 <tr key={vehicle.id || vehicle.plateNumber} className="transition-colors hover:bg-blue-50/30">
@@ -56,12 +56,12 @@ export default function VehiclesView({ vehicles, onView }) {
                   <td className="px-4 py-3.5 text-sm text-slate-600">{vehicle.location}</td>
                   <td className="whitespace-nowrap px-4 py-3.5 text-sm font-semibold text-slate-800">{vehicle.rentalRate}</td>
                   <td className="px-4 py-3.5"><StatusBadge value={vehicle.status} /></td>
-                  <td className="px-4 py-3.5"><button type="button" onClick={() => onView(vehicle)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><Eye size={14} />View</button></td>
+                  <td className="px-4 py-3.5"><button type="button" onClick={() => onView(vehicle)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><Eye size={18} strokeWidth={2} aria-hidden="true" />View</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!filtered.length ? <EmptyState icon={Car} title={vehicles.length ? "No vehicles found" : "No vehicles have been registered yet"} description={vehicles.length ? "Try changing your search or filters." : "Registered vehicles will appear here."} /> : null}
+          {!filtered.length ? <EmptyState icon={CarFront} title={vehicles.length ? "No vehicles found" : "No vehicles have been registered yet"} description={vehicles.length ? "Try changing your search or filters." : "Registered vehicles will appear here."} /> : null}
         </div>
         <TableFooter visible={filtered.length} total={vehicles.length} noun="vehicles" />
       </section>
@@ -72,7 +72,7 @@ export default function VehiclesView({ vehicles, onView }) {
 function VehicleImage({ vehicle }) {
   return (
     <div className="relative flex h-14 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400">
-      <Car size={21} aria-hidden="true" />
+      <CarFront size={24} strokeWidth={2} aria-hidden="true" />
       {vehicle.image ? <img src={vehicle.image} alt={vehicle.name} onError={(event) => { event.currentTarget.style.display = "none"; }} className="absolute inset-0 h-full w-full object-cover" /> : null}
     </div>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CalendarDays, ChevronDown, Database, LoaderCircle, RefreshCw } from "lucide-react";
+import { CalendarDays, ChevronDown, Database, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import { AdminPageHeader, AdminSidebar } from "./components/AdminShell";
 import {
   ConfirmationDialog,
@@ -189,15 +189,15 @@ export default function AdminLayout({ user, onLogout }) {
     subtitle: `${booking.renter} booked ${booking.vehicle}, operated by ${booking.operator}, from ${formatAdminDate(booking.pickupAt)} to ${formatAdminDate(booking.returnAt)}. Status: ${booking.isOverdue ? "Overdue" : booking.status}. Driver option: ${booking.driverSelected ? "Selected" : "Not selected"}.`,
   });
 
-  const requestDocumentDecision = (document, approval) => {
+  const requestDocumentDecision = (document, approval, remarks = "") => {
     setReviewDocument(null);
     requestConfirmation({
       tone: approval === "Rejected" ? "danger" : "primary",
       title: `${approval === "Approved" ? "Approve" : "Reject"} this document?`,
-      description: `${document.fileName} will be marked as ${approval.toLowerCase()} for ${document.customer}.`,
+      description: `${document.fileName} will be marked as ${approval.toLowerCase()} for ${document.customer}.${remarks ? ` Reason: ${remarks}` : ""}`,
       confirmLabel: `${approval === "Approved" ? "Approve" : "Reject"} document`,
       onConfirm: async () => {
-        const payload = await adminDataApi.updateDocument(document.id, approval);
+        const payload = await adminDataApi.updateDocument(document.id, approval, remarks, document.reviewVersion);
         setDocuments((current) => current.map((item) => item.id === document.id ? payload.document : item));
         showFeedback(`Document marked as ${approval.toLowerCase()}.`);
       },
@@ -214,7 +214,7 @@ export default function AdminLayout({ user, onLogout }) {
         title={syncedAt ? `Last synced ${new Date(syncedAt).toLocaleString()}` : "Refresh dashboard data"}
         className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-wait disabled:opacity-60"
       >
-        <RefreshCw size={17} className={refreshing ? "animate-spin" : ""} />
+        <RefreshCw size={18} strokeWidth={2} className={refreshing ? "animate-spin" : ""} aria-hidden="true" />
         <span className="hidden sm:inline">Refresh</span>
       </button>
     </div>
@@ -226,10 +226,11 @@ export default function AdminLayout({ user, onLogout }) {
       <ConfirmationDialog confirmation={confirmation} loading={actionLoading} onCancel={() => setConfirmation(null)} onConfirm={confirmAction} />
       <ViewerDialog item={viewerItem} onClose={() => setViewerItem(null)} />
       <DocumentReviewDialog
+        key={reviewDocument?.id || "closed"}
         document={reviewDocument}
         onClose={() => setReviewDocument(null)}
         onApprove={() => requestDocumentDecision(reviewDocument, "Approved")}
-        onReject={() => requestDocumentDecision(reviewDocument, "Rejected")}
+        onReject={(remarks) => requestDocumentDecision(reviewDocument, "Rejected", remarks)}
       />
 
       <div className="min-h-screen w-full max-w-full lg:pl-64">
@@ -271,7 +272,7 @@ function DataLoadingState() {
   return (
     <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="text-center">
-        <LoaderCircle size={34} className="mx-auto animate-spin text-blue-600" />
+        <LoaderCircle size={32} strokeWidth={2} className="mx-auto animate-spin text-blue-600" aria-hidden="true" />
         <p className="mt-4 font-semibold text-slate-900">Loading RentifyPro data</p>
         <p className="mt-1 text-sm text-slate-500">Reading customers, vehicles, bookings, and documents from the shared database.</p>
       </div>
@@ -283,14 +284,14 @@ function DataErrorState({ message, onRetry, onLogout }) {
   return (
     <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-rose-200 bg-white p-6 shadow-sm">
       <div className="max-w-lg text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600"><Database size={26} /></span>
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600"><Database size={24} strokeWidth={2} aria-hidden="true" /></span>
         <h2 className="mt-5 text-xl font-bold text-slate-950">Could not load the shared database</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">{message}</p>
         <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
-          <button type="button" onClick={onRetry} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><RefreshCw size={17} />Try Again</button>
+          <button type="button" onClick={onRetry} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><RefreshCw size={18} strokeWidth={2} aria-hidden="true" />Try Again</button>
           <button type="button" onClick={onLogout} className="h-11 rounded-xl border border-slate-300 px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Return to Login</button>
         </div>
-        <p className="mt-5 inline-flex items-start gap-2 text-left text-xs leading-5 text-slate-500"><AlertTriangle size={15} className="mt-0.5 shrink-0" />The admin uses the same MongoDB database as the main RentifyPro website. It does not keep a separate copy.</p>
+        <p className="mt-5 inline-flex items-start gap-2 text-left text-xs leading-5 text-slate-500"><TriangleAlert size={16} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />The admin uses the same MongoDB database as the main RentifyPro website. It does not keep a separate copy.</p>
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import {
 } from "../controllers/report.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { authorize } from "../middleware/rbac.middleware.js";
+import { reviewKycDocument } from "../services/kycReview.service.js";
 
 const VEHICLE_MEDIA_PREFIX = "uploads/vehicles/";
 const VEHICLE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
@@ -110,6 +111,8 @@ const mapDocument = (document, usersByEmail) => {
     submitted: asDate(document.createdAt),
     submittedAt: asTimestamp(document.createdAt),
     approval: mapDocumentStatus(document.status),
+    reviewStatus: document.status,
+    reviewVersion: document.fileHash,
     mimeType: asText(document.mimeType, "application/octet-stream"),
     reason: asText(document.reason),
     confidence: Number.isFinite(Number(document.confidence)) ? Number(document.confidence) : null,
@@ -211,7 +214,7 @@ router.get("/data", async (_request, response, next) => {
           projection: { owner: 1, name: 1, dailyRentalRate: 1, pricingUnit: 1, location: 1, availabilityStatus: 1, images: 1, imageUrl: 1, driverOptionEnabled: 1, specs: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("prekycdocuments").find({}, {
-          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },
+          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, fileHash: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("bookings").find({}, {
           projection: { vehicle: 1, renter: 1, owner: 1, pickupAt: 1, returnAt: 1, status: 1, driverSelected: 1, reviewRating: 1, reviewComment: 1, reviewCreatedAt: 1, createdAt: 1 },
@@ -293,23 +296,13 @@ router.patch("/documents/:id", async (request, response, next) => {
         return response.status(400).json({ message: "Approval must be Approved or Rejected." });
       }
 
-      const now = new Date();
-      const setFields = {
-        status: approval === "Approved" ? "verified" : "rejected",
-        reason: approval === "Approved" ? "Approved by the RentifyPro system administrator." : "Rejected by the RentifyPro system administrator.",
-        reviewedAt: now,
-      };
-      if (approval === "Approved") setFields.verifiedAt = now;
-
-      const update = { $set: setFields };
-      if (approval === "Rejected") update.$unset = { verifiedAt: "" };
-      const result = await mongoose.connection.db.collection("prekycdocuments").findOneAndUpdate(
-        { _id: new mongoose.Types.ObjectId(request.params.id), status: "pending_review" },
-        update,
-        { returnDocument: "after" },
-      );
-      const updatedDocument = result?.value ?? result;
-      if (!updatedDocument) return response.status(409).json({ message: "This document is no longer pending review. Refresh the dashboard." });
+      const updatedDocument = await reviewKycDocument({
+        id: request.params.id,
+        action: approval === "Approved" ? "approve" : "reject",
+        remarks: request.body?.remarks,
+        reviewerId: request.user._id,
+        reviewVersion: request.body?.reviewVersion,
+      });
 
       const matchedUser = await mongoose.connection.db.collection("users").findOne(
         { email: asText(updatedDocument.email).toLowerCase() },
@@ -318,6 +311,7 @@ router.patch("/documents/:id", async (request, response, next) => {
       const usersByEmail = new Map(matchedUser ? [[asText(matchedUser.email).toLowerCase(), matchedUser]] : []);
       return response.json({ document: mapDocument(updatedDocument, usersByEmail) });
     } catch (error) {
+      if (error.status) return response.status(error.status).json({ message: error.message });
       return next(error);
     }
 });

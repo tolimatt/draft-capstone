@@ -51,7 +51,7 @@ export default function ReportCategorySelect({
         <span className={selectedLabel ? "font-medium text-slate-900" : "text-slate-500"}>
           {selectedLabel || placeholder}
         </span>
-        <ChevronDown size={17} className={`shrink-0 text-blue-600 transition ${open ? "rotate-180" : ""}`} />
+        <ChevronDown size={18} strokeWidth={2} className={`shrink-0 text-blue-600 transition ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
 
       {open ? (

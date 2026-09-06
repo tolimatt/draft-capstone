@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Loader, ArrowLeft, CheckCircle2, ShieldCheck, RefreshCw, Clock3 } from "lucide-react";
+import { Loader, ArrowLeft, CircleCheck, ShieldCheck, RefreshCw, Clock3 } from "lucide-react";
 import API from "../utils/api";
 
 // Mask the email address
@@ -129,9 +129,9 @@ export default function ForgotPasswordOTP({ email, onVerified, onNavigateToForgo
               </p>
             </div>
             <div className="space-y-3 text-sm text-blue-100">
-              <p className="flex items-center gap-2"><CheckCircle2 size={16} /> 6-digit OTP with expiration timer</p>
-              <p className="flex items-center gap-2"><CheckCircle2 size={16} /> Retry-safe verification flow</p>
-              <p className="flex items-center gap-2"><CheckCircle2 size={16} /> Secure reset-token validation</p>
+              <p className="flex items-center gap-2"><CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> 6-digit OTP with expiration timer</p>
+              <p className="flex items-center gap-2"><CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> Retry-safe verification flow</p>
+              <p className="flex items-center gap-2"><CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> Secure reset-token validation</p>
             </div>
           </div>
         </div>
@@ -146,7 +146,7 @@ export default function ForgotPasswordOTP({ email, onVerified, onNavigateToForgo
                 </div>
                 {timer > 0 ? (
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500">
-                    <Clock3 size={14} /> {timer}s
+                    <Clock3 size={16} strokeWidth={2} aria-hidden="true" /> {timer}s
                   </span>
                 ) : (
                   <button
@@ -155,7 +155,7 @@ export default function ForgotPasswordOTP({ email, onVerified, onNavigateToForgo
                     disabled={isVerifying || isSuccess}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-[#0165B8] hover:underline disabled:opacity-50"
                   >
-                    <RefreshCw size={13} /> Resend
+                    <RefreshCw size={16} strokeWidth={2} aria-hidden="true" /> Resend
                   </button>
                 )}
               </div>
@@ -169,7 +169,7 @@ export default function ForgotPasswordOTP({ email, onVerified, onNavigateToForgo
               {isSuccess && (
                 <div className="mt-5 flex items-center gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3">
                   <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white">
-                    <CheckCircle2 size={18} />
+                    <CircleCheck size={18} strokeWidth={2} aria-hidden="true" />
                   </div>
                   <p className="text-sm font-semibold text-emerald-700">Verified! Redirecting...</p>
                 </div>
@@ -234,7 +234,7 @@ export default function ForgotPasswordOTP({ email, onVerified, onNavigateToForgo
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#017FE6] to-[#0165B8] py-3 text-sm font-semibold text-white transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-65"
                   >
                     {isVerifying ? (
-                      <><Loader size={17} className="animate-spin" /> Verifying...</>
+                      <><Loader size={18} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Verifying...</>
                     ) : (
                       "Verify Code"
                     )}
@@ -248,7 +248,7 @@ export default function ForgotPasswordOTP({ email, onVerified, onNavigateToForgo
                 disabled={isVerifying || isSuccess}
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 py-3 text-sm font-semibold text-slate-800 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <ArrowLeft size={17} /> Back to Forgot Password
+                <ArrowLeft size={18} strokeWidth={2} aria-hidden="true" /> Back to Forgot Password
               </button>
             </div>
 

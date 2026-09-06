@@ -170,7 +170,7 @@ export default function VerificationStepper({ onVerificationComplete }) {
                   : "bg-gray-100 text-gray-400"
               }`}
             >
-              {step > s.id ? <Check size={16} strokeWidth={3} aria-hidden="true" /> : s.id}
+              {step > s.id ? <Check size={16} strokeWidth={2} aria-hidden="true" /> : s.id}
             </div>
             <span
               className={`text-xs hidden sm:block ${
@@ -278,12 +278,13 @@ export default function VerificationStepper({ onVerificationComplete }) {
       {step === 3 && result && (
         <div className="text-center py-4">
           <div className={`text-5xl mb-4 ${result.verified ? "text-green-500" : "text-red-500"}`}>
-            {result.verified ? <CircleCheck size={52} className="mx-auto" aria-hidden="true" /> : <CircleX size={52} className="mx-auto" aria-hidden="true" />}
+            {result.verified ? <CircleCheck size={48} strokeWidth={2} className="mx-auto" aria-hidden="true" /> : <CircleX size={48} strokeWidth={2} className="mx-auto" aria-hidden="true" />}
           </div>
           <h2 className={`text-2xl font-bold mb-2 ${result.verified ? "text-green-700" : "text-red-700"}`}>
-            {result.verified ? "Identity Verified!" : "Verification Failed"}
+            {result.verified ? result.kycStatus === "approved" ? "Identity Approved" : "Selfie Verified — Document Review Pending" : "Verification Failed"}
           </h2>
           <p className="text-gray-500 text-sm mb-4">{result.message}</p>
+          {result.verified && result.kycStatus !== "approved" && <p role="status" className="mb-4 text-sm text-amber-700">Your selfie matched. Use Refresh Status in your account settings to check document approval before booking.</p>}
 
           {result.verified && (
             <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-left mb-4 space-y-1">

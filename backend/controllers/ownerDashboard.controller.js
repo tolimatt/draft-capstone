@@ -6,6 +6,11 @@ import { emitToUser } from "../socket/index.js";
 import { syncVehicleAvailabilityByBookingState } from "../utils/vehicleAvailability.js";
 import { getTransactionFee } from "../utils/fees.js";
 import {
+  getBookingLateReturnPenaltyRatePerHour as getOwnerBookingLatePenaltyRatePerHour,
+  getBookingLateReturnPolicy,
+  getEstimatedLateReturnPenaltyFee,
+} from "../utils/lateReturnPolicy.js";
+import {
   HOURLY_RATE_UNIT,
   getBookingDriverHourlyRate,
   getBookingDurationHours,
@@ -26,27 +31,6 @@ const RETURN_STATUSES = new Set(["none", "requested", "confirmed", "declined"]);
 const CANCELLATION_REVIEW_ACTIONS = new Set(["approve", "reject"]);
 const ACTIVE_BOOKING_STATUSES = new Set(["confirmed", "extended"]);
 const ACTIVE_OVERLAP_STATUSES = ["pending", "confirmed", "extended"];
-const LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT = 0.25;
-const BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT = 0;
-
-const getLateReturnPenaltyMultiplier = () => {
-  const raw = Number(process.env.LATE_RETURN_PENALTY_MULTIPLIER);
-  if (!Number.isFinite(raw) || raw < 0) return LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT;
-  return raw;
-};
-
-const parseGraceMinutes = (value, fallback = 0) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
-  return Math.floor(numeric);
-};
-
-const getOwnerBookingLifecycleGracePolicy = () => ({
-  overdueMinutes: parseGraceMinutes(
-    process.env.BOOKING_OVERDUE_GRACE_MINUTES,
-    BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT
-  ),
-});
 
 const getImageUrl = (req, pathValue) => {
   if (!pathValue) return "";
@@ -57,17 +41,6 @@ const getImageUrl = (req, pathValue) => {
 const shouldUseConfiguredTransactionFeeFallback = (booking) => {
   const paymentStatus = String(booking?.paymentStatus || "").trim().toLowerCase();
   return paymentStatus === "unpaid" || paymentStatus === "partial";
-};
-
-const getOwnerBookingLatePenaltyRatePerHour = (booking) => {
-  const persisted = Number(booking?.lateReturnPenaltyRatePerHour || 0);
-  if (Number.isFinite(persisted) && persisted > 0) {
-    return roundCurrency(persisted);
-  }
-  const vehicleRate = getBookingVehicleHourlyRate(booking);
-  const driverRate = Boolean(booking?.driverSelected) ? getBookingDriverHourlyRate(booking) : 0;
-  const baseRate = Math.max(0, Number(vehicleRate || 0)) + Math.max(0, Number(driverRate || 0));
-  return roundCurrency(baseRate * getLateReturnPenaltyMultiplier());
 };
 
 const getOwnerBookingLatePenaltyFee = (booking) => {
@@ -324,6 +297,7 @@ const serializeWalkInPayment = (booking) => ({
 
 const serializeLateReturn = (booking) => {
   const overdueMinutes = Math.max(0, Math.round(Number(booking?.lateReturnOverdueMinutes || 0)));
+  const policy = getBookingLateReturnPolicy(booking);
   return {
     isOverdue: Boolean(booking?.lateReturnIsOverdue),
     overdueMinutes,
@@ -331,6 +305,10 @@ const serializeLateReturn = (booking) => {
     notifiedAt: booking?.lateReturnNotifiedAt || null,
     penaltyRatePerHour: getOwnerBookingLatePenaltyRatePerHour(booking),
     penaltyFee: getOwnerBookingLatePenaltyFee(booking),
+    estimatedPenaltyFee: getEstimatedLateReturnPenaltyFee(booking),
+    feeType: policy.feeType,
+    feeValue: policy.value,
+    graceMinutes: policy.graceMinutes,
     action: String(booking?.lateReturnAction || "").trim().toLowerCase() || "none",
     resolvedAt: booking?.lateReturnResolvedAt || null,
     resolvedBy: toIdString(booking?.lateReturnResolvedBy),
@@ -454,6 +432,7 @@ const serializeOwnerBooking = (req, booking) => {
     baseAmount: booking.baseAmount,
     driverAmount: booking.driverAmount,
     totalAmount: booking.totalAmount,
+    lateReturnPolicy: getBookingLateReturnPolicy(booking),
     lateReturnPenaltyRatePerHour: getOwnerBookingLatePenaltyRatePerHour(booking),
     lateReturnPenaltyFee: getOwnerBookingLatePenaltyFee(booking),
     transactionFee: getOwnerBookingTransactionFee(booking),
@@ -491,7 +470,7 @@ const syncOwnerBookingLifecycleState = async (booking) => {
   if (!booking?._id) return { updated: false };
 
   const now = new Date();
-  const gracePolicy = getOwnerBookingLifecycleGracePolicy();
+  const lateReturnPolicy = getBookingLateReturnPolicy(booking);
   const normalizedStatus = String(booking?.status || "").trim().toLowerCase();
   if (!ACTIVE_BOOKING_STATUSES.has(normalizedStatus)) {
     return { updated: false };
@@ -502,7 +481,7 @@ const syncOwnerBookingLifecycleState = async (booking) => {
     return { updated: false };
   }
 
-  const overdueMinutes = getOwnerBookingOverdueMinutes(booking, now, gracePolicy.overdueMinutes);
+  const overdueMinutes = getOwnerBookingOverdueMinutes(booking, now, lateReturnPolicy.graceMinutes);
   if (overdueMinutes <= 0) {
     return { updated: false };
   }
@@ -692,8 +671,14 @@ export const updateOwnerBookingStatus = async (req, res) => {
       }
     }
 
-    booking.status = status;
-    await booking.save();
+    const transition = await Booking.updateOne(
+      { _id: booking._id, owner: req.user._id, status: currentStatus, updatedAt: booking.updatedAt },
+      { $set: { status: requestedStatus } },
+    );
+    if (!transition.modifiedCount) {
+      return res.status(409).json({ success: false, message: "This booking changed while you were reviewing it. Refresh bookings to see its latest status." });
+    }
+    booking.status = requestedStatus;
     await syncVehicleAvailabilityByBookingState(booking.vehicle?._id || booking.vehicle);
 
     const statusNotificationEvent =
@@ -871,8 +856,8 @@ export const confirmOwnerVehicleReturn = async (req, res) => {
     }
 
     const now = new Date();
-    const gracePolicy = getOwnerBookingLifecycleGracePolicy();
-    const overdueMinutes = getOwnerBookingOverdueMinutes(booking, now, gracePolicy.overdueMinutes);
+    const lateReturnPolicy = getBookingLateReturnPolicy(booking);
+    const overdueMinutes = getOwnerBookingOverdueMinutes(booking, now, lateReturnPolicy.graceMinutes);
     const penaltyRatePerHour = getOwnerBookingLatePenaltyRatePerHour(booking);
     const lateReturnPenaltyFee = roundCurrency(
       penaltyRatePerHour * getDurationHoursFromMinutes(overdueMinutes)

@@ -9,11 +9,13 @@ const resolveMediaUrl = (value) => {
 
 const normalizeDocument = (document) => ({
   ...document,
+  role: document?.role === "Operator" ? "Vehicle Owner" : document?.role,
   previewUrl: resolveMediaUrl(document?.previewUrl),
 });
 
 const normalizeOverview = (payload) => ({
   ...payload,
+  customers: (payload.customers || []).map((customer) => ({ ...customer, role: customer.role === "Operator" ? "Vehicle Owner" : customer.role })),
   vehicles: Array.isArray(payload?.vehicles)
     ? payload.vehicles.map((vehicle) => ({ ...vehicle, image: resolveMediaUrl(vehicle.image) }))
     : [],
@@ -36,7 +38,7 @@ async function request(path, options = {}) {
       ...options,
     });
   } catch {
-    const error = new Error("Cannot connect to the admin server. Start the project from its root folder with npm run dev.");
+    const error = new Error("Cannot connect to RentifyPro. Check your connection and try again.");
     error.status = 0;
     error.code = "API_UNAVAILABLE";
     throw error;
@@ -54,10 +56,10 @@ async function request(path, options = {}) {
 
 export const adminDataApi = {
   getOverview: async () => normalizeOverview(await request("/admin/data")),
-  updateDocument: async (id, approval) => {
+  updateDocument: async (id, approval, remarks = "", reviewVersion) => {
     const payload = await request(`/admin/documents/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ approval }),
+      body: JSON.stringify({ approval, remarks, reviewVersion }),
     });
     return { ...payload, document: normalizeDocument(payload.document) };
   },

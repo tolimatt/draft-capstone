@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import API from "../../utils/api";
 import { formatDisplayName } from "../../utils/dateUtils";
 import { resolveAssetUrl } from "../../utils/media";
+import OwnerPageHeader from "../components/OwnerPageHeader";
 
 const getRenterProfile = (renter) => {
   const name = formatDisplayName(renter?.name || "", "");
@@ -60,12 +61,11 @@ export default function Reviews() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reviews & Ratings</h1>
-          <p className="text-sm text-gray-600">Renter feedback from completed bookings.</p>
-        </div>
-        <div className="flex gap-2">
+      <OwnerPageHeader
+        title="Reviews & Ratings"
+        description="See renter feedback from completed bookings."
+        actions={(
+          <div className="flex gap-2">
           {["All", "Positive", "Negative"].map((item) => (
             <button
               key={item}
@@ -79,8 +79,9 @@ export default function Reviews() {
               {item}
             </button>
           ))}
-        </div>
-      </div>
+          </div>
+        )}
+      />
 
       {!loading && (
         <div className="bg-white rounded-xl border p-5">

@@ -8,7 +8,8 @@ import {
   CalendarDays,
   CalendarRange,
   CarFront,
-  Check,
+  CircleCheck,
+  CircleX,
   ChevronLeft,
   ChevronRight,
   Circle,
@@ -527,11 +528,11 @@ const getRecentActivity = (bookings) => {
 
       if (extension.status === "approved") {
         description = "Extension Approved";
-        icon = Check;
+        icon = CircleCheck;
         tone = "text-emerald-700 bg-emerald-100";
       } else if (extension.status === "rejected") {
         description = "Extension Declined";
-        icon = X;
+        icon = CircleX;
         tone = "text-rose-700 bg-rose-100";
       } else if (extension.status === "requested") {
         description = "Extension request";
@@ -551,7 +552,7 @@ const getRecentActivity = (bookings) => {
         tone = "text-slate-700 bg-slate-200";
       } else if (status === "confirmed") {
         description = "Booking approved";
-        icon = Check;
+        icon = CircleCheck;
         tone = "text-blue-700 bg-blue-100";
       } else if (status === "pending") {
         description = "New booking request";
@@ -980,7 +981,7 @@ export default function Dashboard() {
         {/* Calendar */}
         <Panel className="overflow-hidden">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 border-b border-slate-200/80 pb-4">
-            <CalendarDays size={17} className="text-[#017FE6]" />
+            <CalendarDays size={20} strokeWidth={2} className="text-[#017FE6]" aria-hidden="true" />
             Rental Calendar
           </div>
 
@@ -1244,7 +1245,7 @@ export default function Dashboard() {
                 return (
                   <div key={activity.booking._id} className="flex items-start gap-3">
                     <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${activity.tone}`}>
-                      <Icon size={14} />
+                      <Icon size={16} strokeWidth={2} aria-hidden="true" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm text-slate-900">
@@ -1299,7 +1300,7 @@ export default function Dashboard() {
                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
               >
                 Open Bookings
-                <ArrowRight size={15} />
+                <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
 
@@ -1354,7 +1355,7 @@ export default function Dashboard() {
                                   onClick={() => reviewExtensionRequest(booking, "approve")}
                                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
                                 >
-                                  <Check size={15} />
+                                  <CircleCheck size={18} strokeWidth={2} aria-hidden="true" />
                                   Approve Extension
                                 </button>
                                 <button
@@ -1363,7 +1364,7 @@ export default function Dashboard() {
                                   onClick={() => reviewExtensionRequest(booking, "reject")}
                                   className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60"
                                 >
-                                  <X size={15} />
+                                  <CircleX size={18} strokeWidth={2} aria-hidden="true" />
                                   Decline Extension
                                 </button>
                               </div>
@@ -1384,7 +1385,7 @@ export default function Dashboard() {
                                 onClick={() => updateBookingStatus(booking._id, "confirmed")}
                                 className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
                               >
-                                <Check size={15} />
+                                <CircleCheck size={18} strokeWidth={2} aria-hidden="true" />
                                 Approve Booking
                               </button>
                               <button
@@ -1393,7 +1394,7 @@ export default function Dashboard() {
                                 onClick={() => updateBookingStatus(booking._id, "rejected")}
                                 className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60"
                               >
-                                <X size={15} />
+                                <CircleX size={18} strokeWidth={2} aria-hidden="true" />
                                 Decline Booking
                               </button>
                             </div>
@@ -1447,7 +1448,7 @@ export default function Dashboard() {
                 onClick={() => reviewExtensionRequest(extensionReviewBooking, "approve")}
                 className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
               >
-                <Check size={15} />
+                <CircleCheck size={18} strokeWidth={2} aria-hidden="true" />
                 Approve Extension
               </button>
               <button
@@ -1456,7 +1457,7 @@ export default function Dashboard() {
                 onClick={() => reviewExtensionRequest(extensionReviewBooking, "reject")}
                 className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60"
               >
-                <X size={15} />
+                <CircleX size={18} strokeWidth={2} aria-hidden="true" />
                 Decline Extension
               </button>
             </div>
@@ -1508,7 +1509,7 @@ export default function Dashboard() {
                 onClick={() => reviewRenterRequest(renterRequestReview, "approve")}
                 className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
               >
-                <Check size={15} />
+                <CircleCheck size={18} strokeWidth={2} aria-hidden="true" />
                 {renterRequestReview.type === "booking"
                   ? "Approve Booking"
                   : renterRequestReview.type === "cancellation"
@@ -1523,7 +1524,7 @@ export default function Dashboard() {
                 onClick={() => reviewRenterRequest(renterRequestReview, "reject")}
                 className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60"
               >
-                <X size={15} />
+                <CircleX size={18} strokeWidth={2} aria-hidden="true" />
                 {renterRequestReview.type === "booking"
                   ? "Decline Booking"
                   : renterRequestReview.type === "cancellation"
@@ -1569,7 +1570,7 @@ function SummaryCard({
     <Panel className="p-4 sm:p-5">
       <div className="flex items-start gap-4">
         <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${iconClassName}`}>
-          <SummaryIcon size={25} />
+          <SummaryIcon size={24} strokeWidth={2} aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
@@ -1595,7 +1596,7 @@ function SummaryCard({
               aria-label={subtitle}
             >
               {subtitle}
-              <ArrowRight size={13} />
+              <ArrowRight size={16} strokeWidth={2} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -1613,7 +1614,7 @@ function SectionViewAllFooter({ label, onClick, pushToBottom = false }) {
         className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-semibold text-[#017FE6] transition hover:text-[#0168be]"
       >
         {label}
-        <ArrowRight size={14} />
+        <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
       </button>
     </div>
   );
@@ -1688,7 +1689,7 @@ function StatusChip({ tone }) {
   const Icon = tone.icon;
   return (
     <span className={`inline-flex w-fit items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${tone.className}`}>
-      <Icon size={12} />
+      <Icon size={16} strokeWidth={2} aria-hidden="true" />
       {tone.label}
     </span>
   );
@@ -1900,7 +1901,7 @@ function ViewAllDashboardModal({
           className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#017FE6] transition hover:border-blue-200 hover:bg-blue-50"
         >
           {details.actionLabel}
-          <ArrowRight size={15} />
+          <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
         </button>
       </div>
     </Modal>

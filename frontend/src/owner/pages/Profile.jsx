@@ -9,6 +9,7 @@ import {
   normalizeOwnerProfile,
   persistOwnerProfile,
 } from "../utils/ownerProfile";
+import OwnerPageHeader from "../components/OwnerPageHeader";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 
@@ -308,13 +309,10 @@ export default function Profile() {
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-12">
-      <div className="rp-page-header">
-        <span className="rp-page-eyebrow">Owner workspace</span>
-        <h1 className="mb-2 text-3xl font-bold text-gray-900">Account Settings</h1>
-        <p className="max-w-xl text-base text-gray-500">
-          Manage your personal information and owner profile preferences
-        </p>
-      </div>
+      <OwnerPageHeader
+        title="Account Settings"
+        description="Manage your personal information and owner profile preferences."
+      />
 
       {statusMessage && (
         <div className="rounded-xl border border-green-100 bg-green-50 px-4 py-3 text-sm text-green-700">

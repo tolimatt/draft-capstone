@@ -18,6 +18,12 @@ import { getTransactionFee } from "../utils/fees.js";
 import { syncVehicleAvailabilityByBookingState } from "../utils/vehicleAvailability.js";
 import { normalizePhilippineMobile } from "../utils/phone.js";
 import {
+  createBookingLateReturnPolicySnapshot,
+  getBookingLateReturnPenaltyRatePerHour as getBookingLatePenaltyRatePerHour,
+  getBookingLateReturnPolicy,
+  getEstimatedLateReturnPenaltyFee,
+} from "../utils/lateReturnPolicy.js";
+import {
   HOURLY_RATE_UNIT,
   getBookingDriverHourlyRate,
   getBookingDurationHours,
@@ -115,27 +121,6 @@ const EXTENSION_STATUSES = new Set(["none", "requested", "approved", "rejected"]
 const CANCELLATION_STATUSES = new Set(["none", "requested", "approved", "rejected"]);
 const RETURN_STATUSES = new Set(["none", "requested", "confirmed", "declined"]);
 const LATE_RETURN_ACTIONS = new Set(["none", "extend_requested", "proceed_late_return", "return_confirmed"]);
-const LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT = 0.25;
-const BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT = 0;
-
-const getLateReturnPenaltyMultiplier = () => {
-  const raw = Number(process.env.LATE_RETURN_PENALTY_MULTIPLIER);
-  if (!Number.isFinite(raw) || raw < 0) return LATE_RETURN_PENALTY_MULTIPLIER_DEFAULT;
-  return raw;
-};
-
-const parseGraceMinutes = (value, fallback = 0) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
-  return Math.floor(numeric);
-};
-
-const getBookingLifecycleGracePolicy = () => ({
-  overdueMinutes: parseGraceMinutes(
-    process.env.BOOKING_OVERDUE_GRACE_MINUTES,
-    BOOKING_OVERDUE_GRACE_MINUTES_DEFAULT
-  ),
-});
 
 const resolvePaymentScope = (value, fallback = "downpayment") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -174,17 +159,6 @@ const logPayMongoError = (context, error) => {
 const shouldApplyConfiguredFeeFallback = (booking) => {
   const paymentStatus = String(booking?.paymentStatus || "unpaid").toLowerCase();
   return paymentStatus === "unpaid" || paymentStatus === "partial";
-};
-
-const getBookingLatePenaltyRatePerHour = (booking) => {
-  const persisted = Number(booking?.lateReturnPenaltyRatePerHour || 0);
-  if (Number.isFinite(persisted) && persisted > 0) {
-    return roundCurrency(persisted);
-  }
-  const vehicleRate = getBookingVehicleHourlyRate(booking);
-  const driverRate = Boolean(booking?.driverSelected) ? getBookingDriverHourlyRate(booking) : 0;
-  const baseRate = Math.max(0, Number(vehicleRate || 0)) + Math.max(0, Number(driverRate || 0));
-  return roundCurrency(baseRate * getLateReturnPenaltyMultiplier());
 };
 
 const getBookingLatePenaltyFee = (booking) => {
@@ -447,13 +421,19 @@ const serializeWalkInPayment = (booking) => ({
 
 const serializeLateReturn = (booking) => {
   const overdueMinutes = Math.max(0, Math.round(Number(booking?.lateReturnOverdueMinutes || 0)));
+  const policy = getBookingLateReturnPolicy(booking);
+  const penaltyFee = roundCurrency(Number(booking?.lateReturnPenaltyFee || 0));
   return {
     isOverdue: Boolean(booking?.lateReturnIsOverdue),
     overdueMinutes,
     detectedAt: booking?.lateReturnDetectedAt || null,
     notifiedAt: booking?.lateReturnNotifiedAt || null,
-    penaltyRatePerHour: roundCurrency(Number(booking?.lateReturnPenaltyRatePerHour || 0)),
-    penaltyFee: roundCurrency(Number(booking?.lateReturnPenaltyFee || 0)),
+    penaltyRatePerHour: getBookingLatePenaltyRatePerHour(booking),
+    penaltyFee,
+    estimatedPenaltyFee: getEstimatedLateReturnPenaltyFee(booking),
+    feeType: policy.feeType,
+    feeValue: policy.value,
+    graceMinutes: policy.graceMinutes,
     action: normalizeLateReturnAction(booking?.lateReturnAction, "none"),
     resolvedAt: booking?.lateReturnResolvedAt || null,
     resolvedBy: toIdString(booking?.lateReturnResolvedBy),
@@ -539,6 +519,7 @@ const serializeBooking = (req, booking) => {
     baseAmount: booking.baseAmount,
     driverAmount: booking.driverAmount,
     totalAmount: booking.totalAmount,
+    lateReturnPolicy: getBookingLateReturnPolicy(booking),
     lateReturnPenaltyRatePerHour: getBookingLatePenaltyRatePerHour(booking),
     lateReturnPenaltyFee: getBookingLatePenaltyFee(booking),
     transactionFee: getEffectiveTransactionFee(booking),
@@ -880,6 +861,12 @@ export const createBooking = async (req, res) => {
     const totalAmount = roundCurrency(baseAmount + driverAmount);
     const transactionFee = getTransactionFee();
     const paymentAmountDue = roundCurrency(totalAmount + transactionFee);
+    const lateReturnPolicySnapshot = createBookingLateReturnPolicySnapshot({
+      vehicle: lockedVehicle,
+      vehicleHourlyRate: vehicleDailyRate,
+      driverHourlyRate: driverDailyRate,
+      driverSelected,
+    });
 
     let booking;
     booking = await Booking.create({
@@ -906,7 +893,7 @@ export const createBooking = async (req, res) => {
       paymentCheckoutAmount: 0,
       paymentScope: null,
       paymentChannel: null,
-      lateReturnPenaltyRatePerHour: 0,
+      ...lateReturnPolicySnapshot,
       lateReturnPenaltyFee: 0,
       lateReturnIsOverdue: false,
       lateReturnDetectedAt: null,
@@ -1642,7 +1629,7 @@ const syncBookingLifecycleState = async (req, booking, { emitUpdate = false } = 
   if (!booking?._id) return { updated: false };
 
   const now = new Date();
-  const gracePolicy = getBookingLifecycleGracePolicy();
+  const lateReturnPolicy = getBookingLateReturnPolicy(booking);
   const normalizedStatus = String(booking?.status || "").trim().toLowerCase();
   const isActiveStatus = ACTIVE_BOOKING_STATUSES.has(normalizedStatus);
   const returnAt = toDate(booking?.returnAt);
@@ -1656,7 +1643,7 @@ const syncBookingLifecycleState = async (req, booking, { emitUpdate = false } = 
     return { updated: false };
   }
 
-  const overdueMinutes = getBookingOverdueMinutes(booking, now, gracePolicy.overdueMinutes);
+  const overdueMinutes = getBookingOverdueMinutes(booking, now, lateReturnPolicy.graceMinutes);
   if (overdueMinutes <= 0) {
     return { updated: false };
   }
@@ -1856,6 +1843,7 @@ export const verifyBookingPayment = async (req, res) => {
       });
     }
     let isPaid = wasPaid;
+    let checkoutStatus = "";
     let verificationApplied = false;
 
     if (!wasPaid) {
@@ -1870,6 +1858,7 @@ export const verifyBookingPayment = async (req, res) => {
       }
 
       const checkoutSession = await getPayMongoCheckoutSession(checkoutId);
+      checkoutStatus = String(checkoutSession?.attributes?.status || "").toLowerCase();
       const sessionCheckoutId = getPayMongoCheckoutId(checkoutSession);
       const sessionReferenceNumber = getPayMongoCheckoutReferenceNumber(checkoutSession);
       const sessionMetadata = getPayMongoCheckoutMetadata(checkoutSession);
@@ -2015,6 +2004,7 @@ export const verifyBookingPayment = async (req, res) => {
       success: true,
       paid: payload.paymentStatus === "paid",
       paymentCaptured: isPaid,
+      checkoutStatus,
       paymentStatus: payload.paymentStatus,
       checkoutId: payload.paymongoCheckoutId,
       referenceNumber: payload.paymongoReference,

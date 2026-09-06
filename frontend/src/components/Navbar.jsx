@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Car, Flag, Menu, MessageCircle, Settings, X } from "lucide-react";
+import { Bell, CalendarDays, Flag, LogOut, Menu, MessageCircle, Settings, X } from "lucide-react";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../utils/liveCounters";
@@ -208,17 +208,17 @@ export default function Navbar({
 
   return (
       <>
-      <nav className="fixed inset-x-0 top-0 z-50 px-3 sm:px-5 pt-3">
+      <nav className="rp-site-navbar fixed inset-x-0 top-0 z-50 px-3 sm:px-5 pt-3">
         <div className="rp-glass mx-auto max-w-7xl rounded-[1.35rem] border border-white/70 shadow-[0_18px_40px_rgba(2,20,46,0.12)]">
-          <div className="flex min-h-[4.25rem] items-center justify-between gap-2 px-3 py-2 sm:gap-4 sm:px-6">
+          <div className="rp-site-navbar__bar flex min-h-[4.25rem] items-center justify-between gap-2 px-3 py-2 sm:gap-4 sm:px-6">
             <button
               onClick={handleHomeClick}
-              className="flex min-w-0 items-center gap-2 text-base font-extrabold tracking-[-0.03em] text-slate-900 transition-opacity hover:opacity-85 sm:gap-3 sm:text-[1.35rem]"
+              className="rp-site-navbar__brand flex min-w-0 items-center gap-2 text-base font-extrabold tracking-[-0.03em] text-slate-900 transition-opacity hover:opacity-85 sm:gap-3 sm:text-[1.35rem]"
             >
               <img
                 src={BRAND_LOGO_SRC}
                 alt="RentifyPro logo"
-                className="h-9 w-9 shrink-0 rounded-full object-cover sm:h-10 sm:w-10"
+                className="rp-site-navbar__brand-logo h-9 w-9 shrink-0 rounded-full object-cover sm:h-10 sm:w-10"
               />
               <span>
                 Rentify<span className="text-[#0B75E7]">Pro</span>
@@ -265,7 +265,7 @@ export default function Navbar({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="rp-site-navbar__actions flex shrink-0 items-center gap-2 sm:gap-3">
               {isLoggedIn && (
                 <div className="hidden lg:flex items-center gap-2 sm:gap-3">
                   <button
@@ -345,7 +345,7 @@ export default function Navbar({
               <button
                 type="button"
                 onClick={() => setShowMobileMenu((prev) => !prev)}
-                className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-[#0B75E7] shadow-sm transition-all hover:border-blue-100 hover:bg-blue-50/90 lg:hidden"
+                className="rp-site-navbar__menu-trigger relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-[#0B75E7] shadow-sm transition-all hover:border-blue-100 hover:bg-blue-50/90 lg:hidden"
                 aria-label={showMobileMenu ? "Close menu" : "Open menu"}
               >
                 {showMobileMenu ? <X size={18} /> : <Menu size={18} />}
@@ -378,7 +378,7 @@ export default function Navbar({
                 className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-50"
                 aria-label="Close menu"
               >
-                <X size={16} />
+                <X size={18} strokeWidth={2} />
               </button>
             </div>
 
@@ -416,7 +416,7 @@ export default function Navbar({
         <button
           onClick={onShowAI}
           aria-label="Open Rentify AI"
-          className="fixed bottom-8 right-10 z-[70] flex h-16 w-16 items-center justify-center text-white transition-all duration-300 hover:scale-105 hover:opacity-95"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-[70] flex h-14 w-14 items-center justify-center text-white transition-all duration-300 hover:scale-105 hover:opacity-95 sm:bottom-8 sm:right-10 sm:h-16 sm:w-16"
         >
           <img
             src="/rentify-ai-logo-bubble-optimized.png"
@@ -515,7 +515,7 @@ function ProfileMenu({
             onClick={onBookingHistory}
             className="flex w-full items-center gap-3 px-4 py-3.5 text-sm font-medium text-slate-700 transition-colors hover:bg-[#017FE6]/10"
           >
-            <Car size={18} /> My Bookings
+            <CalendarDays size={18} strokeWidth={2} aria-hidden="true" /> My Bookings
           </button>
           {onReports && (
             <button
@@ -529,7 +529,7 @@ function ProfileMenu({
             onClick={onLogout}
             className="flex w-full items-center gap-3 px-4 py-3.5 text-sm font-medium text-red-500 transition-colors hover:bg-red-50"
           >
-            Sign Out
+            <LogOut size={18} strokeWidth={2} aria-hidden="true" /> Sign Out
           </button>
         </div>
       )}

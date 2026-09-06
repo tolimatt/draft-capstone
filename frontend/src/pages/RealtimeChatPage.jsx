@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Flag, MessageSquare, Search, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, Flag, MessageCircle, Search, Send, Trash2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
@@ -483,11 +483,11 @@ export default function RealtimeChatPage({
         onLogout={onLogout}
       />
 
-      <main className="mx-auto max-w-[1380px] px-4 pb-12 pt-24 sm:px-6 sm:pt-28">
+      <main className="rp-renter-main mx-auto max-w-[1380px] px-4 pb-12 pt-24 sm:px-6 sm:pt-28">
         <div className="rp-chat-page-header rp-surface">
           <div className="rp-chat-page-heading">
             <span className="rp-chat-page-icon" aria-hidden="true">
-              <MessageSquare size={22} />
+              <MessageCircle size={24} strokeWidth={2} />
             </span>
             <div>
               <p className="rp-chat-eyebrow">Renter inbox</p>
@@ -533,7 +533,7 @@ export default function RealtimeChatPage({
             <div className="rp-chat-conversation-list">
               {!loadingConversations && !conversations.length && (
                 <div className="rp-chat-list-empty">
-                  <MessageSquare size={20} aria-hidden="true" />
+                  <MessageCircle size={20} strokeWidth={2} aria-hidden="true" />
                   <p>No conversations yet</p>
                   <span>Open a vehicle listing to message its owner.</span>
                 </div>
@@ -617,7 +617,7 @@ export default function RealtimeChatPage({
                 className="rp-chat-delete-button"
                 aria-label="Delete conversation"
               >
-                <Trash2 size={15} />
+                <Trash2 size={18} strokeWidth={2} aria-hidden="true" />
                 <span>Delete</span>
               </button>
             </div>
@@ -628,7 +628,7 @@ export default function RealtimeChatPage({
             >
               {!loadingMessages && !messages.length && (
                 <div className="rp-chat-empty-thread">
-                  <span aria-hidden="true"><MessageSquare size={24} /></span>
+                  <span aria-hidden="true"><MessageCircle size={24} strokeWidth={2} /></span>
                   <h3>{activePartnerId ? "Start the conversation" : "Your messages live here"}</h3>
                   <p>
                     {activePartnerId
@@ -719,7 +719,7 @@ export default function RealtimeChatPage({
                             aria-label="Report this message"
                             title="Report message"
                           >
-                            <Flag size={13} />
+                            <Flag size={16} strokeWidth={2} />
                           </button>
                         )}
                       </div>

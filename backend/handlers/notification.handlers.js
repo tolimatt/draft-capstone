@@ -1,6 +1,12 @@
 import eventBus from "../events/eventBus.js";
 import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import NotificationService from "../services/notification.service.js";
+import {
+  getBookingLateReturnPenaltyRatePerHour,
+  getBookingLateReturnPolicy,
+  getEstimatedLateReturnPenaltyFee,
+} from "../utils/lateReturnPolicy.js";
+import { roundCurrency } from "../utils/pricing.js";
 
 let registered = false;
 
@@ -26,6 +32,63 @@ const getOwnerId = (payload = {}) =>
   toIdString(payload.ownerId || getBooking(payload).owner?._id || getBooking(payload).owner);
 const getRenterId = (payload = {}) =>
   toIdString(payload.renterId || getBooking(payload).renter?._id || getBooking(payload).renter);
+
+const peso = (value) =>
+  `₱${Math.max(0, Number(value || 0)).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const durationLabel = (value) => {
+  const minutes = Math.max(0, Math.round(Number(value || 0)));
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours && remainder) return `${hours}h ${remainder}m`;
+  if (hours) return `${hours}h`;
+  return `${remainder}m`;
+};
+
+const getLateReturnPaymentData = (payload = {}, { final = false } = {}) => {
+  const booking = getBooking(payload);
+  const overdueMinutes = Math.max(
+    0,
+    Math.round(Number(payload.overdueMinutes ?? booking.lateReturnOverdueMinutes ?? 0))
+  );
+  const penaltyRatePerHour = getBookingLateReturnPenaltyRatePerHour(booking);
+  const lateReturnPenaltyFee = final
+    ? roundCurrency(Number(payload.lateReturnPenaltyFee ?? booking.lateReturnPenaltyFee ?? 0))
+    : getEstimatedLateReturnPenaltyFee(booking);
+  const lateReturnPolicy = getBookingLateReturnPolicy(booking);
+  const rentalAmount = roundCurrency(Math.max(0, Number(booking.totalAmount || 0)));
+  const transactionFee = roundCurrency(Math.max(0, Number(booking.transactionFee || 0)));
+  const totalAmountPayable = roundCurrency(rentalAmount + Math.max(0, lateReturnPenaltyFee) + transactionFee);
+  const paymentAmountPaid = roundCurrency(Math.max(0, Number(booking.paymentAmountPaid || 0)));
+  const persistedDue = Number(booking.paymentAmountDue);
+  const remainingBalance = final && Number.isFinite(persistedDue)
+    ? roundCurrency(Math.max(0, persistedDue))
+    : roundCurrency(Math.max(0, totalAmountPayable - paymentAmountPaid));
+
+  return {
+    vehicleName: getVehicleName(payload),
+    scheduledReturnAt: booking.returnAt || null,
+    actualReturnAt: booking.actualReturnAt || null,
+    overdueMinutes,
+    graceMinutes: lateReturnPolicy.graceMinutes,
+    lateReturnPenaltyRatePerHour: penaltyRatePerHour,
+    ...(final
+      ? { lateReturnPenaltyFee: Math.max(0, lateReturnPenaltyFee) }
+      : { estimatedLateReturnPenaltyFee: Math.max(0, lateReturnPenaltyFee) }),
+    feeStatus: final ? "final" : "estimated",
+    rentalAmount,
+    transactionFee,
+    totalAmountPayable,
+    paymentAmountPaid,
+    remainingBalance,
+    paymentStatus: String(booking.paymentStatus || "unpaid").trim().toLowerCase(),
+    paymentLocation: "My Bookings",
+    paymentAction: final ? "Pay Remaining" : "Pay Remaining after the owner confirms receipt",
+  };
+};
 
 const notificationKey = (recipientId, eventName, entityId, suffix = "") => {
   const recipient = toIdString(recipientId);
@@ -162,11 +225,12 @@ const handleBookingStatusUpdated = async (payload = {}) => {
 };
 
 const handleBookingOverdue = async (payload = {}) => {
-  const overdueMinutes = Number(payload.overdueMinutes || getBooking(payload).lateReturnOverdueMinutes || 0);
+  const lateReturnData = getLateReturnPaymentData(payload);
+  const { overdueMinutes, lateReturnPenaltyRatePerHour, estimatedLateReturnPenaltyFee, vehicleName } = lateReturnData;
   const data = bookingData(payload, {
     status: payload.status || getBooking(payload).status,
     isOverdue: true,
-    overdueMinutes,
+    ...lateReturnData,
   });
 
   await NotificationService.sendMany([
@@ -177,8 +241,7 @@ const handleBookingOverdue = async (payload = {}) => {
       event: NOTIFICATION_EVENTS.BOOKING_OVERDUE,
       priority: "urgent",
       title: "Late return detected",
-      message:
-        "Your booking is overdue. Request an extension or start the vehicle-return process from your booking card.",
+      message: `Your ${vehicleName} booking is overdue by ${durationLabel(overdueMinutes)}. The current estimated late fee is ${peso(estimatedLateReturnPenaltyFee)} at ${peso(lateReturnPenaltyRatePerHour)} per overdue hour. The estimate continues until the owner confirms receipt. Open My Bookings to request an extension or vehicle return; any final balance can be paid there using Pay Remaining.`,
       entityType: "booking",
       entityId: getBookingId(payload),
       dedupeKey: notificationKey(getRenterId(payload), NOTIFICATION_EVENTS.BOOKING_OVERDUE, getBookingId(payload)),
@@ -191,7 +254,7 @@ const handleBookingOverdue = async (payload = {}) => {
       event: NOTIFICATION_EVENTS.BOOKING_OVERDUE,
       priority: "urgent",
       title: "Vehicle return is overdue",
-      message: "The renter has exceeded the scheduled return time.",
+      message: `${vehicleName} is overdue by ${durationLabel(overdueMinutes)}. The current estimated late fee is ${peso(estimatedLateReturnPenaltyFee)} at ${peso(lateReturnPenaltyRatePerHour)} per overdue hour and continues until receipt is confirmed.`,
       entityType: "booking",
       entityId: getBookingId(payload),
       dedupeKey: notificationKey(getOwnerId(payload), NOTIFICATION_EVENTS.BOOKING_OVERDUE, getBookingId(payload)),
@@ -239,15 +302,12 @@ const handleBookingCompleted = async (payload = {}) => {
 };
 
 const handleLateReturnProcessed = async (payload = {}) => {
-  const overdueMinutes = Number(payload.overdueMinutes || getBooking(payload).lateReturnOverdueMinutes || 0);
-  const lateReturnPenaltyFee = Number(
-    payload.lateReturnPenaltyFee ?? getBooking(payload).lateReturnPenaltyFee ?? 0
-  );
+  const lateReturnData = getLateReturnPaymentData(payload, { final: true });
+  const { overdueMinutes, lateReturnPenaltyFee, remainingBalance, vehicleName } = lateReturnData;
   const actorName = displayName(payload.actor || payload.renter, "Your renter");
   const data = bookingData(payload, {
     status: payload.status || getBooking(payload).status || "completed",
-    overdueMinutes,
-    lateReturnPenaltyFee,
+    ...lateReturnData,
   });
 
   await NotificationService.sendMany([
@@ -259,7 +319,7 @@ const handleLateReturnProcessed = async (payload = {}) => {
       title: "Late return processed",
       message:
         lateReturnPenaltyFee > 0
-          ? `${actorName} proceeded with late return. Additional charges were applied.`
+          ? `${actorName} completed the late return for ${vehicleName}. A final fee of ${peso(lateReturnPenaltyFee)} was added; the booking has ${peso(remainingBalance)} remaining.`
           : `${actorName} confirmed vehicle return.`,
       entityType: "booking",
       entityId: getBookingId(payload),
@@ -274,7 +334,7 @@ const handleLateReturnProcessed = async (payload = {}) => {
       title: "Late return confirmed",
       message:
         lateReturnPenaltyFee > 0
-          ? "Your late return was processed and additional charges were added to your booking."
+          ? `Your ${vehicleName} late return was finalized with a ${peso(lateReturnPenaltyFee)} fee. Your remaining booking balance is ${peso(remainingBalance)}. Pay online from My Bookings using Pay Remaining, or request walk-in payment there for owner approval.`
           : "Your return was confirmed successfully.",
       entityType: "booking",
       entityId: getBookingId(payload),
@@ -305,19 +365,20 @@ const handleVehicleReturnRequested = async (payload = {}) => {
 };
 
 const handleVehicleReturnConfirmed = async (payload = {}) => {
-  const overdueMinutes = Number(payload.overdueMinutes || 0);
-  const lateReturnPenaltyFee = Number(payload.lateReturnPenaltyFee || 0);
+  const lateReturnData = getLateReturnPaymentData(payload, { final: true });
+  const { overdueMinutes, lateReturnPenaltyFee, remainingBalance, vehicleName } = lateReturnData;
   const occurrence = toOptionalText(getBooking(payload).returnRequestedAt);
   await NotificationService.sendMany([
     {
       user: getRenterId(payload),
-      type: "booking_status",
-      category: "booking",
+      type: lateReturnPenaltyFee > 0 ? "booking_payment" : "booking_status",
+      category: lateReturnPenaltyFee > 0 ? "payment" : "booking",
       event: NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED,
-      title: "Vehicle return confirmed",
+      priority: lateReturnPenaltyFee > 0 ? "important" : "normal",
+      title: lateReturnPenaltyFee > 0 ? "Late-return fee ready for payment" : "Vehicle return confirmed",
       message:
         lateReturnPenaltyFee > 0
-          ? "The owner confirmed receipt of the vehicle and the final late-return fee was added."
+          ? `The owner confirmed receipt of ${vehicleName}. Your final late-return fee is ${peso(lateReturnPenaltyFee)} and your remaining booking balance is ${peso(remainingBalance)}. Open My Bookings and select Pay Remaining to pay online, or request walk-in payment for owner approval.`
           : "The owner confirmed receipt of the vehicle.",
       entityType: "booking",
       entityId: getBookingId(payload),
@@ -325,8 +386,7 @@ const handleVehicleReturnConfirmed = async (payload = {}) => {
       data: bookingData(payload, {
         status: "completed",
         returnStatus: "confirmed",
-        actualReturnAt: getBooking(payload).actualReturnAt,
-        overdueMinutes,
+        ...lateReturnData,
       }),
     },
     {
@@ -335,15 +395,17 @@ const handleVehicleReturnConfirmed = async (payload = {}) => {
       category: "booking",
       event: NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED,
       title: "Vehicle under inspection/maintenance",
-      message: "The return is complete. Inspect or service the vehicle, then mark it available when it is rental-ready.",
+      message:
+        lateReturnPenaltyFee > 0
+          ? `${vehicleName} was returned ${durationLabel(overdueMinutes)} late. The final late-return fee is ${peso(lateReturnPenaltyFee)}, and the renter has ${peso(remainingBalance)} remaining. Inspect or service the vehicle, then mark it available when rental-ready.`
+          : "The return is complete. Inspect or service the vehicle, then mark it available when it is rental-ready.",
       entityType: "booking",
       entityId: getBookingId(payload),
       dedupeKey: notificationKey(getOwnerId(payload), NOTIFICATION_EVENTS.VEHICLE_RETURN_CONFIRMED, getBookingId(payload), occurrence),
       data: bookingData(payload, {
         status: "completed",
         returnStatus: "confirmed",
-        actualReturnAt: getBooking(payload).actualReturnAt,
-        overdueMinutes,
+        ...lateReturnData,
       }),
     },
   ]);

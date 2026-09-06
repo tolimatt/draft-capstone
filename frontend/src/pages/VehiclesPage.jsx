@@ -118,6 +118,7 @@ export default function VehiclesPage({
   onNavigateToReports,
 }) {
   const [vehicles, setVehicles] = useState([]);
+  const [reloadSignal, setReloadSignal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAI, setShowAI] = useState(false);
@@ -185,7 +186,7 @@ export default function VehiclesPage({
       isActive = false;
       window.clearTimeout(timeoutId);
     };
-  }, [combinedSearch, searchValidationError, vehicleTypeFilter]);
+  }, [combinedSearch, searchValidationError, vehicleTypeFilter, reloadSignal]);
 
   const clearVehicleSearch = () => {
     setSearchQuery("");
@@ -296,7 +297,7 @@ export default function VehiclesPage({
                 <div className="rp-vehicle-search">
                   <label htmlFor="vehicle-market-search">Search vehicles</label>
                   <div className="rp-vehicle-search__control">
-                    <Search size={19} aria-hidden="true" />
+                    <Search size={20} strokeWidth={2} aria-hidden="true" />
                     <input
                       id="vehicle-market-search"
                       type="search"
@@ -333,11 +334,11 @@ export default function VehiclesPage({
               </div>
 
               {loading && (
-                <div className="rp-results-status">Loading available vehicles...</div>
+                <div role="status" className="rp-results-status">Loading available vehicles...</div>
               )}
 
               {!loading && error && (
-                <div className="rp-results-status rp-results-status--error">{error}</div>
+                <div role="alert" className="rp-results-status rp-results-status--error"><span>{error}</span><button type="button" onClick={() => setReloadSignal((value) => value + 1)} className="rounded-lg border border-current px-4 py-2 font-semibold focus-visible:outline focus-visible:outline-2">Retry</button></div>
               )}
 
               {!loading && !error && vehicles.length === 0 && (
@@ -368,7 +369,7 @@ export default function VehiclesPage({
                         >
                           <span className="rp-market-card__availability">Available</span>
                           <span className="rp-market-card__rating">
-                            <Star size={12} fill="currentColor" />
+                            <Star size={16} strokeWidth={2} fill="currentColor" aria-hidden="true" />
                             {vehicle.reviewCount > 0
                               ? vehicle.rating.toFixed(1)
                               : "New"}
@@ -385,7 +386,7 @@ export default function VehiclesPage({
                             <ArrowRight size={18} aria-hidden="true" />
                           </span>
                           <span className="rp-market-card__location">
-                            <MapPin size={14} />
+                            <MapPin size={16} strokeWidth={2} aria-hidden="true" />
                             <span>{vehicle.location || "Location available on request"}</span>
                           </span>
                           {vehicle.description && (
@@ -393,9 +394,9 @@ export default function VehiclesPage({
                           )}
 
                           <span className="rp-market-card__specs">
-                            <span><Users size={13} /> {vehicle.seats} seats</span>
-                            <span><Settings size={13} /> {vehicle.transmission}</span>
-                            <span><Fuel size={13} /> {vehicle.fuel}</span>
+                            <span><Users size={16} strokeWidth={2} aria-hidden="true" /> {vehicle.seats} seats</span>
+                            <span><Settings size={16} strokeWidth={2} aria-hidden="true" /> {vehicle.transmission}</span>
+                            <span><Fuel size={16} strokeWidth={2} aria-hidden="true" /> {vehicle.fuel}</span>
                           </span>
 
                           {vehicle.driverOptionEnabled && (

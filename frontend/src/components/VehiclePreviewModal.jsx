@@ -63,7 +63,7 @@ export default function VehiclePreviewModal({
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vehicle Preview</p>
           <h3 className="mt-1 pr-10 text-xl sm:text-2xl font-bold text-slate-900">{vehicle.name}</h3>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-600">
-            <MapPin size={14} className="text-[#0B75E7]" />
+            <MapPin size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
             {location || "Location not specified"}
           </p>
         </div>
@@ -80,7 +80,7 @@ export default function VehiclePreviewModal({
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rp-chip bg-amber-100 text-amber-700">
-                  <Star size={13} className="fill-current" />
+                  <Star size={16} strokeWidth={2} className="fill-current" aria-hidden="true" />
                   {reviewCount > 0 ? rating.toFixed(1) : "No reviews"}
                 </span>
                 {reviewCount > 0 && (
@@ -123,7 +123,7 @@ export default function VehiclePreviewModal({
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Car Owner</p>
                       <div className="mt-0.5 flex items-center gap-1.5">
                         <p className="text-sm font-semibold text-slate-900">{ownerName}</p>
-                        {ownerVerified && <BadgeCheck size={15} className="text-[#0B75E7]" />}
+                        {ownerVerified && <BadgeCheck size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />}
                       </div>
                       <p className="text-xs text-slate-500">{ownerEmail || "Verified RentifyPro owner"}</p>
                     </div>
@@ -135,7 +135,7 @@ export default function VehiclePreviewModal({
                     disabled={disableChat}
                     className="rp-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <MessageCircle size={15} />
+                    <MessageCircle size={18} strokeWidth={2} aria-hidden="true" />
                     Chat Owner
                   </button>
                 </div>

@@ -148,7 +148,7 @@ export default function OwnerLayout() {
           {activePage === "Analytics" && <Analytics />}
           {activePage === "Settings" && <Settings />}
           {activePage === "Profile" && <Profile />}
-          {activePage === "Reports" && <ReportsCenter embedded />}
+          {activePage === "Reports" && <ReportsCenter embedded ownerHeader />}
         </main>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Loader, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { Loader, ArrowLeft, CircleCheck } from "lucide-react";
 import PasswordInput from "../components/PasswordInput";
 import API from "../utils/api";
 
@@ -78,7 +78,7 @@ export default function ResetPassword({ onSuccess, onBack, email, token: resetTo
             {isSuccess && (
               <div className="mb-5 p-3 bg-green-50 border-2 border-green-500 rounded-2xl flex items-center gap-3">
                 <div className="w-8 h-8 bg-green-500 rounded-xl flex items-center justify-center text-white flex-shrink-0">
-                  <CheckCircle2 size={18} />
+                  <CircleCheck size={18} strokeWidth={2} aria-hidden="true" />
                 </div>
                 <p className="text-green-700 font-medium text-sm">Password updated! Redirecting...</p>
               </div>

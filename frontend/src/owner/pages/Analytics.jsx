@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import API from "../../utils/api";
+import OwnerPageHeader from "../components/OwnerPageHeader";
 
 const money = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
 
@@ -46,12 +47,10 @@ export default function Analytics() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
-        <p className="text-sm text-gray-600">
-          Monthly earnings trends, booking trends, and most-booked vehicles.
-        </p>
-      </div>
+      <OwnerPageHeader
+        title="Analytics"
+        description="Monitor earnings trends, booking activity, and your most-booked vehicles."
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Metric title="Total Bookings" value={metrics.totalBookings} />

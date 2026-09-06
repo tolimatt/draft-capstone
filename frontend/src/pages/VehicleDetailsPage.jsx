@@ -171,6 +171,10 @@ export default function VehicleDetailsPage({
   const hourlyRate = Number(currentVehicle?.dailyRentalRate ?? currentVehicle?.hourlyRentalRate ?? currentVehicle?.price ?? 0);
   const driverOptionEnabled = Boolean(currentVehicle?.driverOptionEnabled);
   const driverHourlyRate = Number(currentVehicle?.driverDailyRate || currentVehicle?.driverHourlyRate || 0);
+  const lateReturnPolicy = currentVehicle?.lateReturnPolicy || {};
+  const lateReturnFeeType = lateReturnPolicy.feeType || currentVehicle?.lateReturnFeeType || "percentage";
+  const lateReturnFeeValue = Number(lateReturnPolicy.value ?? currentVehicle?.lateReturnFeeValue ?? 25);
+  const lateReturnGraceMinutes = Number(lateReturnPolicy.graceMinutes ?? currentVehicle?.lateReturnGraceMinutes ?? 0);
 
   useEffect(() => {
     if (!driverOptionEnabled && driverSelected) setDriverSelected(false);
@@ -186,6 +190,11 @@ export default function VehicleDetailsPage({
   const transactionFee = getTransactionFee();
   const estimatedTotal = roundCurrency(vehicleCost + driverCost + transactionFee);
   const downpaymentFee = roundCurrency(estimatedTotal * DOWNPAYMENT_RATE);
+  const lateReturnHourlyRate = roundCurrency(
+    lateReturnFeeType === "fixed_hourly"
+      ? lateReturnFeeValue
+      : (hourlyRate + (driverSelected ? driverHourlyRate : 0)) * (lateReturnFeeValue / 100)
+  );
 
   const averageRating = useMemo(() => {
     const fromVehicle = Number(currentVehicle?.averageRating ?? currentVehicle?.rating);
@@ -370,7 +379,7 @@ export default function VehicleDetailsPage({
         onLogout={onLogout}
       />
 
-      <main className="mx-auto max-w-[1380px] space-y-5 px-4 pb-16 pt-24 sm:space-y-6 sm:px-6 sm:pt-28">
+      <main className="rp-renter-main mx-auto max-w-[1380px] space-y-5 px-4 pb-16 pt-24 sm:space-y-6 sm:px-6 sm:pt-28">
         <section className="rp-surface p-5 sm:p-7">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-start gap-3 sm:gap-4">
@@ -397,7 +406,7 @@ export default function VehicleDetailsPage({
                   </span>
                 </div>
                 <p className="rp-detail-meta mt-2.5">
-                  <MapPin size={14} className="text-[#0B75E7]" />
+                  <MapPin size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
                   {currentVehicle?.location || "Location not provided"}
                 </p>
               </div>
@@ -522,7 +531,7 @@ export default function VehicleDetailsPage({
                     disabled={isOwnVehicle}
                     className="rp-btn-secondary inline-flex items-center gap-2 self-start px-3.5 py-2.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <MessageCircle size={15} />
+                    <MessageCircle size={18} strokeWidth={2} aria-hidden="true" />
                     Chat Owner
                   </button>
                 </div>
@@ -623,6 +632,7 @@ export default function VehicleDetailsPage({
                   <SummaryRow label="Hourly vehicle rate" value={money(hourlyRate)} />
                   <SummaryRow label="Duration" value={formatDurationMinutes(durationMinutes)} />
                   <SummaryRow label="Vehicle subtotal" value={money(vehicleCost)} />
+                  <SummaryRow label="Late-return rate" value={`${moneyWithCents(lateReturnHourlyRate)} / overdue hour`} muted />
                   <SummaryRow label="Transaction fee" value={moneyWithCents(transactionFee)} />
                   <SummaryRow label="Downpayment (30%)" value={moneyWithCents(downpaymentFee)} muted />
                   <div className="my-2.5 h-px bg-slate-200/80" />
@@ -630,14 +640,15 @@ export default function VehicleDetailsPage({
                 </div>
 
                 <div className="rp-detail-note flex items-start gap-2 border border-blue-100 bg-blue-50 text-blue-700">
-                  <ShieldCheck size={14} className="mt-0.5 flex-shrink-0" />
+                  <ShieldCheck size={16} strokeWidth={2} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
                   <span>
                     Booking requests are validated with date/time checks and linked to your authenticated account.
                   </span>
                 </div>
                 <div className="rp-detail-note border border-amber-200 bg-amber-50 text-amber-800">
-                  Payment reminder: complete payment within the booked rental duration, or settle via walk-in upon
-                  vehicle return.
+                  Late-return policy: {lateReturnFeeType === "fixed_hourly" ? `${moneyWithCents(lateReturnFeeValue)} per overdue hour` : `${lateReturnFeeValue}% of the booked hourly rate`}
+                  {lateReturnGraceMinutes > 0 ? ` after a ${lateReturnGraceMinutes}-minute grace period` : " with no grace period"}.
+                  The policy and hourly penalty are locked when you book. Complete payment within the booked rental duration, or settle via walk-in upon vehicle return.
                 </div>
 
                 {bookingError && (
@@ -680,7 +691,7 @@ export default function VehicleDetailsPage({
                   <p className="rp-detail-section-copy mt-1.5">Recent renter feedback for this vehicle.</p>
                 </div>
                 <span className="rp-chip self-start bg-amber-100 text-amber-700">
-                  <Star size={13} className="fill-current" />
+                  <Star size={16} strokeWidth={2} className="fill-current" aria-hidden="true" />
                   {reviews.length > 0 ? averageRating : "No reviews"}
                 </span>
               </div>
@@ -701,7 +712,7 @@ export default function VehicleDetailsPage({
                             </div>
                           </div>
                           <div className="rp-chip shrink-0 bg-amber-50 text-amber-700">
-                            <Star size={12} className="fill-current" />
+                            <Star size={16} strokeWidth={2} className="fill-current" aria-hidden="true" />
                             {review.rating}
                           </div>
                         </div>
@@ -736,7 +747,7 @@ export default function VehicleDetailsPage({
                 <h3 className="text-xl font-bold">All Reviews</h3>
                 <p className="text-sm text-slate-500 mt-1">
                   <span className="inline-flex items-center gap-1 text-amber-600 font-semibold">
-                    <Star size={13} className="fill-current" />
+                    <Star size={16} strokeWidth={2} className="fill-current" aria-hidden="true" />
                     {averageRating}
                   </span>
                 </p>
@@ -777,7 +788,7 @@ export default function VehicleDetailsPage({
                         </div>
                       </div>
                       <span className="rp-chip bg-amber-50 text-amber-700">
-                        <Star size={12} className="fill-current" />
+                        <Star size={16} strokeWidth={2} className="fill-current" aria-hidden="true" />
                         {review.rating}
                       </span>
                     </div>
@@ -802,7 +813,7 @@ function SpecItem({ icon, label, value }) {
   return (
     <div className="rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
       <p className="flex items-center gap-1.5 text-[0.68rem] font-extrabold uppercase tracking-[0.12em] text-slate-500">
-        <IconComponent size={12} className="text-[#0B75E7]" />
+        <IconComponent size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
         {label}
       </p>
       <p className="mt-2 text-[0.95rem] font-semibold leading-snug text-slate-900">{value}</p>

@@ -63,7 +63,16 @@ async function request(endpoint, options = {}) {
     config.headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(url, config);
+  let response;
+  try {
+    response = await fetch(url, config);
+  } catch (cause) {
+    if (cause?.name === "AbortError") throw cause;
+    const error = new Error("Cannot connect to RentifyPro. Check your connection and try again.");
+    error.status = 0;
+    error.code = "NETWORK_ERROR";
+    throw error;
+  }
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
