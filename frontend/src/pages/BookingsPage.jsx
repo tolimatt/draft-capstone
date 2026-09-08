@@ -1766,7 +1766,7 @@ export default function BookingsPage({
                       <WalletCards size={24} strokeWidth={2} aria-hidden="true" />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#017FE6]">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#017FE6]">
                         {confirmHasLateReturnFee ? "Late-return payment" : "Booking payment"}
                       </p>
                       <h2 id="confirm-payment-title" className="mt-0.5 text-lg font-bold text-slate-900">
@@ -2029,7 +2029,7 @@ export default function BookingsPage({
               <div className="border-b border-rose-100 bg-gradient-to-r from-rose-50 via-white to-white px-6 pb-5 pt-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-600">Cancellation confirmation</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-600">Cancellation confirmation</p>
                     <h3 id="cancel-booking-title" className="mt-1 text-xl font-bold text-slate-900">Cancel this booking?</h3>
                   </div>
                   <button

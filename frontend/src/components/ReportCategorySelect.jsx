@@ -68,7 +68,7 @@ export default function ReportCategorySelect({
               aria-label={group.label}
               className={groupIndex ? "mt-2 border-t border-slate-200 pt-2" : ""}
             >
-              <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">
+              <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                 {group.label}
               </p>
               <div className="space-y-1">

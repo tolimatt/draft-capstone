@@ -143,7 +143,7 @@ export default function ReportsCenter({ onBack, embedded = false, ownerHeader = 
               </button>
             ) : null}
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-600">Trust and safety</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">Trust and safety</p>
               <h1 className="mt-1 text-2xl font-bold text-slate-950">Reports and appeals</h1>
               <p className="mt-1 text-sm text-slate-500">Track reports you submitted and moderation decisions involving your account.</p>
             </div>
@@ -179,17 +179,17 @@ export default function ReportsCenter({ onBack, embedded = false, ownerHeader = 
               <article id={`report-${report._id}`} key={report._id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">{report.caseReference} · {report.perspective}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">{report.caseReference} · {report.perspective}</p>
                     <h2 className="mt-1 text-lg font-bold text-slate-950">{titleCase(report.category)}</h2>
                     <p className="mt-1 text-sm text-slate-500">{report.sourceType === "chat_message" ? "Reported chat message" : `Booking #${String(report.booking?._id || report.booking || "").slice(-6).toUpperCase()}`} · {new Date(report.createdAt).toLocaleString()}</p>
                   </div>
-                  <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${statusTone(report.status)}`}>{titleCase(report.status)}</span>
+                  <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${statusTone(report.status)}`}>{titleCase(report.status)}</span>
                 </div>
                 <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{report.description}</p>
 
                 {report.sourceType === "chat_message" && report.messageSnapshot?.text ? (
                   <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-rose-700">Reported message only</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Reported message only</p>
                     <blockquote className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900">“{report.messageSnapshot.text}”</blockquote>
                     <p className="mt-2 text-xs text-slate-500">No other messages from the conversation are attached to this case.</p>
                   </div>
@@ -197,14 +197,14 @@ export default function ReportsCenter({ onBack, embedded = false, ownerHeader = 
 
                 {report.informationResponses?.length ? (
                   <div className="mt-4 space-y-2 rounded-xl border border-blue-100 bg-blue-50 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Additional information submitted</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Additional information submitted</p>
                     {report.informationResponses.map((response) => <p key={response._id} className="whitespace-pre-wrap text-sm leading-6 text-blue-950">{response.statement}</p>)}
                   </div>
                 ) : null}
 
                 {report.currentDecision ? (
                   <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Administrator decision</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Administrator decision</p>
                     <p className="mt-1 text-sm font-semibold text-slate-900">{titleCase(report.currentDecision.action)}</p>
                     <p className="mt-1 text-sm leading-6 text-slate-600">{report.currentDecision.userVisibleReason}</p>
                   </div>

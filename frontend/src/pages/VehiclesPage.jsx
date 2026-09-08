@@ -1,13 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ArrowRight,
   CarFront,
-  Fuel,
-  MapPin,
   Search,
-  Settings,
-  Star,
-  Users,
 } from "lucide-react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
@@ -15,9 +9,8 @@ import ChatWidget from "../components/ChatWidget";
 import BookingAccessModal from "../components/BookingAccessModal";
 import VehiclePreviewModal from "../components/VehiclePreviewModal";
 import { sanitizeBookingRange } from "../utils/dateUtils";
-import VehicleCover from "../components/VehicleCover";
+import VehicleCard from "../components/VehicleCard";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
-import { formatVehicleType } from "../utils/vehicleText";
 
 const normalizeVehicleType = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -355,69 +348,13 @@ export default function VehiclesPage({
               {!loading && !error && vehicles.length > 0 && (
                 <div className="rp-market-grid">
                   {vehicles.map((vehicle) => (
-                    <article key={vehicle.id} className="rp-market-card">
-                      <button
-                        type="button"
-                        onClick={() => openVehiclePreview(vehicle)}
-                        className="rp-market-card__preview"
-                        aria-label={`View details for ${vehicle.name}`}
-                      >
-                        <VehicleCover
-                          vehicle={vehicle}
-                          alt={vehicle.name}
-                          className="rp-market-card__cover"
-                        >
-                          <span className="rp-market-card__availability">Available</span>
-                          <span className="rp-market-card__rating">
-                            <Star size={16} strokeWidth={2} fill="currentColor" aria-hidden="true" />
-                            {vehicle.reviewCount > 0
-                              ? vehicle.rating.toFixed(1)
-                              : "New"}
-                          </span>
-                        </VehicleCover>
-
-                        <span className="rp-market-card__body">
-                          <span className="rp-market-card__category">
-                            {formatVehicleType(vehicle.type, "Vehicle")}
-                            {vehicle.subType ? ` \u00b7 ${formatVehicleType(vehicle.subType)}` : ""}
-                          </span>
-                          <span className="rp-market-card__title-row">
-                            <span className="rp-market-card__title">{vehicle.name}</span>
-                            <ArrowRight size={18} aria-hidden="true" />
-                          </span>
-                          <span className="rp-market-card__location">
-                            <MapPin size={16} strokeWidth={2} aria-hidden="true" />
-                            <span>{vehicle.location || "Location available on request"}</span>
-                          </span>
-                          {vehicle.description && (
-                            <span className="rp-market-card__description">{vehicle.description}</span>
-                          )}
-
-                          <span className="rp-market-card__specs">
-                            <span><Users size={16} strokeWidth={2} aria-hidden="true" /> {vehicle.seats} seats</span>
-                            <span><Settings size={16} strokeWidth={2} aria-hidden="true" /> {vehicle.transmission}</span>
-                            <span><Fuel size={16} strokeWidth={2} aria-hidden="true" /> {vehicle.fuel}</span>
-                          </span>
-
-                          {vehicle.driverOptionEnabled && (
-                            <span className="rp-market-card__driver">Driver available</span>
-                          )}
-                        </span>
-                      </button>
-
-                      <div className="rp-market-card__footer">
-                        <p>
-                          <span>From</span>
-                          <strong>P{vehicle.price.toLocaleString()}</strong>
-                          <small>/ hour</small>
-                        </p>
-                        <div>
-                          <button type="button" onClick={() => handleBookNow(vehicle)}>
-                            Book now
-                          </button>
-                        </div>
-                      </div>
-                    </article>
+                    <VehicleCard
+                      key={vehicle.id}
+                      vehicle={vehicle}
+                      onPreview={openVehiclePreview}
+                      onBookNow={handleBookNow}
+                      compactSpecs
+                    />
                   ))}
                 </div>
               )}

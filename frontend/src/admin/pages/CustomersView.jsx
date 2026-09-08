@@ -44,14 +44,14 @@ export default function CustomersView({ customers, adminEmail, initialRole = "Al
           <SearchField label="Search Customers" value={search} onChange={setSearch} placeholder="Search by name, email, or phone..." />
           <FilterSelect label="Role" value={role} onChange={setRole} options={["All Roles", "Renter", "Vehicle Owner"]} />
           <FilterSelect label="Status" value={status} onChange={setStatus} options={["All Statuses", "Active", "Pending Verification", "Inactive", "Suspended"]} />
-          <label className="block"><span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">Joined From</span><input type="date" value={joined} onChange={(event) => setJoined(event.target.value)} className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-700 outline-none hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>
+          <label className="block"><span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">Joined From</span><input type="date" value={joined} onChange={(event) => setJoined(event.target.value)} className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-700 outline-none hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>
           <button type="button" onClick={clearFilters} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Clear Filters</button>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] border-collapse">
             <caption className="sr-only">RentifyPro customer accounts</caption>
-            <thead className="bg-slate-50"><tr>{["Customer", "Email", "Phone", "Role", "Status", "Joined", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
+            <thead className="bg-slate-50"><tr>{["Customer", "Email", "Phone", "Role", "Status", "Joined", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((customer, index) => (
                 <tr key={customer.id || customer.email} className="transition-colors hover:bg-blue-50/30">

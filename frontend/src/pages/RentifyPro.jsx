@@ -2,13 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bike,
   CarFront,
-  Fuel,
   MapPin,
   Search,
-  Settings,
-  Star,
   Truck,
-  Users,
   Van,
   ArrowRight,
   CalendarCheck,
@@ -26,18 +22,19 @@ import {
   formatTimeInput,
 } from "../utils/dateUtils";
 import InfoModal from "../components/InfoModal";
-import VehicleCover from "../components/VehicleCover";
+import VehicleCard from "../components/VehicleCard";
+import VehicleTypeCarousel from "../components/VehicleTypeCarousel";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
 import { formatVehicleTypeLabel } from "../utils/vehicleText";
 
 const categories = [
   {
     id: "premium-cars",
-    title: "Premium Cars",
+    title: "Cars",
     icon: CarFront,
     image: "/cars-optimized.jpg",
     tags: ["Sedan", "Hatchback", "SUV", "Luxury"],
-    description: "Ideal for family trips, business meetings, and city drives.",
+    description: "For city drives, family outings, and weekend escapes.",
     vehicleType: "car",
   },
   {
@@ -46,7 +43,7 @@ const categories = [
     icon: Bike,
     image: "/motor-optimized.jpg",
     tags: ["Scooter", "Sport Bike", "Cruiser"],
-    description: "Great for fast commutes and flexible urban travel.",
+    description: "For daily commutes, solo trips, and exploring the city.",
     vehicleType: "motorcycle",
   },
   {
@@ -55,7 +52,7 @@ const categories = [
     icon: Van,
     image: "/van-optimized.jpg",
     tags: ["Passenger", "Mini Van", "Cargo", "Luxury"],
-    description: "Spacious and reliable for group trips and transport runs.",
+    description: "Room for group trips, family getaways, and extra luggage.",
     vehicleType: "van",
   },
   {
@@ -64,7 +61,7 @@ const categories = [
     icon: Truck,
     image: "/trucks-optimized.jpg",
     tags: ["Pick-up", "Cargo", "Refrigerated", "Flat Bed"],
-    description: "Built for heavy-duty tasks and dependable hauling.",
+    description: "For moving cargo, making deliveries, and bigger jobs.",
     vehicleType: "truck",
   },
 ];
@@ -209,52 +206,6 @@ const mapSearchPayload = (location, vehicleType) => ({
   ...getDefaultSearchDates(),
 });
 
-function CategoryPreview({ category, className = "", onBrowse }) {
-  const CategoryIcon = category.icon;
-  const categoryIndex = categories.findIndex((item) => item.id === category.id);
-
-  return (
-    <article className={`rp-vehicle-selector__preview ${className}`}>
-      <img
-        src={category.image}
-        alt={`${category.title} available on RentifyPro`}
-        className="rp-vehicle-selector__image"
-        loading="lazy"
-      />
-      <span className="rp-vehicle-selector__shade" aria-hidden="true" />
-
-      <div className="rp-vehicle-selector__meta">
-        <span>
-          {String(categoryIndex + 1).padStart(2, "0")} / {String(categories.length).padStart(2, "0")}
-        </span>
-        <span>Available in the marketplace</span>
-      </div>
-
-      <div className="rp-vehicle-selector__details">
-        <span className="rp-vehicle-selector__active-icon" aria-hidden="true">
-          <CategoryIcon size={24} strokeWidth={2} />
-        </span>
-        <p className="rp-vehicle-selector__eyebrow">Selected vehicle type</p>
-        <h3>{category.title}</h3>
-        <p className="rp-vehicle-selector__description">{category.description}</p>
-
-        <div className="rp-vehicle-selector__tags" aria-label={`${category.title} examples`}>
-          {category.tags.map((tag) => (
-            <span key={tag}>{tag}</span>
-          ))}
-        </div>
-
-        {onBrowse && (
-          <button type="button" onClick={onBrowse} className="rp-vehicle-selector__browse">
-            Browse {category.title}
-            <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
-          </button>
-        )}
-      </div>
-    </article>
-  );
-}
-
 export default function RentifyPro({
   onNavigateToHome,
   onNavigateToSignIn,
@@ -283,9 +234,6 @@ export default function RentifyPro({
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
   const [vehicleType, setVehicleType] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState(categories[0].id);
-  const [displayedCategory, setDisplayedCategory] = useState(categories[0]);
-  const [outgoingCategory, setOutgoingCategory] = useState(null);
-  const [categoryTransitionDirection, setCategoryTransitionDirection] = useState("next");
   const [featuredNavigation, setFeaturedNavigation] = useState({
     canGoPrevious: false,
     canGoNext: false,
@@ -294,10 +242,7 @@ export default function RentifyPro({
   const [previewVehicle, setPreviewVehicle] = useState(null);
   const [validationModalMessage, setValidationModalMessage] = useState("");
   const homeRef = useRef(null);
-  const categoryCarouselRef = useRef(null);
   const featuredCarouselRef = useRef(null);
-  const categoryTransitionTimeoutRef = useRef(null);
-  const categoryScrollFrameRef = useRef(null);
   const featuredScrollFrameRef = useRef(null);
 
   const filteredLocations = useMemo(
@@ -308,53 +253,9 @@ export default function RentifyPro({
     [location]
   );
 
-  const activeCategory =
-    categories.find((category) => category.id === activeCategoryId) || categories[0];
-
-  const selectVehicleCategory = (category, { scrollMobileCard = false } = {}) => {
-    const currentIndex = categories.findIndex((item) => item.id === activeCategoryId);
-    const nextIndex = categories.findIndex((item) => item.id === category.id);
-
-    if (category.id !== activeCategoryId) {
-      window.clearTimeout(categoryTransitionTimeoutRef.current);
-      setCategoryTransitionDirection(nextIndex > currentIndex ? "next" : "previous");
-      setOutgoingCategory(displayedCategory);
-      setDisplayedCategory(category);
-      categoryTransitionTimeoutRef.current = window.setTimeout(() => {
-        setOutgoingCategory(null);
-      }, 520);
-    }
-
+  const selectVehicleCategory = (category) => {
     setActiveCategoryId(category.id);
     setVehicleType(category.vehicleType);
-
-    if (scrollMobileCard && window.matchMedia?.("(max-width: 767px)").matches) {
-      const target = categoryCarouselRef.current?.querySelector(
-        `[data-category-card="${category.id}"]`
-      );
-      target?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "start" });
-    }
-  };
-
-  const handleCategoryCarouselScroll = (event) => {
-    const carousel = event.currentTarget;
-    window.cancelAnimationFrame(categoryScrollFrameRef.current);
-    categoryScrollFrameRef.current = window.requestAnimationFrame(() => {
-      const cards = Array.from(carousel.querySelectorAll("[data-category-card]"));
-      const closestCard = cards.reduce((closest, card) => (
-        Math.abs(card.offsetLeft - carousel.scrollLeft) < Math.abs(closest.offsetLeft - carousel.scrollLeft)
-          ? card
-          : closest
-      ), cards[0]);
-      const category = categories.find((item) => item.id === closestCard?.dataset.categoryCard);
-
-      if (category && category.id !== activeCategoryId) {
-        setActiveCategoryId(category.id);
-        setVehicleType(category.vehicleType);
-        setDisplayedCategory(category);
-        setOutgoingCategory(null);
-      }
-    });
   };
 
   const handleSearch = (typeOverride = vehicleType) => {
@@ -394,8 +295,6 @@ export default function RentifyPro({
   }, []);
 
   useEffect(() => () => {
-    window.clearTimeout(categoryTransitionTimeoutRef.current);
-    window.cancelAnimationFrame(categoryScrollFrameRef.current);
     window.cancelAnimationFrame(featuredScrollFrameRef.current);
   }, []);
 
@@ -666,99 +565,26 @@ export default function RentifyPro({
           <div className="rp-section-heading max-w-2xl">
             <span className="rp-page-eyebrow">Browse by vehicle type</span>
             <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
-              What are you looking to <span className="text-[#0B75E7]">drive?</span>
+              The right vehicle for <span className="text-[#0B75E7]">every plan</span>
             </h2>
           </div>
           <p className="max-w-md text-sm leading-6 text-slate-600 sm:text-base">
-            Choose a category to see available vehicles, rates, and pickup options near you.
+            Explore cars, motorcycles, vans, and trucks for daily travel, group trips, or moving cargo.
           </p>
         </div>
 
-        <div className="rp-vehicle-selector rp-scroll-reveal rp-reveal-card" data-rp-reveal="">
-          <div className="rp-vehicle-selector__choices">
-            <div className="rp-vehicle-selector__intro">
-              <span>Vehicle collection</span>
-              <strong>Choose your drive</strong>
-            </div>
-
-            <div className="rp-vehicle-selector__list" role="group" aria-label="Choose a vehicle type">
-              {categories.map((category, index) => {
-                const isActive = category.id === activeCategory.id;
-                return (
-                  <button
-                    key={category.id}
-                    type="button"
-                    aria-pressed={isActive}
-                    onClick={() => selectVehicleCategory(category, { scrollMobileCard: true })}
-                    className={`rp-vehicle-selector__option rp-scroll-reveal rp-reveal-from-left ${isActive ? "is-active" : ""}`}
-                    data-rp-reveal=""
-                    style={{ "--rp-reveal-delay": `${120 + index * 90}ms` }}
-                  >
-                    <span className="rp-vehicle-selector__number">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span className="rp-vehicle-selector__icon" aria-hidden="true">
-                      <category.icon size={24} strokeWidth={2} />
-                    </span>
-                    <span className="rp-vehicle-selector__label">{category.title}</span>
-                    <ArrowRight className="rp-vehicle-selector__arrow" size={18} aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </div>
-
-            <p className="rp-vehicle-selector__hint">
-              Select a type to preview it, then continue to matching listings.
-            </p>
-          </div>
-
-          <div
-            className="rp-vehicle-selector__desktop-stage rp-scroll-reveal rp-reveal-image"
-            data-rp-reveal=""
-            style={{ "--rp-reveal-delay": "180ms" }}
-            aria-live="polite"
-          >
-            {outgoingCategory && (
-              <CategoryPreview
-                category={outgoingCategory}
-                className={`rp-vehicle-selector__preview--outgoing rp-vehicle-selector__preview--${categoryTransitionDirection}`}
-                onBrowse={() => handleSearch(outgoingCategory.vehicleType)}
-              />
-            )}
-            <CategoryPreview
-              key={displayedCategory.id}
-              category={displayedCategory}
-              className={`rp-vehicle-selector__preview--active ${
-                outgoingCategory ? `rp-vehicle-selector__preview--enter-${categoryTransitionDirection}` : ""
-              }`}
-              onBrowse={() => handleSearch(displayedCategory.vehicleType)}
-            />
-          </div>
-
-          <div
-            ref={categoryCarouselRef}
-            className="rp-vehicle-selector__mobile-carousel"
-            aria-label="Swipe through vehicle categories"
-            onScroll={handleCategoryCarouselScroll}
-          >
-            {categories.map((category) => (
-              <div
-                key={category.id}
-                className="rp-vehicle-selector__mobile-slide"
-                data-category-card={category.id}
-              >
-                <CategoryPreview
-                  category={category}
-                  onBrowse={() => handleSearch(category.vehicleType)}
-                />
-              </div>
-            ))}
-          </div>
+        <div className="rp-scroll-reveal rp-reveal-card" data-rp-reveal="">
+          <VehicleTypeCarousel
+            categories={categories}
+            activeCategoryId={activeCategoryId}
+            onSelect={selectVehicleCategory}
+            onBrowse={handleSearch}
+          />
         </div>
       </section>
 
       <section id="featured" className="rp-featured-section scroll-mt-24 py-16 sm:py-20">
-        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+        <div className="rp-featured-section__content mx-auto max-w-7xl px-5 sm:px-8">
           <div
             className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between rp-scroll-reveal rp-reveal-up"
             data-rp-reveal=""
@@ -816,114 +642,60 @@ export default function RentifyPro({
               tabIndex="0"
             >
               {featuredVehicles.map((vehicle, index) => (
-                <article
+                <VehicleCard
                   key={vehicle.id}
-                  className="rp-featured-card rp-scroll-reveal rp-reveal-card flex h-full flex-col overflow-hidden"
+                  vehicle={vehicle}
+                  onPreview={openVehiclePreview}
+                  onBookNow={handleFeaturedBookNow}
+                  className="rp-scroll-reveal rp-reveal-card"
+                  imageClassName="rp-reveal-media-image"
                   data-rp-reveal=""
                   data-featured-card=""
                   style={{ "--rp-reveal-delay": `${index * 90}ms` }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => openVehiclePreview(vehicle)}
-                    className="rp-featured-card__preview text-left"
-                    aria-label={`View details for ${vehicle.name}`}
-                  >
-                    <span className="rp-featured-card__media">
-                      <VehicleCover
-                        vehicle={vehicle}
-                        alt={vehicle.name}
-                        contentClassName="p-4 sm:p-5"
-                        imageClassName="rp-reveal-media-image"
-                      >
-                        <span className={`absolute left-3 top-3 z-10 rp-featured-card__availability ${vehicle.available ? "is-available" : ""}`}>
-                          {vehicle.available ? "Available" : "Unavailable"}
-                        </span>
-                        <span className="rp-featured-card__rating absolute right-3 top-3 z-10">
-                          <Star size={16} strokeWidth={2} fill="currentColor" aria-hidden="true" />
-                          {vehicle.reviewCount > 0 ? vehicle.rating : "New"}
-                        </span>
-                      </VehicleCover>
-                    </span>
-                  </button>
-
-                  <div className="rp-featured-card__body">
-                    <div className="rp-featured-card__topline">
-                      <span>{vehicle.category}</span>
-                      <span className="rp-featured-card__price">
-                        <strong>₱{vehicle.price.toLocaleString()}</strong>
-                        <span>/ hour</span>
-                      </span>
-                    </div>
-                    <h3>{vehicle.name}</h3>
-                    <p className="rp-featured-card__location">
-                      <MapPin size={16} strokeWidth={2} aria-hidden="true" />
-                      <span>{vehicle.location}</span>
-                    </p>
-
-                    <div className="rp-featured-card__specs" aria-label={`${vehicle.name} specifications`}>
-                      <span><Users size={16} strokeWidth={2} aria-hidden="true" />{vehicle.seats} seats</span>
-                      <span><Settings size={16} strokeWidth={2} aria-hidden="true" />{vehicle.transmission}</span>
-                      <span><Fuel size={16} strokeWidth={2} aria-hidden="true" />{vehicle.fuel}</span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleFeaturedBookNow(vehicle)}
-                      disabled={!vehicle.available}
-                      className="rp-featured-card__book rp-btn-primary disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
-                    >
-                      {vehicle.available ? "Book now" : "Unavailable"}
-                      {vehicle.available && <ArrowRight size={16} aria-hidden="true" />}
-                    </button>
-                  </div>
-                </article>
+                />
               ))}
             </div>
           )}
         </div>
       </section>
 
-      <section id="how-it-works" className="rp-how-it-works scroll-mt-24 py-16 sm:py-20">
+      <section id="how-it-works" className="rp-how-it-works scroll-mt-24" aria-labelledby="how-it-works-heading">
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div
             className="rp-how-it-works__heading rp-scroll-reveal rp-reveal-up"
             data-rp-reveal=""
           >
             <span className="rp-page-eyebrow">A simple way to rent</span>
-            <h2 className="mt-3 text-3xl font-bold sm:text-4xl">How RentifyPro Works</h2>
+            <h2 id="how-it-works-heading">How RentifyPro Works</h2>
             <p>
               From your first search to the moment you drive away, every step stays clear and in your control.
             </p>
           </div>
 
-          <div className="rp-process-stack">
+          <ol className="rp-process-steps" role="list">
             {processSteps.map((step, index) => {
               const StepIcon = step.icon;
               return (
-                <article
+                <li
                   key={step.number}
-                  className="rp-process-step rp-scroll-reveal rp-reveal-card"
+                  className="rp-process-step rp-scroll-reveal rp-reveal-up"
                   data-rp-reveal=""
-                  style={{
-                    "--rp-process-top": `${5.75 + index * 1.1}rem`,
-                    "--rp-reveal-delay": `${index * 90}ms`,
-                    zIndex: index + 1,
-                  }}
+                  style={{ "--rp-reveal-delay": `${index * 90}ms` }}
                 >
-                  <div className="rp-process-step__number" aria-hidden="true">{step.number}</div>
                   <div className="rp-process-step__icon" aria-hidden="true">
-                    <StepIcon size={32} strokeWidth={2} />
+                    <StepIcon size={28} strokeWidth={1.75} />
                   </div>
                   <div className="rp-process-step__content">
-                    <span>Step {index + 1}</span>
+                    <span className="rp-process-step__number">
+                      <span className="sr-only">Step </span>{step.number}
+                    </span>
                     <h3>{step.title}</h3>
                     <p>{step.description}</p>
                   </div>
-                </article>
+                </li>
               );
             })}
-          </div>
+          </ol>
         </div>
       </section>
 

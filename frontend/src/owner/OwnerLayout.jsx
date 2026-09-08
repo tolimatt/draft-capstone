@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 import Dashboard from "./pages/Dashboard";
@@ -44,6 +44,7 @@ export default function OwnerLayout() {
     return normalizeOwnerPage(tabFromStorage);
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const closeSidebar = useCallback(() => setIsSidebarOpen(false), []);
   const navigateToPage = (page) => {
     setActivePage(normalizeOwnerPage(page));
     setIsSidebarOpen(false);
@@ -125,13 +126,14 @@ export default function OwnerLayout() {
         activePage={activePage}
         setActivePage={navigateToPage}
         isMobileOpen={isSidebarOpen}
-        onCloseMobile={() => setIsSidebarOpen(false)}
+        onCloseMobile={closeSidebar}
       />
 
       {/* main area */}
-      <div className="flex min-h-screen flex-1 flex-col overflow-hidden lg:h-screen">
+      <div inert={isSidebarOpen} className="flex min-h-screen flex-1 flex-col overflow-hidden lg:h-screen">
         {/* top bar */}
         <Topbar
+          isSidebarOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
           onNavigateToNotifications={() => navigateToPage("Notifications")}
         />

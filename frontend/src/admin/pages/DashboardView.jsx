@@ -95,7 +95,7 @@ export default function DashboardView({ vehicles, customers, documents, bookings
                 </ResponsiveContainer>
                 <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-3xl font-bold text-slate-950">{vehicles.length}</span>
-                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Vehicles</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Vehicles</span>
                 </div>
               </div>
               <ul className="w-[126px] space-y-3 text-xs text-slate-600">
@@ -121,7 +121,7 @@ export default function DashboardView({ vehicles, customers, documents, bookings
             <table className="w-full min-w-[820px] border-collapse">
               <caption className="sr-only">Recent RentifyPro booking operations</caption>
               <thead className="bg-slate-50">
-                <tr>{["Booking", "Renter", "Vehicle", "Vehicle Owner", "Pickup", "Return", "Status"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[10px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr>
+                <tr>{["Booking", "Renter", "Vehicle", "Vehicle Owner", "Pickup", "Return", "Status"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {recentBookings.map((booking) => (
@@ -167,7 +167,7 @@ function OperationsCalendar({ bookings, period }) {
       </div>
 
       <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
-        <div className="grid grid-cols-7 bg-slate-50">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <div key={day} className="border-b border-slate-200 px-1 py-2 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">{day}</div>)}</div>
+        <div className="grid grid-cols-7 bg-slate-50">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <div key={day} className="border-b border-slate-200 px-1 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">{day}</div>)}</div>
         <div className="grid grid-cols-7">
           {days.map((day) => {
             const pickupCount = bookings.filter((booking) => dateKey(booking.pickupAt) === day.key).length;
@@ -225,7 +225,7 @@ function DashboardKpiCard({ label, value, actionLabel, onAction, icon: Icon, ton
       <div className="relative flex h-full flex-col">
         <div className="flex items-start gap-4">
           <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${tones[tone] || tones.blue}`}><Icon size={20} aria-hidden="true" /></div>
-          <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-950">{value}</p></div>
+          <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-950">{value}</p></div>
         </div>
         <button type="button" onClick={onAction} className="group mt-auto flex w-full items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><span>{actionLabel}</span><ChevronRight size={16} strokeWidth={2} className="transition group-hover:translate-x-0.5" aria-hidden="true" /></button>
       </div>

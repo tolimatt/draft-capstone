@@ -79,7 +79,7 @@ export default function NotificationDetailsModal({ notification, viewerRole = "u
                   <WalletCards size={24} strokeWidth={2} aria-hidden="true" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#017FE6]">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#017FE6]">
                     {isLateReturn ? (isFinalFee ? "Late-return payment" : "Late-return estimate") : "Notification"}
                   </p>
                   <h2 id="notification-details-title" className="mt-0.5 text-lg font-bold text-slate-900">

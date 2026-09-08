@@ -22,7 +22,7 @@ const getGreetingPrefix = () => {
   return "Good evening";
 };
 
-export default function Topbar({ onNavigateToNotifications, onToggleSidebar }) {
+export default function Topbar({ onNavigateToNotifications, onToggleSidebar, isSidebarOpen = false }) {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [owner, setOwner] = useState(() => getOwnerProfileFromStorage());
 
@@ -95,8 +95,10 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar }) {
           <button
             type="button"
             onClick={onToggleSidebar}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-white/15 text-white transition hover:bg-white/25 lg:hidden"
-            aria-label="Open menu"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/15 text-white transition hover:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white lg:hidden"
+            aria-label={isSidebarOpen ? "Close menu" : "Open menu"}
+            aria-expanded={isSidebarOpen}
+            aria-controls="owner-navigation"
           >
             <Menu size={18} />
           </button>

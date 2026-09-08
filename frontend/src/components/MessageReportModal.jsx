@@ -62,7 +62,7 @@ export default function MessageReportModal({ message, senderName = "this user", 
     >
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900"><span className="font-semibold">Please be factual.</span> The administrator will review the exact stored message. Reporting does not automatically punish the sender.</div>
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Message being reported</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Message being reported</p>
         <blockquote className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900">“{message.text}”</blockquote>
         <p className="mt-2 text-xs text-slate-500">Only this message will be attached to the report. The rest of the conversation is not included.</p>
       </div>

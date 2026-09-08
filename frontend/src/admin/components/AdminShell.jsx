@@ -35,7 +35,7 @@ export function AdminSidebar({ activeView, displayName, displayEmail, mobileOpen
             <div className="space-y-6">
               {groups.map((group) => (
                 <div key={group.label}>
-                  <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{group.label}</p>
+                  <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{group.label}</p>
                   <div className="space-y-1">
                     {group.items.map(({ id, label, icon: Icon }) => {
                       const active = activeView === id;

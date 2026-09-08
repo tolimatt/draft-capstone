@@ -634,7 +634,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
 
         {messages.length === 1 && !isSending && (
           <div className="pl-10">
-            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
               Suggested questions
             </p>
             <div className="flex flex-wrap gap-2">

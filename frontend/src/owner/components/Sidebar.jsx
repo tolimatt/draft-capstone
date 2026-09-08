@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -13,6 +14,8 @@ import {
   BarChart3,
   ShieldAlert,
   LogOut,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import LogoutModal from "../../components/LogoutModal";
 import { getOwnerProfileFromStorage } from "../utils/ownerProfile";
@@ -24,6 +27,7 @@ import {
   clearSessionUser,
 } from "../../utils/sessionStore";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../../utils/liveCounters";
+import "./Sidebar.css";
 
 const BRAND_LOGO_SRC = "/rentifypro-logo-optimized.png";
 
@@ -36,6 +40,41 @@ function Sidebar({
   const [owner, setOwner] = useState(() => getOwnerProfileFromStorage());
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const sidebarRef = useRef(null);
+
+  useEffect(() => {
+    if (!isMobileOpen) return undefined;
+
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    sidebarRef.current?.querySelector("button")?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseMobile?.();
+      }
+      if (event.key !== "Tab") return;
+      const buttons = [...sidebarRef.current.querySelectorAll("button:not(:disabled)")];
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [isMobileOpen, onCloseMobile]);
 
   useEffect(() => {
     const syncOwner = () => {
@@ -106,7 +145,7 @@ function Sidebar({
     `${owner.firstName || ""} ${owner.lastName || ""}`.trim() ||
     owner.name ||
     "Owner";
-  const displayEmail = owner.email || "owner@rentifypro.com";
+  const displayEmail = owner.email || "Manage your profile";
 
   const menuItems = [
     { id: "Dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -117,6 +156,10 @@ function Sidebar({
     { id: "Earnings", label: "Earnings", icon: Wallet },
     { id: "Analytics", label: "Analytics", icon: BarChart3 },
     { id: "Reports", label: "Reports", icon: ShieldAlert },
+  ];
+  const menuGroups = [
+    { label: "Workspace", items: menuItems.slice(0, 4) },
+    { label: "Business", items: menuItems.slice(4) },
   ];
 
   const openLogoutModal = () => {
@@ -153,102 +196,101 @@ function Sidebar({
       />
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[17.5rem] max-w-[86vw] bg-white flex flex-col border-r border-gray-200 transform transition-transform duration-300 ease-out lg:static lg:z-auto lg:w-[16.5rem] lg:max-w-none lg:translate-x-0 ${
-          isMobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        ref={sidebarRef}
+        id="owner-navigation"
+        aria-label="Owner workspace"
+        role={isMobileOpen ? "dialog" : undefined}
+        aria-modal={isMobileOpen ? true : undefined}
+        className={`rp-owner-sidebar${isMobileOpen ? " rp-owner-sidebar--open" : ""}`}
       >
-        {/* header */}
-        <div className="flex h-20 items-center border-b border-slate-100 px-5 sm:px-6 lg:px-6">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-white ring-1 ring-slate-200">
-              <img
-                src={BRAND_LOGO_SRC}
-                alt="RentifyPro logo"
-                className="h-full w-full rounded-full object-contain"
-              />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-[#017FE6]">RentifyPro</h1>
-              <p className="text-xs opacity-90 text-[#017FE6]">Owner / Lessor Dashboard</p>
-            </div>
+        <div className="rp-owner-sidebar__brand">
+          <img
+            src={BRAND_LOGO_SRC}
+            alt=""
+            className="rp-owner-sidebar__logo"
+          />
+          <div className="rp-owner-sidebar__brand-copy">
+            <p className="rp-owner-sidebar__brand-name">Rentify<span>Pro</span></p>
+            <p className="rp-owner-sidebar__brand-caption">Owner workspace</p>
           </div>
+          <button type="button" className="rp-owner-sidebar__close" onClick={onCloseMobile} aria-label="Close menu">
+            <X size={20} aria-hidden="true" />
+          </button>
         </div>
 
-        {/* profile */}
-        <div className="px-5 sm:px-6 py-6 border-b border-gray-200">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#017FE6] text-lg font-bold text-white">
-              {owner.avatar ? (
-                <img
-                  src={owner.avatar}
-                  alt={displayName}
-                  className="h-full w-full rounded-full object-cover"
-                />
-              ) : (
-                getInitials(owner.firstName, owner.lastName) || "O"
-              )}
-            </div>
-
-            <div>
-              <p className="font-semibold">
-                {displayName}
-              </p>
-              <p className="text-xs text-gray-500">{displayEmail}</p>
-            </div>
-          </div>
-
+        <div className="rp-owner-sidebar__profile-wrap">
           <button
+            type="button"
             onClick={() => {
               setActivePage("Profile");
               onCloseMobile?.();
             }}
-            className="mt-4 w-full text-sm font-medium text-[#017FE6] border border-[#017FE6] rounded-lg py-2 hover:bg-[#017FE6] hover:text-white transition"
+            className="rp-owner-sidebar__profile"
+            aria-current={activePage === "Profile" ? "page" : undefined}
+            aria-label={`Edit profile for ${displayName}`}
           >
-            Edit Profile
+            <span className="rp-owner-sidebar__avatar">
+              {owner.avatar ? (
+                <img
+                  src={owner.avatar}
+                  alt=""
+                />
+              ) : (
+                getInitials(owner.firstName, owner.lastName) || "O"
+              )}
+            </span>
+            <span className="rp-owner-sidebar__profile-copy">
+              <span className="rp-owner-sidebar__profile-name" title={displayName}>{displayName}</span>
+              <span className="rp-owner-sidebar__profile-email" title={owner.email || undefined}>{displayEmail}</span>
+              <span className="rp-owner-sidebar__profile-action">Edit profile</span>
+            </span>
+            <ChevronRight size={16} aria-hidden="true" />
           </button>
         </div>
 
-        {/* nav */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {menuItems.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => {
-                setActivePage(item.id);
-                onCloseMobile?.();
-              }}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer ${
-                activePage === item.id
-                  ? "bg-[#017FE6] text-white"
-                  : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              <item.icon size={20} strokeWidth={2} aria-hidden="true" />
-              <span className="text-sm font-medium flex-1">{item.label}</span>
-              {item.badge > 0 && (
-                <span
-                  className={`min-w-[20px] h-5 flex items-center justify-center rounded-full text-[11px] font-bold px-1.5 ${
-                    activePage === item.id
-                      ? "bg-white text-[#017FE6]"
-                      : "bg-red-500 text-white"
-                  }`}
-                >
-                  {item.badge > 99 ? "99+" : item.badge}
-                </span>
-              )}
+        <nav className="rp-owner-sidebar__nav" aria-label="Owner navigation">
+          {menuGroups.map((group) => (
+            <div className="rp-owner-sidebar__group" key={group.label}>
+              <p className="rp-owner-sidebar__group-label" id={`owner-nav-${group.label.toLowerCase()}`}>{group.label}</p>
+              <ul aria-labelledby={`owner-nav-${group.label.toLowerCase()}`}>
+                {group.items.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePage(item.id);
+                        onCloseMobile?.();
+                      }}
+                      className="rp-owner-sidebar__link"
+                      aria-current={activePage === item.id ? "page" : undefined}
+                    >
+                      <span className="rp-owner-sidebar__icon"><item.icon size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+                      <span className="rp-owner-sidebar__link-label">{item.label}</span>
+                      {item.badge > 0 && (
+                        <span
+                          className="rp-owner-sidebar__badge"
+                          aria-label={`${item.badge} unread messages`}
+                        >
+                          {item.badge > 99 ? "99+" : item.badge}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </nav>
 
-        {/* footer */}
-        <div className="px-4 py-4 border-t">
-          <div
+        <div className="rp-owner-sidebar__footer">
+          <button
+            type="button"
             onClick={openLogoutModal}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer text-red-600 hover:bg-red-50"
+            className="rp-owner-sidebar__logout"
           >
-            <LogOut size={20} strokeWidth={2} aria-hidden="true" />
-            Logout
-          </div>
+            <LogOut size={19} strokeWidth={1.8} aria-hidden="true" />
+            <span>Log out</span>
+          </button>
         </div>
       </aside>
     </>

@@ -8,7 +8,7 @@ export default function NotFoundPage({ onNavigateToHome, onNavigateToVehicles })
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-[#0B75E7]">
           <CarFront size={32} aria-hidden="true" />
         </div>
-        <p className="mt-6 text-sm font-bold uppercase tracking-[0.2em] text-[#0B75E7]">404</p>
+        <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#0B75E7]">404</p>
         <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Page not found</h1>
         <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-slate-600 sm:text-base">
           The page you requested does not exist or may have moved. You can return home or continue browsing available vehicles.

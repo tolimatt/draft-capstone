@@ -43,7 +43,7 @@ export default function DocumentsView({ documents, initialStatus = "All Statuses
         <div className="overflow-x-auto">
           <table className="w-full min-w-[940px] border-collapse">
             <caption className="sr-only">Customer verification documents</caption>
-            <thead className="bg-slate-50"><tr>{["Customer", "Role", "Document Type", "File", "Submitted", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
+            <thead className="bg-slate-50"><tr>{["Customer", "Role", "Document Type", "File", "Submitted", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((document) => {
                 const DocumentIcon = String(document.fileName || "").toLowerCase().endsWith(".pdf") ? FileText : FileImage;

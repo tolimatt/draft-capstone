@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { BadgeCheck, CarFront, Check, Fuel, ImagePlus, MapPin, Settings, Settings2, UploadCloud, UserRoundCheck, Users, Wrench, X } from "lucide-react";
+import { BadgeCheck, CarFront, Check, ImagePlus, MapPin, Settings2, UploadCloud, UserRoundCheck, Users, Wrench, X } from "lucide-react";
 import API from "../../utils/api";
 import { isPhilippineLocation } from "../../utils/locationValidation";
 import VehicleCover from "../../components/VehicleCover";
+import VehicleCard from "../../components/VehicleCard";
+import "./Vehicles.css";
 import ModalPortal from "../../components/ModalPortal";
 import { validateVehicleImageFiles } from "../../utils/fileValidation";
 import OwnerPageHeader from "../components/OwnerPageHeader";
@@ -69,7 +71,7 @@ function VehicleFormSectionHeader({ step, icon: Icon, title, description }) {
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#017FE6]">Step {step}</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Step {step}</span>
           <span className="h-px w-5 bg-blue-200" aria-hidden="true" />
         </div>
         <h3 className="mt-1 text-base font-bold text-slate-900">{title}</h3>
@@ -184,7 +186,7 @@ function VehicleModal({
                   <CarFront size={20} />
                 </div>
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#017FE6]">Vehicle inventory</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Vehicle inventory</p>
                   <h2 id="vehicle-modal-title" className="mt-0.5 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
                     {mode === "edit" ? "Edit vehicle listing" : "Create vehicle listing"}
                   </h2>
@@ -721,7 +723,7 @@ function VehicleModal({
             <aside className="border-t border-slate-200 bg-white p-5 xl:sticky xl:top-0 xl:self-start xl:border-l xl:border-t-0 xl:p-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#017FE6]">Renter view</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Renter view</p>
                   <h3 className="mt-1 text-base font-bold text-slate-900">Listing preview</h3>
                 </div>
                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${form.availabilityStatus === "available" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
@@ -1043,7 +1045,7 @@ function Vehicles() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="rp-owner-vehicles space-y-6">
       <OwnerPageHeader
         title="Vehicle Management"
         description="Manage vehicle details, images, availability, and driver options."
@@ -1051,7 +1053,7 @@ function Vehicles() {
 
       <div className="bg-white border rounded-xl p-4 flex flex-col md:flex-row gap-3">
         <input
-          className="flex-1 rounded-lg border px-3 py-2"
+          className="min-w-0 flex-1 rounded-lg border px-3 py-2"
           placeholder="Search by name, location, or plate number"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -1077,99 +1079,46 @@ function Vehicles() {
         </div>
       )}
 
-      {!loading && <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      {!loading && <div className="rp-owner-vehicle-grid">
         {filteredVehicles.map((vehicle) => (
-          <article key={vehicle._id} className="rp-surface rp-hover-lift flex h-full flex-col overflow-hidden">
-            <div className="px-4 pt-4">
-              <VehicleCover
-                vehicle={vehicle}
-                alt={vehicle.name}
-                contentClassName="p-4 sm:p-5"
+          <VehicleCard
+            key={vehicle._id}
+            vehicle={vehicle}
+            compactSpecs
+            imageBadge={`${(vehicle.images || []).length} photo(s)`}
+            details={<p>Late returns: {formatLateReturnPolicy(vehicle)}</p>}
+            management={
+              <label className="block">
+                <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
+                  <Wrench size={16} strokeWidth={2} aria-hidden="true" /> Vehicle status
+                </span>
+                <select
+                  value={getVehicleOperationalStatus(vehicle)}
+                  disabled={updatingStatusId === vehicle._id}
+                  onChange={(event) => updateVehicleStatus(vehicle, event.target.value)}
+                  className="h-10 w-full min-w-0 cursor-pointer rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100 disabled:cursor-wait disabled:opacity-60"
+                  aria-label={`Set status for ${vehicle.name}`}
+                >
+                  <option value="available">Available</option>
+                  <option value="unavailable">Unavailable</option>
+                  <option value="inspection">Under inspection/maintenance</option>
+                </select>
+              </label>
+            }
+            actions={<>
+              <button type="button" onClick={() => openEditModal(vehicle)} className="rp-btn-secondary" aria-label={`Edit ${vehicle.name}`}>
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteVehicle(vehicle._id)}
+                className="bg-rose-50 text-rose-700 transition hover:bg-rose-100"
+                aria-label={`Delete ${vehicle.name}`}
               >
-                <span
-                  className={`absolute top-3 left-3 z-10 rp-chip ${
-                    vehicle.availabilityStatus === "available"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : vehicle.availabilityHoldReason === "inspection"
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-slate-200 text-slate-700"
-                  }`}
-                >
-                  {vehicle.availabilityStatus === "available"
-                    ? "Available"
-                    : vehicle.availabilityHoldReason === "inspection"
-                      ? "Under inspection/maintenance"
-                      : "Unavailable"}
-                </span>
-                <span className="absolute top-3 right-3 z-10 rp-chip bg-slate-900 text-white">
-                  {(vehicle.images || []).length} photo(s)
-                </span>
-              </VehicleCover>
-            </div>
-
-            <div className="flex flex-1 flex-col p-5">
-              <h3 className="text-lg font-bold">{vehicle.name}</h3>
-              <p className="mt-2 text-sm text-slate-600 line-clamp-2">{vehicle.description}</p>
-
-              <div className="mt-2 flex items-center gap-1 text-sm text-slate-500">
-                <MapPin size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
-                <span>{vehicle.location}</span>
-              </div>
-
-              <div className="mt-2 flex gap-4 text-sm text-slate-600">
-                <span className="flex items-center gap-1">
-                  <Users size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
-                  {vehicle.specs?.seats || "-"}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Settings size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
-                  {vehicle.specs?.transmission || "-"}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Fuel size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
-                  {vehicle.specs?.fuel || "-"}
-                </span>
-              </div>
-
-              {vehicle.driverOptionEnabled && <p className="mt-2 text-sm text-blue-700">Driver available</p>}
-
-              <div className="mt-3 text-xl font-bold text-[#0B75E7]">
-                {formatCurrency(vehicle.dailyRentalRate)}
-                <span className="text-sm text-slate-500 font-medium"> / hour</span>
-              </div>
-              <p className="mt-2 text-xs font-medium text-amber-700">Late returns: {formatLateReturnPolicy(vehicle)}</p>
-
-              <div className="mt-auto pt-4">
-                <label className="mb-3 block">
-                  <span className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.1em] text-slate-500">
-                    <Wrench size={16} strokeWidth={2} aria-hidden="true" /> Vehicle status
-                  </span>
-                  <select
-                    value={getVehicleOperationalStatus(vehicle)}
-                    disabled={updatingStatusId === vehicle._id}
-                    onChange={(event) => updateVehicleStatus(vehicle, event.target.value)}
-                    className="h-10 w-full cursor-pointer rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100 disabled:cursor-wait disabled:opacity-60"
-                    aria-label={`Set status for ${vehicle.name}`}
-                  >
-                    <option value="available">Available</option>
-                    <option value="unavailable">Unavailable</option>
-                    <option value="inspection">Under inspection/maintenance</option>
-                  </select>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => openEditModal(vehicle)} className="rp-btn-secondary py-2 text-sm">
-                  Edit
-                </button>
-                <button
-                  onClick={() => deleteVehicle(vehicle._id)}
-                  className="py-2 rounded-xl bg-rose-50 text-rose-700 text-sm font-semibold transition hover:bg-rose-100"
-                >
-                  Delete
-                </button>
-                </div>
-              </div>
-            </div>
-          </article>
+                Delete
+              </button>
+            </>}
+          />
         ))}
       </div>}
       {modalOpen && (

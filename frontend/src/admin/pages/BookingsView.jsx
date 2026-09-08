@@ -40,7 +40,7 @@ export default function BookingsView({ bookings, initialStatus = "All Statuses",
           <table className="w-full min-w-[1060px] border-collapse">
             <caption className="sr-only">RentifyPro booking operations without financial information</caption>
             <thead className="bg-slate-50">
-              <tr>{["Booking", "Renter", "Vehicle", "Vehicle Owner", "Pickup", "Return", "Driver", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr>
+              <tr>{["Booking", "Renter", "Vehicle", "Vehicle Owner", "Pickup", "Return", "Driver", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((booking) => (

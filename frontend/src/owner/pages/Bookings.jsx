@@ -737,7 +737,7 @@ function ReturnReviewModal({ review, note, loading, error, onNoteChange, onClose
                 : "Declining keeps the booking active and the vehicle unavailable. The renter can submit another return request later."}
             </div>
             <label className="block">
-              <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Optional note</span>
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Optional note</span>
               <textarea
                 value={note}
                 maxLength={500}
