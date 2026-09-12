@@ -4,7 +4,9 @@ const adminMfaChallengeSchema = new mongoose.Schema(
   {
     challengeId: { type: String, required: true, unique: true, index: true },
     email: { type: String, required: true, lowercase: true, trim: true, index: true },
-    otpHash: { type: String, required: true, select: false },
+    otpHash: { type: String, default: "", select: false },
+    emailCodeSentAt: { type: Date, default: null },
+    emailCodeExpiresAt: { type: Date, default: null },
     rememberMe: { type: Boolean, default: false },
     attempts: { type: Number, default: 0 },
     maxAttempts: { type: Number, default: 5 },

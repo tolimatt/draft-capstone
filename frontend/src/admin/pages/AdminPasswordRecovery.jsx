@@ -152,7 +152,7 @@ export default function AdminPasswordRecovery({ onBackToLogin }) {
       <section className="w-full max-w-[560px] rounded-[26px] border border-white bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.14)] sm:p-9">
         <div className="text-center">
           <img src="/rentifypro-logo.png" alt="RentifyPro logo" className="mx-auto h-20 w-20 object-contain" />
-          <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-blue-600">System Admin Recovery</p>
+          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">System Admin Recovery</p>
         </div>
 
         {step === "email" ? (
@@ -171,7 +171,7 @@ export default function AdminPasswordRecovery({ onBackToLogin }) {
         {step === "otp" ? (
           <form onSubmit={verifyCode} className="mt-6">
             <RecoveryHeader icon={ShieldCheck} title="Verify your email" description={`Enter the code sent to ${maskEmail(email)}.`} step="Step 2 of 3" />
-            {developmentCode ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center"><p className="text-xs font-semibold uppercase tracking-[0.1em] text-amber-700">Local development code</p><p className="mt-1 font-mono text-2xl font-bold tracking-[0.25em] text-amber-900">{developmentCode}</p><p className="mt-1 text-xs text-amber-700">SMTP is unavailable locally. This code is only exposed for loopback development.</p></div> : null}
+            {developmentCode ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center"><p className="text-xs font-semibold uppercase tracking-[0.1em] text-amber-700">Local development code</p><p className="mt-1 font-sans tabular-nums text-2xl font-bold tracking-[0.25em] text-amber-900">{developmentCode}</p><p className="mt-1 text-xs text-amber-700">SMTP is unavailable locally. This code is only exposed for loopback development.</p></div> : null}
             <div className="mt-7 flex justify-center gap-2" onPaste={handleOtpPaste}>
               {otp.map((digit, index) => <input key={index} ref={(element) => { otpRefs.current[index] = element; }} type="text" inputMode="numeric" maxLength={1} value={digit} onChange={(event) => handleOtpChange(index, event.target.value)} onKeyDown={(event) => handleOtpKeyDown(event, index)} disabled={loading} aria-label={`Verification code digit ${index + 1}`} className="h-12 w-11 rounded-xl border border-slate-300 text-center text-lg font-bold text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50 sm:h-14 sm:w-12" />)}
             </div>

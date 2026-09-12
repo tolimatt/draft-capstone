@@ -80,3 +80,28 @@ export async function sendAdminMfaCodeEmail(to, otp, details = {}) {
       </div>`,
   });
 }
+
+export async function sendCustomerEmailVerificationCode(to, otp) {
+  const fromAddress = asText(process.env.EMAIL_FROM || process.env.SMTP_USER || process.env.EMAIL_USER);
+  const fromName = asText(process.env.EMAIL_FROM_NAME) || "RentifyPro";
+  await getTransporter().sendMail({
+    from: `"${fromName}" <${fromAddress}>`,
+    to,
+    subject: "Verify Your Updated RentifyPro Email",
+    text: `A Super Admin updated your RentifyPro email address. Your verification code is ${otp}. It expires in 10 minutes.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:28px"><h1 style="color:#017FE6">RentifyPro</h1><h2>Verify your updated email</h2><p>A Super Admin corrected the email address on your account. Use this code to verify the new address:</p><div style="margin:22px 0;padding:16px;border-radius:10px;background:#eff6ff;text-align:center;color:#1d4ed8;font-size:30px;font-weight:700;letter-spacing:8px">${otp}</div><p>This code expires in 10 minutes. If you did not expect this change, contact RentifyPro support.</p></div>`,
+  });
+}
+
+export async function sendCustomerAccountChangeAlert(to, changedFields = []) {
+  const fromAddress = asText(process.env.EMAIL_FROM || process.env.SMTP_USER || process.env.EMAIL_USER);
+  const fromName = asText(process.env.EMAIL_FROM_NAME) || "RentifyPro";
+  const fields = changedFields.map((field) => asText(field)).filter(Boolean).join(", ") || "account details";
+  await getTransporter().sendMail({
+    from: `"${fromName}" <${fromAddress}>`,
+    to,
+    subject: "Your RentifyPro Account Was Updated",
+    text: `A RentifyPro Super Admin updated the following account details: ${fields}. If you did not request this correction, contact RentifyPro support immediately.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:28px"><h1 style="color:#017FE6">RentifyPro</h1><h2>Account details updated</h2><p>A Super Admin updated: <strong>${fields}</strong>.</p><p>If you did not request this correction, contact RentifyPro support immediately.</p></div>`,
+  });
+}

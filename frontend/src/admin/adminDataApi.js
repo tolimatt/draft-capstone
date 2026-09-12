@@ -22,6 +22,13 @@ const normalizeOverview = (payload) => ({
   documents: Array.isArray(payload?.documents) ? payload.documents.map(normalizeDocument) : [],
 });
 
+const normalizeReport = (report) => ({
+  ...report,
+  evidence: Array.isArray(report?.evidence)
+    ? report.evidence.map((item) => ({ ...item, url: resolveMediaUrl(item.url) }))
+    : [],
+});
+
 async function request(path, options = {}) {
   let response;
   try {
@@ -70,6 +77,24 @@ export const adminDataApi = {
   getOverview: async () => normalizeOverview(await request(ADMIN_API_ROUTES.overview)),
   getTransactions: (params = {}) => request(`${ADMIN_API_ROUTES.transactions}${buildQueryString(params)}`),
   getAuditLogs: (params = {}) => request(`${ADMIN_API_ROUTES.auditLogs}${buildQueryString(params)}`),
+  getReports: async (params = {}) => {
+    const payload = await request(`${ADMIN_API_ROUTES.reports}${buildQueryString(params)}`);
+    return { ...payload, reports: Array.isArray(payload.reports) ? payload.reports.map(normalizeReport) : [] };
+  },
+  updateReport: async (id, changes) => {
+    const payload = await request(`/admin/reports/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(changes),
+    });
+    return { ...payload, report: normalizeReport(payload.report) };
+  },
+  decideReport: async (id, decision) => {
+    const payload = await request(`/admin/reports/${encodeURIComponent(id)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ ...decision, reason: decision.policyReason }),
+    });
+    return { ...payload, report: normalizeReport(payload.report) };
+  },
   updateCustomer: (id, changes) => request(`/admin/customers/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(changes),
@@ -82,10 +107,10 @@ export const adminDataApi = {
     method: "PATCH",
     body: JSON.stringify(details),
   }),
-  updateDocument: async (id, approval) => {
+  updateDocument: async (id, details) => {
     const payload = await request(`/admin/documents/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ approval }),
+      body: JSON.stringify(details),
     });
     return { ...payload, document: normalizeDocument(payload.document) };
   },

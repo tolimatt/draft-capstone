@@ -1,15 +1,21 @@
-import { Eye, FileImage, FileText, RotateCcw } from "lucide-react";
+import { AlertTriangle, Eye, FileImage, FileText, RotateCcw, ScanSearch, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
+import { percentage } from "../adminAnalytics";
+import { AnalyticsPanel, DistributionList, MetricTile, ProgressRing } from "../components/AdminAnalytics";
 import { EmptyState, FilterSelect, SearchField, StatCard, StatusBadge, TableFooter } from "../components/AdminUI";
 
 export default function DocumentsView({ documents, initialStatus = "All Statuses", onView, onReview }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(initialStatus);
   const [type, setType] = useState("All Document Types");
-  const documentTypes = [...new Set(documents.map((document) => document.document))];
+  const documentTypes = [...new Set(documents.map((document) => document.document).filter(Boolean))];
   const approved = documents.filter((document) => document.approval === "Approved").length;
   const pending = documents.filter((document) => document.approval === "Pending").length;
   const rejected = documents.filter((document) => document.approval === "Rejected").length;
+  const tamperingFlags = documents.filter((document) => document.suspectedTampering).length;
+  const mismatchFlags = documents.filter((document) => document.mismatchFields?.length).length;
+  const retrying = documents.filter((document) => document.processingStage === "retry_wait").length;
+  const resolutionRate = percentage(approved + rejected, documents.length);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -26,13 +32,32 @@ export default function DocumentsView({ documents, initialStatus = "All Statuses
   return (
     <div className="space-y-5">
       <section aria-label="Document statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Documents" value={documents.length} description="All verification files" icon={FileText} />
-        <StatCard label="Verified Documents" value={approved} description="Successfully approved" icon={FileText} tone="green" />
-        <StatCard label="Pending Review" value={pending} description="Awaiting admin review" icon={FileText} tone="amber" />
-        <StatCard label="Needs Attention" value={rejected} description="Rejected verification files" icon={FileText} tone="red" />
+        <StatCard label="Total Documents" value={documents.length} description="All verification files" icon={FileText} showArrow />
+        <StatCard label="Verified Documents" value={approved} description="Successfully approved" icon={FileText} tone="green" showArrow />
+        <StatCard label="Pending Review" value={pending} description="Awaiting admin review" icon={FileText} tone="amber" showArrow />
+        <StatCard label="Needs Attention" value={rejected} description="Rejected verification files" icon={FileText} tone="red" showArrow />
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section aria-label="Document review insights" className="grid gap-5 xl:grid-cols-[minmax(330px,.72fr)_minmax(0,1.28fr)]">
+        <AnalyticsPanel eyebrow="Verification pipeline" title="Review completion" description="Resolved decisions compared with the total verification queue." icon={ShieldCheck}>
+          <ProgressRing value={resolutionRate} label="Resolved" detail={`${approved + rejected} of ${documents.length} documents have a final decision.`} tone={resolutionRate >= 75 ? "emerald" : "amber"} />
+          <div className="mt-5 border-t border-slate-100 pt-5"><DistributionList items={[
+            { label: "Verified", value: approved, tone: "emerald" },
+            { label: "Pending review", value: pending, tone: "amber" },
+            { label: "Rejected", value: rejected, tone: "rose" },
+          ]} /></div>
+        </AnalyticsPanel>
+        <AnalyticsPanel eyebrow="Screening monitor" title="Items requiring closer inspection" description="Automated screening signals help prioritize manual review; they do not make the final decision." icon={ScanSearch}>
+          <div className="grid gap-3 sm:grid-cols-3"><MetricTile label="Tampering flags" value={tamperingFlags} helper="Potential file alteration" tone={tamperingFlags ? "rose" : "slate"} /><MetricTile label="Detail mismatches" value={mismatchFlags} helper="Submitted data differs" tone={mismatchFlags ? "amber" : "slate"} /><MetricTile label="Waiting to retry" value={retrying} helper="Screening will resume" tone={retrying ? "violet" : "slate"} /></div>
+          <div className={`mt-5 flex gap-3 rounded-xl border p-4 ${tamperingFlags || mismatchFlags ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+            {tamperingFlags || mismatchFlags ? <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={19} /> : <ShieldCheck className="mt-0.5 shrink-0 text-emerald-600" size={19} />}
+            <div><p className={`text-sm font-bold ${tamperingFlags || mismatchFlags ? "text-amber-900" : "text-emerald-900"}`}>{tamperingFlags || mismatchFlags ? "Manual inspection recommended" : "No screening risks detected"}</p><p className={`mt-1 text-xs leading-5 ${tamperingFlags || mismatchFlags ? "text-amber-700" : "text-emerald-700"}`}>{tamperingFlags || mismatchFlags ? `${tamperingFlags + mismatchFlags} screening signal${tamperingFlags + mismatchFlags === 1 ? "" : "s"} appear across the queue. Open each document and verify the evidence before deciding.` : "Current documents have no mismatch or tampering indicators."}</p></div>
+          </div>
+          <div className="mt-5 border-t border-slate-100 pt-5"><p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Document type mix</p><DistributionList items={documentTypes.map((documentType, index) => ({ label: documentType, value: documents.filter((document) => document.document === documentType).length, tone: ["blue", "violet", "emerald", "amber"][index % 4] }))} emptyLabel="Document types will appear here." /></div>
+        </AnalyticsPanel>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_6px_20px_rgba(33,33,33,0.035)]">
         <div className="grid gap-4 border-b border-slate-200 p-4 lg:grid-cols-[minmax(280px,1.5fr)_220px_230px_auto] lg:items-end">
           <SearchField label="Search Documents" value={search} onChange={setSearch} placeholder="Search by customer, filename, or document type..." />
           <FilterSelect label="Approval Status" value={status} onChange={setStatus} options={["All Statuses", "Verified", "Pending Review", "Rejected"]} />
@@ -43,7 +68,7 @@ export default function DocumentsView({ documents, initialStatus = "All Statuses
         <div className="overflow-x-auto">
           <table className="w-full min-w-[940px] border-collapse">
             <caption className="sr-only">Customer verification documents</caption>
-            <thead className="bg-slate-50"><tr>{["Customer", "Role", "Document Type", "File", "Submitted", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
+            <thead className="bg-slate-50"><tr>{["Customer", "Role", "Document Type", "File", "Submitted", "Status", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((document) => {
                 const DocumentIcon = String(document.fileName || "").toLowerCase().endsWith(".pdf") ? FileText : FileImage;

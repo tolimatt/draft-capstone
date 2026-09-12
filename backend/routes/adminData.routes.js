@@ -1,13 +1,18 @@
 import path from "node:path";
 import { unlink } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import express from "express";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import AdminCredential from "../models/AdminCredential.js";
 import AdminAuditLog from "../models/AdminAuditLog.js";
 import { recordAdminAudit } from "../services/adminAudit.service.js";
+import { createAdminReportsRouter } from "./adminReports.routes.js";
 import { ADMIN_API_CONTRACT_VERSION, ADMIN_API_ROUTES } from "../../shared/adminApiContract.js";
+import {
+  sendCustomerAccountChangeAlert,
+  sendCustomerEmailVerificationCode,
+} from "../services/adminEmail.service.js";
 
 const VEHICLE_MEDIA_PREFIX = "uploads/vehicles/";
 const VEHICLE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
@@ -82,6 +87,8 @@ const mapVehicle = (vehicle, ownerNames) => {
   return {
     id: vehicle._id.toString(),
     name: asText(vehicle.name, "Unnamed vehicle"),
+    description: asText(vehicle.description),
+    coverDisplayMode: ["photo", "cutout"].includes(vehicle.coverDisplayMode) ? vehicle.coverDisplayMode : "auto",
     image: imageReference ? `/api/admin/vehicles/${vehicle._id.toString()}/image` : "",
     plateNumber: asText(specs.plateNumber, "—"),
     type: asText(specs.type, "Vehicle"),
@@ -113,9 +120,15 @@ const mapDocument = (document, usersByEmail) => {
     submitted: asDate(document.createdAt),
     submittedAt: asTimestamp(document.createdAt),
     approval: mapDocumentStatus(document.status),
+    processingStage: asText(document.status, "pending_review"),
+    processingAttempts: Number(document.processingAttempts || 0),
+    nextAttemptAt: asTimestamp(document.nextAttemptAt),
     mimeType: asText(document.mimeType, "application/octet-stream"),
     reason: asText(document.reason),
     confidence: Number.isFinite(Number(document.confidence)) ? Number(document.confidence) : null,
+    detailsMatched: document.detailsMatched !== false,
+    mismatchFields: Array.isArray(document.mismatchFields) ? document.mismatchFields.slice(0, 12) : [],
+    suspectedTampering: Boolean(document.suspectedTampering),
     previewUrl: document.fileKey ? `/api/admin/documents/${document._id.toString()}/file` : "",
   };
 };
@@ -224,6 +237,40 @@ const mapTransaction = (booking, usersById, vehiclesById) => {
   };
 };
 
+const transactionMonthlyTrend = (transactions, monthCount = 6) => {
+  const now = new Date();
+  const months = [];
+  for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1));
+    months.push({
+      key: `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`,
+      label: date.toLocaleDateString("en-PH", { month: "short", timeZone: "UTC" }),
+      collected: 0,
+      outstanding: 0,
+      fees: 0,
+      records: 0,
+    });
+  }
+  const byKey = new Map(months.map((month) => [month.key, month]));
+  transactions.forEach((transaction) => {
+    const createdAt = transaction.createdAt ? new Date(transaction.createdAt) : null;
+    if (!createdAt || Number.isNaN(createdAt.getTime())) return;
+    const key = `${createdAt.getUTCFullYear()}-${String(createdAt.getUTCMonth() + 1).padStart(2, "0")}`;
+    const month = byKey.get(key);
+    if (!month) return;
+    month.collected += Number(transaction.paymentAmountPaid || 0);
+    month.outstanding += Number(transaction.paymentAmountDue || 0);
+    month.fees += Number(transaction.transactionFee || 0);
+    month.records += 1;
+  });
+  return months.map((month) => ({
+    ...month,
+    collected: roundCurrency(month.collected),
+    outstanding: roundCurrency(month.outstanding),
+    fees: roundCurrency(month.fees),
+  }));
+};
+
 const transactionMatchesSearch = (transaction, rawSearch) => {
   const search = asText(rawSearch).toLowerCase();
   if (!search) return true;
@@ -300,6 +347,31 @@ const verifyCriticalAction = async (request, { requireReason = false } = {}) => 
   return { account, reason };
 };
 
+const createCustomerChangeNotification = async (database, customerId, changedFields, reason) => {
+  const now = new Date();
+  const notification = {
+    user: customerId,
+    type: "system",
+    category: "system",
+    event: "account.admin_updated",
+    priority: "important",
+    entityType: "user",
+    entityId: customerId.toString(),
+    actionUrl: "/account-settings",
+    dedupeKey: `admin-account-update:${customerId.toString()}:${now.getTime()}`,
+    title: "Your account details were updated",
+    message: `A RentifyPro Super Admin updated: ${changedFields.join(", ")}. Contact support if you did not request this correction.`,
+    data: { changedFields, reason: String(reason || "").slice(0, 500) },
+    readAt: null,
+    archived_at: null,
+    lastOccurredAt: now,
+    expiresAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await database.collection("notifications").insertOne(notification);
+};
+
 const safeFileFromKey = (directory, key, allowedExtensions) => {
   const fileName = asText(key);
   if (!fileName || fileName !== path.basename(fileName) || /[\\/]/.test(fileName)) return "";
@@ -339,12 +411,15 @@ export function createAdminDataRouter({ requireAdminSession }) {
   );
   const kycDirectory = path.resolve(process.env.KYC_UPLOAD_DIR || path.join(websiteBackendDirectory, "private_uploads", "kyc"));
   const vehicleDirectory = path.resolve(websiteBackendDirectory, "uploads", "vehicles");
+  const reportEvidenceDirectory = path.resolve(process.env.REPORT_EVIDENCE_DIR || path.join(websiteBackendDirectory, "private_uploads", "reports"));
 
   router.use((_request, response, next) => {
     response.setHeader("X-RentifyPro-Admin-Contract", ADMIN_API_CONTRACT_VERSION);
     next();
   });
   router.use(requireAdminSession);
+
+  router.use("/reports", createAdminReportsRouter({ verifyCriticalAction, recordAdminAudit, evidenceDirectory: reportEvidenceDirectory }));
 
   router.get("/contract", (_request, response) => response.json({
     version: ADMIN_API_CONTRACT_VERSION,
@@ -367,10 +442,16 @@ export function createAdminDataRouter({ requireAdminSession }) {
         const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         filter.$or = ["summary", "targetLabel", "adminEmail", "reason"].map((field) => ({ [field]: { $regex: escaped, $options: "i" } }));
       }
-      const [logs, total, actions] = await Promise.all([
+      const summaryFilter = { ...filter };
+      delete summaryFilter.outcome;
+      const recentFilter = { ...summaryFilter, createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } };
+      const [logs, total, actions, summaryTotal, summarySuccess, recentActivity] = await Promise.all([
         AdminAuditLog.find(filter).sort({ createdAt: -1, _id: -1 }).skip(offset).limit(limit).lean(),
         AdminAuditLog.countDocuments(filter),
         AdminAuditLog.distinct("action"),
+        AdminAuditLog.countDocuments(summaryFilter),
+        AdminAuditLog.countDocuments({ ...summaryFilter, outcome: "success" }),
+        AdminAuditLog.countDocuments(recentFilter),
       ]);
       return response.json({
         logs: logs.map((log) => ({
@@ -387,6 +468,7 @@ export function createAdminDataRouter({ requireAdminSession }) {
           createdAt: asTimestamp(log.createdAt),
         })),
         actions: actions.sort(),
+        summary: { total: summaryTotal, success: summarySuccess, failure: Math.max(summaryTotal - summarySuccess, 0), recent24Hours: recentActivity },
         page: { offset, limit, total, hasMore: offset + logs.length < total },
       });
     } catch (error) {
@@ -445,6 +527,10 @@ export function createAdminDataRouter({ requireAdminSession }) {
           unpaidBookings: allTransactions.filter((item) => item.paymentStatus === "unpaid").length,
           refundedBookings: allTransactions.filter((item) => item.paymentStatus === "refunded").length,
           totalCollected: roundCurrency(allTransactions.reduce((sum, item) => sum + item.paymentAmountPaid, 0)),
+          totalOutstanding: roundCurrency(allTransactions.reduce((sum, item) => sum + item.paymentAmountDue, 0)),
+          totalPayable: roundCurrency(allTransactions.reduce((sum, item) => sum + item.amountPayable, 0)),
+          totalTransactionFees: roundCurrency(allTransactions.reduce((sum, item) => sum + item.transactionFee, 0)),
+          monthlyTrend: transactionMonthlyTrend(allTransactions),
         },
         page: {
           hasMore: nextOffset < filteredTransactions.length,
@@ -459,7 +545,7 @@ export function createAdminDataRouter({ requireAdminSession }) {
 
   router.patch("/customers/:id", async (request, response, next) => {
     try {
-      const reauthentication = await verifyCriticalAction(request);
+      const reauthentication = await verifyCriticalAction(request, { requireReason: true });
       if (reauthentication.error) return response.status(reauthentication.error.status).json({ message: reauthentication.error.message, code: reauthentication.error.code });
       const database = mongoose.connection.db;
       const target = await getCustomerManagementTarget(database, request.params.id, request.adminAccount?.email);
@@ -498,6 +584,18 @@ export function createAdminDataRouter({ requireAdminSession }) {
           });
         }
       }
+      if (target.customer.role === "user" && role === "owner") {
+        const approvedSupportingDocument = await database.collection("prekycdocuments").findOne({
+          email: asText(target.customer.email).toLowerCase(),
+          docType: "supporting",
+          status: "verified",
+        }, { projection: { _id: 1 } });
+        if (!approvedSupportingDocument) {
+          return response.status(409).json({
+            message: "This renter must complete the Become a Vehicle Owner verification workflow before the role can be changed.",
+          });
+        }
+      }
 
       const duplicateEmail = await database.collection("users").findOne({
         _id: { $ne: target.objectId },
@@ -521,6 +619,18 @@ export function createAdminDataRouter({ requireAdminSession }) {
         ...(phone ? {} : { $unset: { phone: "" } }),
       };
       if (phone) update.$set.phone = phone;
+      if (email !== previousEmail) {
+        update.$set.isVerified = false;
+        update.$inc = { sessionVersion: 1 };
+      }
+
+      const changedFields = [
+        name !== asText(target.customer.name) ? "name" : "",
+        email !== previousEmail ? "email" : "",
+        phone !== asText(target.customer.phone) ? "phone" : "",
+        role !== target.customer.role ? "role" : "",
+      ].filter(Boolean);
+      if (!changedFields.length) return response.status(400).json({ message: "No customer details were changed." });
 
       const result = await database.collection("users").findOneAndUpdate(
         { _id: target.objectId },
@@ -532,15 +642,36 @@ export function createAdminDataRouter({ requireAdminSession }) {
         await Promise.all([
           database.collection("prekycdocuments").updateMany({ email: previousEmail }, { $set: { email } }),
           database.collection("prekycfaces").updateMany({ email: previousEmail }, { $set: { email } }),
-          database.collection("otps").updateMany({ email: previousEmail }, { $set: { email } }),
+          database.collection("otps").deleteMany({ email: { $in: [previousEmail, email] }, purpose: "verification" }),
         ]);
+        const otp = String(randomInt(100000, 1000000));
+        const now = new Date();
+        await database.collection("otps").insertOne({
+          email,
+          otp,
+          purpose: "verification",
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+          attempts: 0,
+          maxAttempts: 5,
+          lastSentAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await sendCustomerEmailVerificationCode(email, otp).catch((error) => {
+          console.error("Customer email verification delivery failed:", error.message);
+        });
       }
-      const changedFields = [
-        name !== asText(target.customer.name) ? "name" : "",
-        email !== previousEmail ? "email" : "",
-        phone !== asText(target.customer.phone) ? "phone" : "",
-        role !== target.customer.role ? "role" : "",
-      ].filter(Boolean);
+      await createCustomerChangeNotification(database, target.objectId, changedFields, reauthentication.reason);
+      await sendCustomerAccountChangeAlert(previousEmail, changedFields).catch((error) => {
+        console.error("Customer account-change alert delivery failed:", error.message);
+      });
+      const before = {
+        name: asText(target.customer.name),
+        email: previousEmail,
+        phone: asText(target.customer.phone),
+        role: target.customer.role,
+      };
+      const after = { name, email, phone, role };
       await recordAdminAudit({
         request,
         admin: request.adminAccount,
@@ -548,10 +679,17 @@ export function createAdminDataRouter({ requireAdminSession }) {
         targetType: "customer",
         targetId: target.objectId.toString(),
         targetLabel: name,
+        reason: reauthentication.reason,
         summary: `Updated customer account ${name}.`,
-        metadata: { changedFields },
+        metadata: { changedFields, before, after, emailVerificationRequired: email !== previousEmail },
       });
-      return response.json({ message: "Customer account updated.", customer: mapUser(updatedCustomer) });
+      return response.json({
+        message: email !== previousEmail
+          ? "Customer updated. Existing sessions were revoked and the new email must be verified."
+          : "Customer account updated and the customer was notified.",
+        customer: mapUser(updatedCustomer),
+        emailVerificationRequired: email !== previousEmail,
+      });
     } catch (error) {
       if (error?.code === 11000) return response.status(409).json({ message: "That email address is already in use." });
       return next(error);
@@ -709,15 +847,15 @@ export function createAdminDataRouter({ requireAdminSession }) {
   router.get("/data", async (_request, response, next) => {
     try {
       const database = mongoose.connection.db;
-      const [users, vehicles, documents, bookings, failedAdminLogins] = await Promise.all([
+      const [users, vehicles, documents, bookings, failedAdminLogins, actionableReportCount] = await Promise.all([
         database.collection("users").find({}, {
           projection: { name: 1, email: 1, phone: 1, role: 1, isVerified: 1, isDisabled: 1, isArchived: 1, disabledAt: 1, disabledReason: 1, kycStatus: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("vehicles").find({}, {
-          projection: { owner: 1, name: 1, dailyRentalRate: 1, pricingUnit: 1, location: 1, availabilityStatus: 1, images: 1, imageUrl: 1, driverOptionEnabled: 1, specs: 1, createdAt: 1 },
+          projection: { owner: 1, name: 1, description: 1, coverDisplayMode: 1, dailyRentalRate: 1, pricingUnit: 1, location: 1, availabilityStatus: 1, images: 1, imageUrl: 1, driverOptionEnabled: 1, specs: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("prekycdocuments").find({}, {
-          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },
+          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, detailsMatched: 1, mismatchFields: 1, suspectedTampering: 1, processingAttempts: 1, nextAttemptAt: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("bookings").find({}, {
           projection: { vehicle: 1, renter: 1, owner: 1, pickupAt: 1, returnAt: 1, status: 1, paymentStatus: 1, paymentAmountDue: 1, driverSelected: 1, reviewRating: 1, reviewComment: 1, reviewCreatedAt: 1, createdAt: 1 },
@@ -727,6 +865,7 @@ export function createAdminDataRouter({ requireAdminSession }) {
           outcome: "failure",
           createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
         }),
+        database.collection("reports").countDocuments({ status: { $in: ["open", "investigating", "awaiting_information", "appealed"] } }),
       ]);
 
       const usersByEmail = new Map(users.map((user) => [asText(user.email).toLowerCase(), user]));
@@ -744,6 +883,7 @@ export function createAdminDataRouter({ requireAdminSession }) {
       const outstandingPaymentCount = mappedBookings.filter((booking) => booking.paymentAmountDue > 0 && !["Cancelled", "Rejected"].includes(booking.status)).length;
       const unavailableVehicleCount = mappedVehicles.filter((vehicle) => vehicle.status !== "Available").length;
       const operationalAlerts = [
+        actionableReportCount ? { id: "actionable-reports", severity: "critical", title: "User reports need review", description: "Submitted reports or appeals are waiting for an administrative decision.", count: actionableReportCount, view: "reports", context: {} } : null,
         overdueCount ? { id: "overdue-returns", severity: "critical", title: "Overdue vehicle returns", description: "Bookings have passed their scheduled return time.", count: overdueCount, view: "bookings", context: { status: "Overdue" } } : null,
         pendingDocumentCount ? { id: "pending-documents", severity: "warning", title: "Documents awaiting review", description: "Identity or permit documents need a Super Admin decision.", count: pendingDocumentCount, view: "documents", context: { status: "Pending Review" } } : null,
         outstandingPaymentCount ? { id: "outstanding-payments", severity: "warning", title: "Outstanding booking balances", description: "Bookings have an unpaid or partially paid balance.", count: outstandingPaymentCount, view: "transactions", context: { paymentStatus: "unpaid" } } : null,
@@ -822,24 +962,53 @@ export function createAdminDataRouter({ requireAdminSession }) {
       if (!["Approved", "Rejected"].includes(approval)) {
         return response.status(400).json({ message: "Approval must be Approved or Rejected." });
       }
+      const reauthentication = await verifyCriticalAction(request, { requireReason: true });
+      if (reauthentication.error) return response.status(reauthentication.error.status).json({ message: reauthentication.error.message, code: reauthentication.error.code });
 
       const now = new Date();
       const setFields = {
         status: approval === "Approved" ? "verified" : "rejected",
-        reason: approval === "Approved" ? "Approved by the RentifyPro system administrator." : "Rejected by the RentifyPro system administrator.",
+        reason: reauthentication.reason,
         reviewedAt: now,
+        provider: "manual-super-admin",
+        processingLockedAt: null,
+        nextAttemptAt: null,
       };
       if (approval === "Approved") setFields.verifiedAt = now;
 
       const update = { $set: setFields };
       if (approval === "Rejected") update.$unset = { verifiedAt: "" };
       const result = await mongoose.connection.db.collection("prekycdocuments").findOneAndUpdate(
-        { _id: new mongoose.Types.ObjectId(request.params.id), status: "pending_review" },
+        { _id: new mongoose.Types.ObjectId(request.params.id), status: { $in: ["queued", "processing", "retry_wait", "pending_review"] } },
         update,
         { returnDocument: "after" },
       );
       const updatedDocument = result?.value ?? result;
-      if (!updatedDocument) return response.status(409).json({ message: "This document is no longer pending review. Refresh the dashboard." });
+      if (!updatedDocument) return response.status(409).json({ message: "This document is no longer awaiting review. Refresh the dashboard." });
+
+      if (approval === "Approved" && asText(updatedDocument.sessionId).startsWith("user:")) {
+        const userId = asText(updatedDocument.sessionId).slice("user:".length);
+        if (validObjectId(userId)) {
+          const objectId = new mongoose.Types.ObjectId(userId);
+          const kycCase = await mongoose.connection.db.collection("kyc_cases").findOne(
+            { user: objectId },
+            { projection: { status: 1 } },
+          );
+          if (kycCase?.status === "challenge_passed") {
+            const verifiedAt = new Date();
+            await Promise.all([
+              mongoose.connection.db.collection("kyc_cases").updateOne(
+                { user: objectId },
+                { $set: { status: "approved", verifiedAt, remarks: "Face match completed and document approved by the Super Admin.", updatedAt: verifiedAt } },
+              ),
+              mongoose.connection.db.collection("users").updateOne(
+                { _id: objectId },
+                { $set: { kycStatus: "approved", updatedAt: verifiedAt } },
+              ),
+            ]);
+          }
+        }
+      }
 
       const matchedUser = await mongoose.connection.db.collection("users").findOne(
         { email: asText(updatedDocument.email).toLowerCase() },
@@ -853,6 +1022,7 @@ export function createAdminDataRouter({ requireAdminSession }) {
         targetType: "document",
         targetId: request.params.id,
         targetLabel: asText(updatedDocument.fileName, asText(updatedDocument.email)),
+        reason: reauthentication.reason,
         summary: `${approval} verification document for ${asText(updatedDocument.email)}.`,
       });
       return response.json({ document: mapDocument(updatedDocument, usersByEmail) });

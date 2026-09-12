@@ -6,6 +6,8 @@ const adminCredentialSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
+    passkeyHash: { type: String, default: "", select: false },
+    passkeyEnabledAt: { type: Date, default: null },
     sessionVersion: { type: Number, default: 1, min: 1 },
   },
   { timestamps: true },

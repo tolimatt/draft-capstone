@@ -1,12 +1,22 @@
 import {
   AlertTriangle,
+  CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  FileImage,
   FileText,
   LoaderCircle,
+  Mail,
+  Phone,
   Search,
+  UserRound,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import VehicleImage from "./VehicleImage";
+import { presentVehicle } from "../vehiclePresentation";
 
 export function StatusBadge({ value }) {
   const status = String(value || "").toLowerCase();
@@ -31,26 +41,30 @@ export function StatusBadge({ value }) {
   );
 }
 
-export function StatCard({ label, value, description, icon: Icon, tone = "blue" }) {
+export function StatCard({ label, value, description, icon: Icon, tone = "blue", showArrow = false }) {
   const tones = {
-    blue: "bg-blue-50 text-blue-600",
-    green: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-600",
-    red: "bg-rose-50 text-rose-600",
-    slate: "bg-slate-100 text-slate-600",
+    blue: { icon: "bg-blue-50 text-blue-600 ring-blue-100" },
+    green: { icon: "bg-emerald-50 text-emerald-600 ring-emerald-100" },
+    amber: { icon: "bg-amber-50 text-amber-600 ring-amber-100" },
+    red: { icon: "bg-rose-50 text-rose-600 ring-rose-100" },
+    slate: { icon: "bg-slate-100 text-slate-600 ring-slate-200" },
   };
+  const theme = tones[tone] || tones.blue;
 
   return (
-    <article className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_6px_22px_rgba(15,23,42,0.045)]">
-      <div className="flex items-start gap-4">
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${tones[tone] || tones.blue}`}>
-          <Icon size={21} aria-hidden="true" />
+    <article className="group min-h-[132px] min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_6px_20px_rgba(33,33,33,0.035)] transition duration-200 hover:border-blue-200 hover:shadow-[0_10px_26px_rgba(33,33,33,0.055)]">
+      <div className="flex items-start justify-between gap-3.5">
+        <div className="flex min-w-0 items-start gap-3.5">
+          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset ${theme.icon}`}>
+            <Icon size={19} aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">{label}</p>
+            <p className="mt-1 text-[28px] font-extrabold tracking-[-0.035em] text-slate-900">{value}</p>
+            {description ? <p className="mt-1.5 text-[11px] leading-[1.1rem] text-slate-500">{description}</p> : null}
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{label}</p>
-          <p className="mt-1 text-2xl font-bold tracking-tight text-slate-950">{value}</p>
-          {description ? <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p> : null}
-        </div>
+        {showArrow ? <ChevronRight size={14} className="mt-0.5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600" aria-hidden="true" /> : null}
       </div>
     </article>
   );
@@ -59,7 +73,7 @@ export function StatCard({ label, value, description, icon: Icon, tone = "blue" 
 export function SearchField({ label, value, onChange, placeholder }) {
   return (
     <label className="block min-w-0">
-      {label ? <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{label}</span> : null}
+      {label ? <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">{label}</span> : null}
       <div className="relative">
         <Search size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
         <input
@@ -77,7 +91,7 @@ export function SearchField({ label, value, onChange, placeholder }) {
 export function FilterSelect({ label, value, onChange, options }) {
   return (
     <label className="block min-w-0">
-      {label ? <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{label}</span> : null}
+      {label ? <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">{label}</span> : null}
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -152,12 +166,15 @@ function ConfirmationForm({ confirmation, loading, onCancel, onConfirm }) {
 
 export function ViewerDialog({ item, onClose }) {
   if (!item) return null;
+  if (item.type === "Customer profile") return <CustomerProfileDialog item={item} onClose={onClose} />;
+  if (item.type === "Vehicle details") return <VehicleDetailsDialog key={item.vehicle?.id || item.title} item={item} onClose={onClose} />;
+
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/50 px-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-labelledby="viewer-title" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">{item.type}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">{item.type}</p>
             <h3 id="viewer-title" className="mt-2 text-xl font-bold text-slate-950">{item.title}</h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">{item.subtitle}</p>
           </div>
@@ -169,24 +186,184 @@ export function ViewerDialog({ item, onClose }) {
   );
 }
 
+function VehicleDetailsDialog({ item, onClose }) {
+  const vehicle = presentVehicle(item.vehicle || {});
+  return (
+    <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm sm:p-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="vehicle-details-title" className="flex max-h-[min(720px,calc(100dvh-3rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Vehicle details</p><h3 id="vehicle-details-title" className="mt-1 break-words text-xl font-bold text-slate-950">{vehicle.name || item.title}</h3></div>
+          <button autoFocus type="button" onClick={onClose} aria-label="Close vehicle details" className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
+        </div>
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-4">
+          <VehicleImage vehicle={vehicle} />
+          <div className="mt-4 flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-3">
+            <div className="min-w-0 flex-1"><p className="text-xs font-semibold tracking-wide text-blue-700">{[vehicle.type, vehicle.category].filter((value, index, values) => value && values.indexOf(value) === index).join(" · ") || "Vehicle"}</p><p className="mt-1 break-words text-sm text-slate-600">{vehicle.location || "Location not provided"}</p></div>
+            {vehicle.status ? <StatusBadge value={vehicle.status} /> : null}
+          </div>
+          <section aria-labelledby="vehicle-description-title" className="mt-3 rounded-xl bg-slate-50 p-3"><h4 id="vehicle-description-title" className="text-sm font-bold text-slate-900">Description</h4><p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">{vehicle.description || "No description has been provided for this vehicle."}</p></section>
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+            {[["Rental rate", vehicle.rentalRate], ["Seats", vehicle.seats], ["Transmission", vehicle.transmission], ["Fuel", vehicle.fuel], ["Plate number", vehicle.plateNumber], ["Driver option", vehicle.driverOption]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-slate-500">{label}</dt><dd className={`mt-1 break-words text-sm font-semibold ${label === "Rental rate" ? "text-blue-700" : "text-slate-900"}`}>{value ?? "Not provided"}</dd></div>)}
+          </dl>
+          <div className="mt-4 border-t border-slate-200 pt-3"><p className="text-xs text-slate-500">Operator</p><p className="mt-1 break-words text-sm font-semibold text-slate-900">{vehicle.operator || "Not provided"}</p></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomerProfileDialog({ item, onClose }) {
+  const customer = item.customer || {};
+  const documents = Array.isArray(item.documents) ? item.documents : [];
+  const galleryRef = useRef(null);
+  const initials = String(customer.name || item.title || "?")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  const navigateGallery = (direction) => {
+    const gallery = galleryRef.current;
+    if (!gallery) return;
+    gallery.scrollBy({ left: direction * Math.min(gallery.clientWidth * 0.82, 390), behavior: "smooth" });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[65] flex items-center justify-center overflow-y-auto bg-slate-950/55 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-labelledby="viewer-title" className="flex max-h-[calc(100vh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 p-5 sm:p-6">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Customer profile</p>
+            <h3 id="viewer-title" className="mt-1.5 truncate text-xl font-bold text-slate-950">{customer.name || item.title}</h3>
+            <p className="mt-1 text-sm text-slate-500">Account details and submitted verification documents.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close customer profile" className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+          <section aria-label="Customer account details" className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-[auto_1fr] sm:p-5">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-base font-bold text-white shadow-sm">{initials}</div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="truncate text-lg font-bold text-slate-950">{customer.name || item.title}</h4>
+                {customer.status ? <StatusBadge value={customer.status} /> : null}
+              </div>
+              <p className="mt-1 text-sm font-medium text-slate-500">{customer.role || "Customer"} account</p>
+            </div>
+            <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2 lg:grid-cols-4">
+              <ProfileDetail icon={Mail} label="Email address" value={customer.email} />
+              <ProfileDetail icon={Phone} label="Phone number" value={customer.phone} />
+              <ProfileDetail icon={UserRound} label="Role" value={customer.role} />
+              <ProfileDetail icon={CalendarDays} label="Joined" value={customer.created} />
+            </div>
+          </section>
+
+          <section aria-labelledby="customer-documents-title" className="mt-6">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Verification files</p>
+                <h4 id="customer-documents-title" className="mt-1 text-lg font-bold text-slate-950">Submitted documents</h4>
+                <p className="mt-1 text-sm text-slate-500">{documents.length ? `${documents.length} document${documents.length === 1 ? "" : "s"} attached to this account.` : "No documents are attached to this account."}</p>
+              </div>
+              {documents.length > 1 ? (
+                <div className="flex shrink-0 gap-2" aria-label="Document gallery navigation">
+                  <button type="button" onClick={() => navigateGallery(-1)} aria-label="View previous documents" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><ChevronLeft size={18} /></button>
+                  <button type="button" onClick={() => navigateGallery(1)} aria-label="View next documents" className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><ChevronRight size={18} /></button>
+                </div>
+              ) : null}
+            </div>
+
+            {documents.length ? (
+              <div ref={galleryRef} tabIndex={0} aria-label="Customer document gallery" className="mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto overscroll-x-contain pb-3 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">
+                {documents.map((document, index) => <CustomerDocumentCard key={document.id || `${document.fileName}-${index}`} document={document} />)}
+              </div>
+            ) : (
+              <div className="mt-4 flex min-h-52 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                <div>
+                  <FileText size={32} className="mx-auto text-slate-400" />
+                  <p className="mt-3 text-sm font-semibold text-slate-800">No submitted documents</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">This customer has not uploaded a verification document yet.</p>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="flex shrink-0 justify-end border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+          <button type="button" onClick={onClose} className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileDetail({ icon: Icon, label, value }) {
+  return (
+    <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-3.5">
+      <div className="flex items-center gap-2 text-xs font-semibold text-slate-500"><Icon size={15} className="shrink-0 text-blue-600" />{label}</div>
+      <p className="mt-2 truncate text-sm font-semibold text-slate-900" title={value || "Not provided"}>{value || "Not provided"}</p>
+    </div>
+  );
+}
+
+function CustomerDocumentCard({ document }) {
+  const mimeType = String(document.mimeType || "").toLowerCase();
+  const DocumentIcon = mimeType.startsWith("image/") ? FileImage : FileText;
+
+  return (
+    <article className="w-[min(78vw,360px)] shrink-0 snap-start overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <PreviewPane item={document} className="h-56 rounded-none border-0 border-b border-slate-200" compact />
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-blue-600"><DocumentIcon size={15} className="shrink-0" />{document.document || "Verification document"}</p>
+            <h5 className="mt-2 truncate text-sm font-bold text-slate-950" title={document.fileName}>{document.fileName || "Uploaded document"}</h5>
+          </div>
+          {document.approval ? <StatusBadge value={document.approval} /> : null}
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+          <p className="truncate text-xs text-slate-500">Submitted {document.submitted || "date unavailable"}</p>
+          {document.previewUrl ? <a href={document.previewUrl} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Open full file<ExternalLink size={14} /></a> : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export function DocumentReviewDialog({ document, onClose, onApprove, onReject }) {
   if (!document) return null;
   return (
-    <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/55 px-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-labelledby="review-title" className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-start justify-between border-b border-slate-200 p-5 sm:p-6">
-          <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">Document review</p><h3 id="review-title" className="mt-1.5 text-xl font-bold text-slate-950">{document.fileName}</h3><p className="mt-1 text-sm text-slate-500">Review the verification details before making a decision.</p></div>
-          <button type="button" aria-label="Close review" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
+    <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm sm:p-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div role="dialog" aria-modal="true" aria-labelledby="review-title" className="flex max-h-[min(720px,calc(100dvh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
+          <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Document review</p><h3 id="review-title" title={document.fileName} className="mt-1 truncate text-base font-bold text-slate-950">{document.fileName}</h3><p className="mt-1 text-xs text-slate-500">Review the verification details before making a decision.</p></div>
+          <button type="button" aria-label="Close review" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
         </div>
-        <div className="grid gap-5 p-5 sm:grid-cols-[220px_1fr] sm:p-6">
-          <PreviewPane item={document} className="min-h-56" />
-          <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4">
-            {[['Customer', document.customer], ['Role', document.role], ['Document type', document.document], ['Submitted', document.submitted], ['Current status', document.approval]].map(([label, value]) => (
-              <div key={label} className="grid grid-cols-[120px_1fr] gap-3 py-3.5"><dt className="text-xs font-semibold text-slate-500">{label}</dt><dd className="text-sm font-medium text-slate-900">{value}</dd></div>
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5">
+          <div className="grid items-start gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
+          <PreviewPane item={document} className="h-56 sm:h-64" compact />
+          <dl className="min-w-0 divide-y divide-slate-100 rounded-xl border border-slate-200 px-3 [overflow-wrap:anywhere]">
+            {[
+              ['Customer', document.customer],
+              ['Role', document.role],
+              ['Document type', document.document],
+              ['Submitted', document.submitted],
+              ['Current status', document.approval],
+              ['Queue stage', formatQueueStage(document.processingStage)],
+              ['AI confidence', document.confidence === null ? 'Not available' : `${document.confidence}%`],
+              ['Details matched', document.detailsMatched ? 'Yes' : 'No'],
+              ['Tampering flag', document.suspectedTampering ? 'Flagged for review' : 'Not flagged'],
+            ].map(([label, value]) => (
+              <div key={label} className="grid grid-cols-[minmax(0,104px)_minmax(0,1fr)] gap-3 py-2"><dt className="text-xs font-semibold text-slate-500">{label}</dt><dd className="text-sm font-medium text-slate-900">{value}</dd></div>
             ))}
+            {document.mismatchFields?.length ? <div className="py-2"><dt className="text-xs font-semibold text-slate-500">Mismatched fields</dt><dd className="mt-1 text-sm font-medium text-rose-700">{document.mismatchFields.join(", ")}</dd></div> : null}
+            {document.reason ? <div className="py-2"><dt className="text-xs font-semibold text-slate-500">Screening notes</dt><dd className="mt-1 text-sm leading-5 text-slate-700">{document.reason}</dd></div> : null}
           </dl>
+          </div>
         </div>
-        <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+        <div className="flex shrink-0 flex-wrap justify-end gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
           <button type="button" onClick={onReject} className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-100">Reject</button>
           <button type="button" onClick={onApprove} className="h-11 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Approve Document</button>
         </div>
@@ -195,7 +372,11 @@ export function DocumentReviewDialog({ document, onClose, onApprove, onReject })
   );
 }
 
-function PreviewPane({ item, className = "" }) {
+function formatQueueStage(value) {
+  return ({ queued: "Queued", processing: "Automated screening", retry_wait: "Waiting to retry", pending_review: "Ready for manual review", verified: "Approved", rejected: "Rejected" })[value] || "Pending review";
+}
+
+function PreviewPane({ item, className = "", compact = false }) {
   const previewUrl = item?.previewUrl;
   const mimeType = String(item?.mimeType || "").toLowerCase();
   const imagePreview = mimeType.startsWith("image/") || mimeType === "image/*";
@@ -211,7 +392,7 @@ function PreviewPane({ item, className = "" }) {
   if (previewUrl) {
     return (
       <div className={`overflow-hidden rounded-xl border border-slate-200 bg-slate-50 ${className}`}>
-        <iframe src={previewUrl} title={`Preview of ${item.title || item.fileName || "document"}`} className="h-[420px] w-full bg-white" />
+        <iframe src={previewUrl} title={`Preview of ${item.title || item.fileName || "document"}`} className={`${compact ? "h-full" : "h-[420px]"} w-full bg-white`} />
       </div>
     );
   }

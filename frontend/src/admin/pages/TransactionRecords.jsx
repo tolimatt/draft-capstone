@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { CreditCard, PhilippinePeso, ReceiptText, Search, WalletCards } from "lucide-react";
 import { adminDataApi } from "../adminDataApi";
+import { percentage } from "../adminAnalytics";
+import { AnalyticsPanel, DistributionList, MetricTile, ProgressRing, TrendBars } from "../components/AdminAnalytics";
+import { StatCard } from "../components/AdminUI";
 
 const EMPTY_PAGE = { hasMore: false, nextCursor: null };
 const EMPTY_SUMMARY = {
@@ -10,6 +13,10 @@ const EMPTY_SUMMARY = {
   unpaidBookings: 0,
   refundedBookings: 0,
   totalCollected: 0,
+  totalOutstanding: 0,
+  totalPayable: 0,
+  totalTransactionFees: 0,
+  monthlyTrend: [],
 };
 
 const filters = [
@@ -63,7 +70,7 @@ const bookingStyles = {
   rejected: "border-rose-200 bg-rose-50 text-rose-700",
 };
 
-export default function TransactionRecords() {
+export default function TransactionRecords({ refreshSignal = 0, onRefreshStateChange }) {
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [page, setPage] = useState(EMPTY_PAGE);
@@ -75,6 +82,7 @@ export default function TransactionRecords() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const requestSequence = useRef(0);
+  const handledRefreshSignal = useRef(refreshSignal);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchQuery(searchInput.trim()), 300);
@@ -125,34 +133,44 @@ export default function TransactionRecords() {
     return () => window.clearTimeout(initialLoad);
   }, [loadRecords]);
 
+  useEffect(() => {
+    if (refreshSignal === handledRefreshSignal.current) return;
+    handledRefreshSignal.current = refreshSignal;
+    void loadRecords({ refresh: true });
+  }, [loadRecords, refreshSignal]);
+
+  useEffect(() => {
+    onRefreshStateChange?.(loading || refreshing);
+  }, [loading, onRefreshStateChange, refreshing]);
+
+  useEffect(() => () => onRefreshStateChange?.(false), [onRefreshStateChange]);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Transaction Records</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Review payment activity across every renter, owner, and booking.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => loadRecords({ refresh: true })}
-          disabled={loading || refreshing}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
-          {refreshing ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
+    <div className="space-y-5">
+      <section aria-label="Transaction statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Transaction Records" value={Number(summary.totalRecords || 0).toLocaleString()} description="Every booking payment record" icon={ReceiptText} />
+        <StatCard label="Total Collected" value={money(summary.totalCollected)} description={`${summary.paidBookings} fully paid bookings`} icon={PhilippinePeso} tone="green" />
+        <StatCard label="Outstanding Balance" value={money(summary.totalOutstanding)} description={`${summary.unpaidBookings + summary.partialPayments} bookings with a balance`} icon={WalletCards} tone={summary.totalOutstanding ? "amber" : "slate"} />
+        <StatCard label="Transaction Fees" value={money(summary.totalTransactionFees)} description="Fees represented in booking totals" icon={CreditCard} tone="slate" />
+      </section>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Total Records" value={summary.totalRecords.toLocaleString()} />
-        <SummaryCard label="Paid Bookings" value={summary.paidBookings.toLocaleString()} tone="emerald" />
-        <SummaryCard label="Partial Payments" value={summary.partialPayments.toLocaleString()} tone="orange" />
-        <SummaryCard label="Total Collected" value={money(summary.totalCollected)} tone="blue" />
-      </div>
+      <section aria-label="Payment performance" className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(350px,.75fr)]">
+        <AnalyticsPanel eyebrow="Payment tracker" title="Cash-flow overview" description="Collected payments and remaining balances for bookings created during the last six months." icon={PhilippinePeso}>
+          <TrendBars data={summary.monthlyTrend || []} primaryKey="collected" secondaryKey="outstanding" primaryLabel="Collected (PHP)" secondaryLabel="Outstanding (PHP)" emptyLabel="Payment activity will appear here when bookings are recorded." />
+          <div className="mt-5 grid grid-cols-2 gap-2 border-t border-slate-100 pt-5"><MetricTile label="Total payable" value={money(summary.totalPayable)} tone="blue" /><MetricTile label="Still outstanding" value={money(summary.totalOutstanding)} tone={summary.totalOutstanding ? "amber" : "slate"} /></div>
+        </AnalyticsPanel>
+        <AnalyticsPanel eyebrow="Payment health" title="Collection and status mix" description="A platform-wide view of completed and unresolved payment records." icon={WalletCards}>
+          <ProgressRing value={percentage(summary.totalCollected, summary.totalPayable)} label="Collected" detail={`${money(summary.totalCollected)} received from ${money(summary.totalPayable)} payable.`} tone={percentage(summary.totalCollected, summary.totalPayable) >= 75 ? "emerald" : "amber"} />
+          <div className="mt-5 border-t border-slate-100 pt-5"><DistributionList items={[
+            { label: "Paid", value: summary.paidBookings, tone: "emerald" },
+            { label: "Partial", value: summary.partialPayments, tone: "amber" },
+            { label: "Unpaid", value: summary.unpaidBookings, tone: "rose" },
+            { label: "Refunded", value: summary.refundedBookings, tone: "violet" },
+          ]} total={summary.totalRecords} /></div>
+        </AnalyticsPanel>
+      </section>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_6px_20px_rgba(33,33,33,0.035)]">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap gap-2">
             {filters.map((filter) => (
@@ -197,7 +215,7 @@ export default function TransactionRecords() {
       )}
 
       {!loading && !error && (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-[0_6px_20px_rgba(33,33,33,0.035)]">
           <table className="w-full min-w-[1280px] text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
@@ -282,22 +300,6 @@ export default function TransactionRecords() {
     </div>
   );
 }
-
-const SummaryCard = ({ label, value, tone = "slate" }) => {
-  const tones = {
-    slate: "border-slate-200 bg-white text-slate-900",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-900",
-    orange: "border-orange-200 bg-orange-50 text-orange-900",
-    blue: "border-blue-200 bg-blue-50 text-blue-900",
-  };
-
-  return (
-    <div className={`rounded-xl border p-4 ${tones[tone] || tones.slate}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</p>
-      <p className="mt-2 text-2xl font-bold">{value}</p>
-    </div>
-  );
-};
 
 const PartyCell = ({ party, fallback }) => (
   <td className="px-4 py-3">

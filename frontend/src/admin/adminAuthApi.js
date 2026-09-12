@@ -43,6 +43,26 @@ export const adminAuthApi = {
     method: "POST",
     body: JSON.stringify({ challengeId, otp }),
   }),
+  sendMfaEmailCode: (challengeId) => request("/admin/auth/mfa/email/send", {
+    method: "POST",
+    body: JSON.stringify({ challengeId }),
+  }),
+  verifyPasskey: (challengeId, passkey) => request("/admin/auth/mfa/passkey/verify", {
+    method: "POST",
+    body: JSON.stringify({ challengeId, passkey }),
+  }),
+  getSessions: () => request("/admin/auth/sessions"),
+  revokeSession: (sessionId) => request(`/admin/auth/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
+  revokeOtherSessions: () => request("/admin/auth/sessions/revoke-others", { method: "POST" }),
+  getPasskeyStatus: () => request("/admin/auth/passkey/status"),
+  savePasskey: (adminPassword, newPasskey, currentPasskey = "") => request("/admin/auth/passkey", {
+    method: "PUT",
+    body: JSON.stringify({ adminPassword, newPasskey, currentPasskey }),
+  }),
+  disablePasskey: (adminPassword, passkey) => request("/admin/auth/passkey", {
+    method: "DELETE",
+    body: JSON.stringify({ adminPassword, passkey }),
+  }),
   getSession: () => request("/admin/auth/session"),
   logout: () => request("/admin/auth/logout", { method: "POST" }),
   requestPasswordReset: (email) => request("/admin/auth/forgot-password", {

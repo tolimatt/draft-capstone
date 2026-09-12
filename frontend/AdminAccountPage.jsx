@@ -15,6 +15,8 @@ import DocumentsView from "./src/admin/pages/DocumentsView";
 import VehiclesView from "./src/admin/pages/VehiclesView";
 import TransactionRecords from "./src/admin/pages/TransactionRecords";
 import AuditLogsView from "./src/admin/pages/AuditLogsView";
+import SecurityView from "./src/admin/pages/SecurityView";
+import ReportsView from "./src/admin/pages/ReportsView";
 
 const pageMeta = {
   dashboard: {
@@ -41,9 +43,17 @@ const pageMeta = {
     title: "Transaction Records",
     description: "Review payment activity across every renter, operator, and booking.",
   },
+  reports: {
+    title: "User Reports",
+    description: "Review reports, inspect evidence, request more information, and issue fair moderation decisions.",
+  },
   audit: {
     title: "Audit Logs",
     description: "Review Super Admin security events and sensitive management decisions.",
+  },
+  security: {
+    title: "Security",
+    description: "Control passkey protection, email backup, and active Super Admin sessions.",
   },
 };
 
@@ -59,6 +69,8 @@ export default function AdminAccountPage({ user, onLogout }) {
   const [loadState, setLoadState] = useState("loading");
   const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [transactionRefreshSignal, setTransactionRefreshSignal] = useState(0);
+  const [transactionRefreshing, setTransactionRefreshing] = useState(false);
   const [syncedAt, setSyncedAt] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [viewerItem, setViewerItem] = useState(null);
@@ -165,17 +177,26 @@ export default function AdminAccountPage({ user, onLogout }) {
 
   const viewVehicle = (vehicle) => setViewerItem({
     type: "Vehicle details",
+    vehicle,
     title: vehicle.name,
     subtitle: `${vehicle.plateNumber} · ${vehicle.category} · ${vehicle.location} · ${vehicle.rentalRate}`,
     previewUrl: vehicle.image,
     mimeType: "image/*",
   });
 
-  const viewCustomer = (customer) => setViewerItem({
-    type: "Customer profile",
-    title: customer.name,
-    subtitle: `${customer.role} account using ${customer.email} and ${customer.phone}. Joined ${customer.created}.`,
-  });
+  const viewCustomer = (customer) => {
+    const customerEmail = String(customer.email || "").trim().toLowerCase();
+    const customerDocuments = documents.filter(
+      (document) => String(document.email || "").trim().toLowerCase() === customerEmail,
+    );
+
+    setViewerItem({
+      type: "Customer profile",
+      title: customer.name,
+      customer,
+      documents: customerDocuments,
+    });
+  };
 
   const updateCustomer = async (customer, changes) => {
     const payload = await adminDataApi.updateCustomer(customer.id, changes);
@@ -239,8 +260,10 @@ export default function AdminAccountPage({ user, onLogout }) {
       title: `${approval === "Approved" ? "Approve" : "Reject"} this document?`,
       description: `${document.fileName} will be marked as ${approval.toLowerCase()} for ${document.customer}.`,
       confirmLabel: `${approval === "Approved" ? "Approve" : "Reject"} document`,
-      onConfirm: async () => {
-        const payload = await adminDataApi.updateDocument(document.id, approval);
+      requireReason: true,
+      requirePassword: true,
+      onConfirm: async ({ reason, adminPassword }) => {
+        const payload = await adminDataApi.updateDocument(document.id, { approval, reason, adminPassword });
         setDocuments((current) => current.map((item) => item.id === document.id ? payload.document : item));
         showFeedback(`Document marked as ${approval.toLowerCase()}.`);
       },
@@ -252,19 +275,19 @@ export default function AdminAccountPage({ user, onLogout }) {
       {activeView === "dashboard" ? <DashboardPeriodSelect value={dashboardPeriod} options={dashboardPeriodOptions} onChange={setDashboardPeriod} /> : null}
       <button
         type="button"
-        onClick={() => void loadAdminData({ background: loadState === "ready" })}
-        disabled={refreshing || loadState === "loading"}
-        title={syncedAt ? `Last synced ${new Date(syncedAt).toLocaleString()}` : "Refresh dashboard data"}
+        onClick={() => activeView === "transactions" ? setTransactionRefreshSignal((current) => current + 1) : void loadAdminData({ background: loadState === "ready" })}
+        disabled={activeView === "transactions" ? transactionRefreshing : refreshing || loadState === "loading"}
+        title={activeView === "transactions" ? "Refresh transaction records" : syncedAt ? `Last synced ${new Date(syncedAt).toLocaleString()}` : "Refresh dashboard data"}
         className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-wait disabled:opacity-60"
       >
-        <RefreshCw size={17} className={refreshing ? "animate-spin" : ""} />
-        <span className="hidden sm:inline">Refresh</span>
+        <RefreshCw size={17} className={(activeView === "transactions" ? transactionRefreshing : refreshing) ? "animate-spin" : ""} />
+        <span className="hidden sm:inline">{(activeView === "transactions" ? transactionRefreshing : refreshing) ? "Refreshing..." : "Refresh"}</span>
       </button>
     </div>
   );
 
   return (
-    <div className="min-h-screen w-screen max-w-[100vw] overflow-x-hidden bg-[#f5f7fb] lg:w-auto">
+    <div className="min-h-screen w-screen max-w-[100vw] overflow-x-hidden bg-canvas lg:w-auto">
       <Toast message={feedbackMessage} />
       <ConfirmationDialog confirmation={confirmation} loading={actionLoading} onCancel={() => setConfirmation(null)} onConfirm={confirmAction} />
       <ViewerDialog item={viewerItem} onClose={() => setViewerItem(null)} />
@@ -290,14 +313,16 @@ export default function AdminAccountPage({ user, onLogout }) {
           <AdminPageHeader
             {...pageMeta[activeView]}
             onMenuOpen={() => setMobileNavOpen(true)}
-            actions={["transactions", "audit"].includes(activeView) ? null : headerActions}
+            actions={["reports", "audit", "security"].includes(activeView) ? null : headerActions}
           />
 
-          <div className="mx-auto max-w-[1600px] p-4 sm:p-5 lg:p-5">
-            {activeView === "transactions" ? <TransactionRecords /> : null}
+          <div className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-7">
+            {activeView === "transactions" ? <TransactionRecords refreshSignal={transactionRefreshSignal} onRefreshStateChange={setTransactionRefreshing} /> : null}
+            {activeView === "reports" ? <ReportsView key={`reports-${viewContext.status || "all"}`} initialStatus={viewContext.status || "all"} onFeedback={showFeedback} /> : null}
             {activeView === "audit" ? <AuditLogsView key={`audit-${viewContext.outcome || "all"}`} initialOutcome={viewContext.outcome || "all"} /> : null}
-            {!["transactions", "audit"].includes(activeView) && loadState === "loading" ? <DataLoadingState /> : null}
-            {!["transactions", "audit"].includes(activeView) && loadState === "error" ? <DataErrorState message={loadError} onRetry={() => void loadAdminData()} onLogout={onLogout} /> : null}
+            {activeView === "security" ? <SecurityView onCurrentSessionRevoked={onLogout} /> : null}
+            {!["transactions", "reports", "audit", "security"].includes(activeView) && loadState === "loading" ? <DataLoadingState /> : null}
+            {!["transactions", "reports", "audit", "security"].includes(activeView) && loadState === "error" ? <DataErrorState message={loadError} onRetry={() => void loadAdminData()} onLogout={onLogout} /> : null}
             {loadState === "ready" && activeView === "dashboard" ? <DashboardView vehicles={vehicles} customers={customers} documents={documents} bookings={bookings} alerts={operationalAlerts} period={dashboardPeriod} onSelect={selectView} /> : null}
             {loadState === "ready" && activeView === "bookings" ? <BookingsView key={`bookings-${viewContext.status || "all"}`} bookings={bookings} initialStatus={viewContext.status} onView={viewBooking} /> : null}
             {loadState === "ready" && activeView === "vehicles" ? <VehiclesView vehicles={vehicles} onView={viewVehicle} /> : null}

@@ -1,6 +1,8 @@
-import { Eye, LoaderCircle, MoreVertical, Pencil, Power, PowerOff, Trash2, UserRound, Users, X } from "lucide-react";
+import { Activity, AlertTriangle, BadgeCheck, Eye, LoaderCircle, MoreVertical, Pencil, Power, PowerOff, Trash2, UserRound, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { percentage } from "../adminAnalytics";
+import { AnalyticsPanel, DistributionList, MetricTile, ProgressRing, TrendBars } from "../components/AdminAnalytics";
 import { EmptyState, FilterSelect, SearchField, StatCard, StatusBadge, TableFooter } from "../components/AdminUI";
 
 const avatarTones = ["bg-blue-50 text-blue-600", "bg-orange-50 text-orange-600", "bg-violet-50 text-violet-600", "bg-cyan-50 text-cyan-700"];
@@ -28,6 +30,10 @@ export default function CustomersView({
   const active = visibleCustomers.filter((customer) => customer.status === "Active").length;
   const pending = visibleCustomers.filter((customer) => customer.status === "Pending Verification").length;
   const inactive = visibleCustomers.filter((customer) => ["Inactive", "Suspended"].includes(customer.status)).length;
+  const growthTrend = buildCustomerTrend(visibleCustomers);
+  const renters = visibleCustomers.filter((customer) => customer.role === "Renter").length;
+  const operators = visibleCustomers.filter((customer) => customer.role === "Operator").length;
+  const activationRate = percentage(active, visibleCustomers.length);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -104,25 +110,40 @@ export default function CustomersView({
       ) : null}
 
       <section aria-label="Customer statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Customers" value={visibleCustomers.length} description="All customer accounts" icon={Users} />
-        <StatCard label="Active Customers" value={active} description="Verified and active" icon={UserRound} tone="green" />
-        <StatCard label="Pending Verification" value={pending} description="Awaiting account review" icon={UserRound} tone="amber" />
-        <StatCard label="Inactive / Suspended" value={inactive} description="Restricted accounts" icon={UserRound} tone="red" />
+        <StatCard label="Total Customers" value={visibleCustomers.length} description="All customer accounts" icon={Users} showArrow />
+        <StatCard label="Active Customers" value={active} description="Verified and active" icon={UserRound} tone="green" showArrow />
+        <StatCard label="Pending Verification" value={pending} description="Awaiting account review" icon={UserRound} tone="amber" showArrow />
+        <StatCard label="Inactive / Suspended" value={inactive} description="Restricted accounts" icon={UserRound} tone="red" showArrow />
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section aria-label="Customer growth insights" className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,.75fr)]">
+        <AnalyticsPanel eyebrow="Customer growth tracker" title="New account momentum" description="Monthly renter and operator registrations across the last six months." icon={Activity}>
+          <TrendBars data={growthTrend} primaryKey="renters" secondaryKey="operators" primaryLabel="Renters" secondaryLabel="Operators" />
+          <div className="mt-5 grid grid-cols-3 gap-2 border-t border-slate-100 pt-5"><MetricTile label="Renters" value={renters} tone="blue" /><MetricTile label="Operators" value={operators} tone="violet" /><MetricTile label="Pending" value={pending} tone={pending ? "amber" : "slate"} /></div>
+        </AnalyticsPanel>
+        <AnalyticsPanel eyebrow="Activation health" title="Account readiness" description="How many customer accounts are verified, active, and ready to use RentifyPro." icon={BadgeCheck}>
+          <ProgressRing value={activationRate} label="Active" detail={`${active} of ${visibleCustomers.length} customer accounts are currently active.`} tone={activationRate >= 75 ? "emerald" : activationRate >= 50 ? "amber" : "rose"} />
+          <div className="mt-5 border-t border-slate-100 pt-5"><DistributionList items={[
+            { label: "Active", value: active, tone: "emerald" },
+            { label: "Pending verification", value: pending, tone: "amber" },
+            { label: "Inactive / suspended", value: inactive, tone: "rose" },
+          ]} /></div>
+        </AnalyticsPanel>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_6px_20px_rgba(33,33,33,0.035)]">
         <div className="grid gap-4 border-b border-slate-200 p-4 lg:grid-cols-[minmax(260px,1.4fr)_190px_210px_190px_auto] lg:items-end">
           <SearchField label="Search Customers" value={search} onChange={setSearch} placeholder="Search by name, email, or phone..." />
           <FilterSelect label="Role" value={role} onChange={setRole} options={["All Roles", "Renter", "Operator"]} />
           <FilterSelect label="Status" value={status} onChange={setStatus} options={["All Statuses", "Active", "Pending Verification", "Inactive", "Suspended"]} />
-          <label className="block"><span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">Joined From</span><input type="date" value={joined} onChange={(event) => setJoined(event.target.value)} className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-700 outline-none hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>
+          <label className="block"><span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">Joined From</span><input type="date" value={joined} onChange={(event) => setJoined(event.target.value)} className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-700 outline-none hover:border-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>
           <button type="button" onClick={clearFilters} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Clear Filters</button>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1180px] border-collapse">
             <caption className="sr-only">RentifyPro customer accounts</caption>
-            <thead className="bg-slate-50"><tr>{["Customer", "Email", "Phone", "Role", "Status", "Joined", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
+            <thead className="bg-slate-50"><tr>{["Customer", "Email", "Phone", "Role", "Status", "Joined", "Actions"].map((heading) => <th key={heading} scope="col" className="border-b border-slate-200 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-600">{heading}</th>)}</tr></thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((customer, index) => (
                 <tr key={customer.id || customer.email} className="transition-colors hover:bg-blue-50/30">
@@ -196,12 +217,14 @@ function CustomerEditDialog({ customer, onClose, onSave }) {
 }
 
 function CustomerEditForm({ customer, onClose, onSave }) {
+  const originalPhone = /\d/.test(String(customer.phone || "")) ? String(customer.phone) : "";
   const [form, setForm] = useState({
     name: String(customer.name || ""),
     email: String(customer.email || ""),
     phone: ["—", "â€”"].includes(String(customer.phone || "")) ? "" : String(customer.phone || ""),
     role: customer.role === "Operator" ? "Operator" : "Renter",
     adminPassword: "",
+    reason: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -212,6 +235,7 @@ function CustomerEditForm({ customer, onClose, onSave }) {
     setError("");
     if (form.name.trim().length < 2) return setError("Name must contain at least 2 characters.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return setError("Enter a valid email address.");
+    if (form.reason.trim().length < 10) return setError("Explain the administrative correction using at least 10 characters.");
     if (!form.adminPassword) return setError("Enter your Super Admin password to save these changes.");
     setSaving(true);
     try {
@@ -221,12 +245,19 @@ function CustomerEditForm({ customer, onClose, onSave }) {
       setSaving(false);
     }
   };
+  const changes = [
+    ["Name", customer.name, form.name],
+    ["Email", customer.email, form.email],
+    ["Phone", originalPhone, form.phone],
+    ["Role", customer.role, form.role],
+  ].filter(([, before, after]) => String(before || "") !== String(after || ""));
+  const sensitiveChange = changes.some(([field]) => ["Email", "Role"].includes(field));
 
   return (
     <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/55 px-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
       <form onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="customer-edit-title" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 p-5">
-          <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">Customer management</p><h3 id="customer-edit-title" className="mt-1.5 text-xl font-bold text-slate-950">Edit customer</h3></div>
+          <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Customer management</p><h3 id="customer-edit-title" className="mt-1.5 text-xl font-bold text-slate-950">Edit customer</h3></div>
           <button type="button" onClick={onClose} disabled={saving} aria-label="Close edit dialog" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"><X size={19} /></button>
         </div>
         <div className="grid gap-4 p-5 sm:grid-cols-2">
@@ -234,12 +265,15 @@ function CustomerEditForm({ customer, onClose, onSave }) {
           <EditField label="Email address" type="email" value={form.email} onChange={update("email")} maxLength={254} />
           <EditField label="Phone number" value={form.phone} onChange={update("phone")} maxLength={32} placeholder="Optional" />
           <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-700">Role</span><select value={form.role} onChange={update("role")} className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"><option>Renter</option><option>Operator</option></select></label>
+          {changes.length ? <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600">Changes to be recorded</p><div className="mt-2 space-y-2">{changes.map(([field, before, after]) => <div key={field} className="grid grid-cols-[72px_1fr_18px_1fr] items-center gap-2 text-xs"><span className="font-semibold text-slate-600">{field}</span><span className="truncate rounded bg-white px-2 py-1.5 text-slate-600">{before || "—"}</span><span className="text-center text-slate-400">→</span><span className="truncate rounded bg-blue-50 px-2 py-1.5 font-semibold text-blue-800">{after || "—"}</span></div>)}</div></div> : null}
+          {sensitiveChange ? <div className="sm:col-span-2 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800"><AlertTriangle size={17} className="mt-0.5 shrink-0" /><span>Email changes revoke sessions and require verification. Role changes require the applicable owner verification and must not conflict with existing records.</span></div> : null}
+          <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-semibold text-slate-700">Administrative reason</span><textarea value={form.reason} onChange={update("reason")} required maxLength={500} rows={3} placeholder="Explain why this correction is necessary" className="w-full resize-none rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /><span className="mt-1 block text-xs text-slate-500">{form.reason.trim().length}/500 characters</span></label>
           <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-semibold text-slate-700">Confirm Super Admin password</span><input type="password" autoComplete="current-password" value={form.adminPassword} onChange={update("adminPassword")} required placeholder="Required for sensitive customer changes" className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /></label>
           {error ? <p role="alert" className="sm:col-span-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{error}</p> : null}
         </div>
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} disabled={saving} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-white disabled:opacity-50">Cancel</button>
-          <button type="submit" disabled={saving} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-70">{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Pencil size={16} />}{saving ? "Saving..." : "Save changes"}</button>
+          <button type="submit" disabled={saving || !changes.length} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">{saving ? <LoaderCircle size={17} className="animate-spin" /> : <Pencil size={16} />}{saving ? "Saving..." : "Save changes"}</button>
         </div>
       </form>
     </div>
@@ -251,3 +285,23 @@ function EditField({ label, type = "text", value, onChange, maxLength, placehold
 }
 
 function initials(name) { return String(name || "?").split(" ").filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase(); }
+
+function buildCustomerTrend(customers) {
+  const months = [];
+  const now = new Date();
+  for (let offset = 5; offset >= 0; offset -= 1) {
+    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    months.push({ key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`, label: date.toLocaleDateString("en-PH", { month: "short" }), renters: 0, operators: 0 });
+  }
+  const byKey = new Map(months.map((month) => [month.key, month]));
+  customers.forEach((customer) => {
+    const date = new Date(customer.createdAt || customer.created);
+    if (Number.isNaN(date.getTime())) return;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const month = byKey.get(key);
+    if (!month) return;
+    if (customer.role === "Operator") month.operators += 1;
+    else month.renters += 1;
+  });
+  return months;
+}
