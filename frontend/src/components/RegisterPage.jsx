@@ -31,6 +31,9 @@ import FormInput from "./FormInput";
 import PasswordInput from "./PasswordInput";
 import AuthShell from "./AuthShell";
 import LegalPolicyModal from "./LegalPolicyModal";
+import RegistrationDraftNotice from "./RegistrationDraftNotice";
+import useRegistrationDraft from "../hooks/useRegistrationDraft";
+import useRegistrationEmailCheck from "../hooks/useRegistrationEmailCheck";
 import { RELATIONSHIP_OPTIONS, VALIDATION_RULES } from "../data/registerValidation";
 import { ID_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 import API from "../utils/api";
@@ -95,20 +98,31 @@ function friendlyError(msg) {
   return "Something went wrong. Please try again.";
 }
 
-export default function RegisterPage({
+export default function RegisterPage(props) {
+  const [attempt, setAttempt] = useState({ key: 0, reason: "" });
+  const resetDraft = useCallback((reason) => setAttempt((previous) => ({ key: previous.key + 1, reason })), []);
+  return <RegisterForm key={attempt.key} {...props} onResetDraft={resetDraft} draftResetReason={attempt.reason} />;
+}
+
+function RegisterForm({
   onNavigateToHome,
   onNavigateToSignIn,
   onNavigateToRegisterOTP,
   onNavigateToOwnerRegister,
+  onResetDraft,
+  draftResetReason,
 }) {
   // Form fields
-  const [form, setForm] = useState({
+  const [isLoading, setIsLoading] = useState(false);
+  const draft = useRegistrationDraft("user", {
     firstName: "", lastName: "", email: "", phone: "",
     dateOfBirth: "", gender: "",
     region: "", province: "", city: "", barangay: "",
     emergencyContactName: "", emergencyContactPhone: "", emergencyContactRelationship: "",
     password: "", confirmPassword: "", agree: false,
-  });
+  }, { busy: isLoading, onReset: onResetDraft, resetReason: draftResetReason });
+  const { form, setForm } = draft;
+  const { check: checkEmail, cancel: cancelEmailCheck, isChecking: isCheckingEmail } = useRegistrationEmailCheck();
 
   const [accountType, setAccountType] = useState("user");
   const [regions, setRegions] = useState([]);
@@ -143,7 +157,6 @@ export default function RegisterPage({
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
   const [stepErrors, setStepErrors] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
   const [rateLimitUntil, setRateLimitUntil] = useState(() => readStoredRateLimitUntil());
   const [rateLimitSeconds, setRateLimitSeconds] = useState(() =>
     getRemainingRateLimitSeconds(readStoredRateLimitUntil())
@@ -270,8 +283,6 @@ export default function RegisterPage({
         if (!active) return;
 
         setProvinces(provinceList);
-        setCities([]);
-        setBarangays([]);
 
         if (provinceList.length === 0) {
           const cityResponse = await fetch(
@@ -318,7 +329,6 @@ export default function RegisterPage({
         const data = await response.json();
         if (!active) return;
         setCities(Array.isArray(data) ? data : []);
-        setBarangays([]);
       } catch {
         if (!active) return;
         setCities([]);
@@ -429,6 +439,7 @@ export default function RegisterPage({
   );
 
   const handleChange = (field, value) => {
+    if (field === "email") cancelEmailCheck();
     const nextForm = { ...form, [field]: value };
     setForm(nextForm);
     setFormError("");
@@ -582,6 +593,7 @@ export default function RegisterPage({
 
   const openCamera = async () => {
     if (!canAct()) return;
+    setIsLoading(true);
     setCamError(""); setCamInfo("");
     setKycUi((p) => ({ ...p, showCamera: true, statusText: "Initializing camera..." }));
     try {
@@ -614,10 +626,13 @@ export default function RegisterPage({
       if (name === "NotFoundError") msg = "No camera was found on your device.";
       setCamError(msg);
       closeCamera();
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const switchCamera = async (deviceId) => {
+    setIsLoading(true);
     setSelectedDeviceId(deviceId);
     setCamError(""); setCamInfo("");
     try {
@@ -634,6 +649,8 @@ export default function RegisterPage({
       setCamInfo(`${label} | ${settings.width || "?"}x${settings.height || "?"}`);
     } catch {
       setCamError("Failed to switch camera. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -724,10 +741,29 @@ export default function RegisterPage({
 
   // Step navigation
 
-  const goNext = () => {
+  const goNext = async () => {
     if (!canAct()) return;
     setSuccessMessage("");
-    if (step === 1) { if (!validateStep1()) return; setStep(2); return; }
+    if (step === 1) {
+      if (!validateStep1()) return;
+      setFormError("");
+      setIsLoading(true);
+      try {
+        const result = await checkEmail(form.email);
+        if (!result) return;
+        if (result.available) {
+          setStep(2);
+        } else if (result.fieldError) {
+          setErrors((previous) => ({ ...previous, email: result.message }));
+          setTimeout(() => emailRef.current?.focus(), 0);
+        } else {
+          setFormError(result.message);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
     if (step === 2) { if (!validateStep2()) return; setStep(3); return; }
   };
 
@@ -881,6 +917,7 @@ export default function RegisterPage({
         preKycToken,
       });
       const registeredEmail = String(response?.user?.email || form.email || "").trim().toLowerCase();
+      draft.complete();
       setSuccessMessage(response?.message || "Registration successful! Redirecting to OTP verification...");
       clearRateLimit();
       await API.sendOTP(registeredEmail).catch(() => {});
@@ -1066,7 +1103,7 @@ export default function RegisterPage({
       contentMaxWidth="max-w-4xl"
       contentContainerClassName="items-start py-2 sm:py-4"
     >
-      <div className="rp-surface rp-glass rounded-[28px] border-white/70 p-6 shadow-[0_20px_45px_rgba(15,23,42,0.12)] sm:p-8">
+      <div {...draft.activityProps} className="rp-surface rp-glass rounded-[28px] border-white/70 p-6 shadow-[0_20px_45px_rgba(15,23,42,0.12)] sm:p-8">
         {/* header */}
         <div className="mb-6 text-center">
           <span className="rp-chip bg-blue-50 text-blue-700 ring-1 ring-blue-100">Register</span>
@@ -1093,6 +1130,8 @@ export default function RegisterPage({
                 ))}
         </div>
 
+        <RegistrationDraftNotice draft={draft} busy={isLoading} />
+
         {/* success message */}
         {successMessage && (
           <div className="mb-5 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -1103,7 +1142,12 @@ export default function RegisterPage({
           </div>
         )}
 
-        <form onSubmit={handleFinalRegister} className="space-y-4" noValidate>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          if (step < TOTAL_STEPS) void goNext();
+          else void handleFinalRegister(event);
+        }} className="space-y-4" noValidate>
+          {isCheckingEmail && <p role="status" className="sr-only">Checking email availability.</p>}
           {formError && (
             <div
               role="alert"
@@ -1479,6 +1523,8 @@ export default function RegisterPage({
                       className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
                       {isRateLimited ? (
                         `Try again in ${formatCountdown(rateLimitSeconds)}`
+                      ) : isCheckingEmail ? (
+                        <><Loader size={18} className="animate-spin" aria-hidden="true" /> Checking email...</>
                       ) : (
                         <>
                           Next <ArrowRight size={18} />
@@ -1528,6 +1574,3 @@ export default function RegisterPage({
     </AuthShell>
   );
 }
-
-
-

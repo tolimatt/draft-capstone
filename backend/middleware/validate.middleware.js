@@ -61,6 +61,25 @@ const getAgeFromDate = (birthDate, today) => {
   return age;
 };
 
+const registrationEmailError = (email) => {
+  if (!email || typeof email !== "string") return "Email is required.";
+  if (/\s/.test(email.trim())) return "Email must not contain spaces.";
+  if (EMOJI_REGEX.test(email)) return "Email must not contain emoji.";
+  if (email.trim().length > MAX_EMAIL_LENGTH) return `Email is too long (max ${MAX_EMAIL_LENGTH} characters).`;
+  if (!EMAIL_REGEX.test(email.trim())) return "Enter a valid email address.";
+  if (!ALLOWED_EMAIL_DOMAINS.has(email.trim().split("@")[1].toLowerCase())) {
+    return "Please use a valid email address from a supported provider.";
+  }
+  return "";
+};
+
+export const validateRegistrationEmail = (req, res, next) => {
+  const message = registrationEmailError(req.body?.email);
+  if (message) return res.status(400).json({ success: false, message, errors: { email: message } });
+  req.body.email = req.body.email.trim().toLowerCase();
+  next();
+};
+
 // Validate register input
 export const validateRegister = (req, res, next) => {
   const { name, email, password } = req.body;
@@ -90,19 +109,8 @@ export const validateRegister = (req, res, next) => {
   else if (name.trim().length > 100) errors.name = "Name is too long (max 100 characters).";
 
   // Email rules
-  if (!email || typeof email !== "string") errors.email = "Email is required.";
-  else if (/\s/.test(email.trim())) errors.email = "Email must not contain spaces.";
-  else if (EMOJI_REGEX.test(email)) errors.email = "Email must not contain emoji.";
-  else if (email.trim().length > MAX_EMAIL_LENGTH)
-    errors.email = `Email is too long (max ${MAX_EMAIL_LENGTH} characters).`;
-  else if (!EMAIL_REGEX.test(email.trim())) errors.email = "Enter a valid email address.";
-
-  if (!errors.email) {
-    const emailDomain = String(email || "").trim().split("@")[1]?.toLowerCase() || "";
-    if (!ALLOWED_EMAIL_DOMAINS.has(emailDomain)) {
-      errors.email = "Please use a valid email address from a supported provider.";
-    }
-  }
+  const emailError = registrationEmailError(email);
+  if (emailError) errors.email = emailError;
 
   // Password rules
   if (!password) errors.password = "Password is required.";

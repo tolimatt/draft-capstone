@@ -33,6 +33,8 @@ const skipForSignedIn = (req) => hasValidSessionToken(req);
 const skipForAuthLimiter = async (req) => {
   const path = String(req.path || "").trim().toLowerCase();
   if (path === "/login-challenge") return true;
+  // Availability has its own IP limiter; it must not consume the email's login budget.
+  if (path === "/check-registration-email") return true;
   return skipForSignedIn(req);
 };
 
@@ -137,6 +139,12 @@ export const registerLimiter = createLimiter({
   skipSuccessfulRequests: true,
   keyGenerator: keyByEmailOrIp,
   skipCondition: skipForSignedIn,
+});
+
+// Count every availability check by IP, including available addresses and signed-in callers.
+export const registrationEmailLimiter = createLimiter({
+  max: 20,
+  messagePrefix: "Too many email checks.",
 });
 
 // OTP limit

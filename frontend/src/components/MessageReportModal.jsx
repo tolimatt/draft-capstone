@@ -1,74 +1,75 @@
-import { getSessionUser } from "../utils/sessionStore";
-import { useEffect, useState } from "react";
-import { Flag, MessageCircleWarning, TriangleAlert } from "lucide-react";
+import { useRef, useState } from "react";
+import { Flag, MessageCircleWarning } from "lucide-react";
 import API from "../utils/api";
 import { MESSAGE_REPORT_CATEGORY_GROUPS } from "../data/reportCategories";
 import ReportCategorySelect from "./ReportCategorySelect";
 import ReportModalFrame from "./ReportModalFrame";
+import ReportReview from "./ReportReview";
+import ReportSubmissionError from "./ReportSubmissionError";
+import useReportSubmission from "../hooks/useReportSubmission";
+import { getReportCategoryLabel, validateReportCategory } from "../utils/reportValidation";
 
-export default function MessageReportModal({ message, senderName = "this user", onClose, onReported }) {
+export default function MessageReportModal(props) {
+  return props.message ? <MessageReportForm key={props.message._id} {...props} /> : null;
+}
+
+function MessageReportForm({ message, senderName = "this user", onClose, onReported }) {
   const [category, setCategory] = useState("");
-  const [error, setError] = useState("");
-  const [existingReport, setExistingReport] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const categoryRef = useRef(null);
+  const { submitting, error, existingReport, submit } = useReportSubmission();
 
-  useEffect(() => {
-    const onKeyDown = (event) => event.key === "Escape" && !submitting && onClose?.();
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, submitting]);
+  const review = () => {
+    if (submitting) return;
+    const validationError = validateReportCategory(MESSAGE_REPORT_CATEGORY_GROUPS, category);
+    setCategoryError(validationError);
+    if (validationError) { categoryRef.current?.focus(); return; }
+    setReviewing(true);
+  };
 
-  useEffect(() => {
-    setCategory("");
-    setError("");
-    setExistingReport(null);
-  }, [message?._id]);
-
-  if (!message) return null;
-
-  const submit = async (event) => {
-    event.preventDefault();
-    setExistingReport(null);
-    if (!category) {
-      setError("Select why you are reporting this message.");
+  const confirm = () => {
+    if (!reviewing || submitting) return;
+    const validationError = validateReportCategory(MESSAGE_REPORT_CATEGORY_GROUPS, category);
+    if (validationError) {
+      setCategoryError(validationError);
+      setReviewing(false);
       return;
     }
-    setSubmitting(true);
-    setError("");
-    try {
-      const response = await API.reportChatMessage(message._id, category);
-      onReported?.(response.report);
+    void submit(() => API.reportChatMessage(message._id, category), (report) => {
+      onReported?.(report);
       onClose?.();
-    } catch (requestError) {
-      if (requestError.details?.code === "DUPLICATE_REPORT") setExistingReport(requestError.details.reportId || "");
-      setError(requestError.message || "The message could not be reported.");
-    } finally {
-      setSubmitting(false);
-    }
+    });
   };
 
   return (
     <ReportModalFrame
       titleId="message-report-title"
-      title="Report this message"
+      title={reviewing ? "Submit this report?" : "Report this message"}
       subtitle={`Report a message sent by ${senderName}.`}
       headerIcon={<MessageCircleWarning size={24} strokeWidth={2} aria-hidden="true" />}
       submitIcon={<Flag size={18} strokeWidth={2} aria-hidden="true" />}
-      submitLabel="Report message"
       submittingLabel="Reporting..."
       submitting={submitting}
+      reviewing={reviewing}
       onClose={onClose}
-      onSubmit={submit}
+      onBack={() => setReviewing(false)}
+      onSubmit={review}
+      onConfirm={confirm}
     >
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900"><span className="font-semibold">Please be factual.</span> The administrator will review the exact stored message. Reporting does not automatically punish the sender.</div>
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Message being reported</p>
-        <blockquote className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-900">“{message.text}”</blockquote>
-        <p className="mt-2 text-xs text-slate-500">Only this message will be attached to the report. The rest of the conversation is not included.</p>
-      </div>
-      <ReportCategorySelect label="Message violation" placeholder="Select a message-related category" groups={MESSAGE_REPORT_CATEGORY_GROUPS} value={category} onChange={setCategory} disabled={submitting} />
-      {error ? <p role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700"><TriangleAlert size={18} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />{error}</p> : null}
-      {existingReport !== null && <a href={(getSessionUser()?.role === "owner" ? "/owner-dashboard?tab=Reports" : "/reports") + (existingReport ? "#report-" + encodeURIComponent(existingReport) : "")} className="inline-block text-sm font-semibold text-blue-700 underline">View existing report</a>}
+      {reviewing ? (
+        <ReportReview reportedName={senderName} context="Chat message" category={getReportCategoryLabel(MESSAGE_REPORT_CATEGORY_GROUPS, category)} messageText={message.text || ""} />
+      ) : (
+        <>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Message being reported</p>
+            <blockquote className="mt-1.5 max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-slate-900" tabIndex={0}>{message.text}</blockquote>
+            <p className="mt-2 text-xs leading-4 text-slate-500">Only this message is attached, not the conversation.</p>
+          </div>
+          <ReportCategorySelect label="Message violation" placeholder="Select a message-related category" groups={MESSAGE_REPORT_CATEGORY_GROUPS} value={category} onChange={(value) => { setCategory(value); setCategoryError(validateReportCategory(MESSAGE_REPORT_CATEGORY_GROUPS, value)); }} disabled={submitting} error={categoryError} buttonRef={categoryRef} />
+        </>
+      )}
+      <ReportSubmissionError error={error} existingReport={existingReport} />
     </ReportModalFrame>
   );
 }

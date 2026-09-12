@@ -368,6 +368,25 @@ export const getLoginChallenge = async (_req, res) => {
   }
 };
 
+export const checkRegistrationEmail = async (req, res) => {
+  try {
+    // Match final registration: any account with this email reserves it, regardless of role/status.
+    const existing = await User.exists({ email: normalizeEmail(req.body.email) });
+    if (existing) {
+      return sendFieldError(res, 409, "email", "This email is already registered. Please sign in or use another email.", {
+        code: "EMAIL_ALREADY_REGISTERED",
+      });
+    }
+    return res.json({ success: true, available: true });
+  } catch (error) {
+    auditLog.error("AUTH", "Registration email check failed", { detail: error.message });
+    return res.status(503).json({
+      success: false,
+      message: "We couldn't check your email right now. Please try again.",
+    });
+  }
+};
+
 export const registerUser = async (req, res) => {
   try {
     const {

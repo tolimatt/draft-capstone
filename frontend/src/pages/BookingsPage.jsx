@@ -1,3 +1,4 @@
+import VehicleThumbnail from "../components/VehicleThumbnail";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RequestFeedback from "../components/RequestFeedback";
 import { bookingStatusLabel, bookingGuidance } from "../utils/workflowStatus";
@@ -1144,19 +1145,12 @@ export default function BookingsPage({
               Number.isFinite(pickupAtMs) &&
               Date.now() >= pickupAtMs &&
               ["none", "declined"].includes(returnRequestInfo.status);
-            const vehicleImage = resolveAssetUrl(booking.vehicle?.imageUrl || booking.vehicle?.images?.[0] || "");
 
             return (
             <article key={booking._id} className="rp-booking-card group overflow-hidden p-4 sm:p-5">
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 gap-4">
-                  <div className="h-20 w-24 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-100 to-blue-100 shadow-inner sm:h-24 sm:w-32">
-                    {vehicleImage ? (
-                      <img src={vehicleImage} alt={booking.vehicle?.name || "Booked vehicle"} className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-[#017FE6]"><CarFront size={32} strokeWidth={2} aria-hidden="true" /></div>
-                    )}
-                  </div>
+                  <VehicleThumbnail vehicle={booking.vehicle} className="h-20 w-24 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-100 to-blue-100 shadow-inner sm:h-24 sm:w-32" imageClassName="transition duration-300 group-hover:scale-105" />
                   <div className="min-w-0 py-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Rental booking</p>
                     <h2 className="mt-1 truncate text-xl font-bold text-slate-900">{booking.vehicle?.name || "Vehicle"}</h2>

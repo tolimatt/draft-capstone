@@ -1,89 +1,128 @@
-import { getSessionUser } from "../utils/sessionStore";
-import { useEffect, useState } from "react";
-import { TriangleAlert } from "lucide-react";
+import { useRef, useState } from "react";
 import API from "../utils/api";
 import { BOOKING_REPORT_CATEGORY_GROUPS } from "../data/reportCategories";
 import ReportCategorySelect from "./ReportCategorySelect";
 import ReportModalFrame from "./ReportModalFrame";
 import EvidenceFilePicker from "./EvidenceFilePicker";
+import ReportReview from "./ReportReview";
+import ReportSubmissionError from "./ReportSubmissionError";
+import useReportSubmission from "../hooks/useReportSubmission";
 import { validateReportEvidenceFiles } from "../utils/fileValidation";
+import { getReportCategoryLabel, validateReportCategory, validateReportDescription } from "../utils/reportValidation";
 
-export default function ReportIssueModal({ booking, perspective = "renter", onClose, onSubmitted }) {
+export default function ReportIssueModal(props) {
+  return props.booking ? <BookingReportForm key={`${props.booking._id}-${props.perspective || "renter"}`} {...props} /> : null;
+}
+
+function BookingReportForm({ booking, perspective = "renter", onClose, onSubmitted }) {
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState([]);
-  const [error, setError] = useState("");
-  const [existingReport, setExistingReport] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    const onKeyDown = (event) => event.key === "Escape" && !submitting && onClose?.();
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, submitting]);
-
-  useEffect(() => {
-    setCategory("");
-    setDescription("");
-    setFiles([]);
-    setError("");
-    setExistingReport(null);
-  }, [booking?._id, perspective]);
-
-  if (!booking) return null;
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [evidenceError, setEvidenceError] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const categoryRef = useRef(null);
+  const descriptionRef = useRef(null);
+  const evidenceRef = useRef(null);
+  const { submitting, error, existingReport, submit } = useReportSubmission();
   const reportedRole = perspective === "owner" ? "renter" : "owner";
   const reportedName = perspective === "owner"
     ? booking.renter?.name || booking.renter?.email || "this renter"
     : booking.owner?.name || booking.owner?.email || "this owner";
   const categoryGroups = BOOKING_REPORT_CATEGORY_GROUPS[reportedRole] || [];
+  const bookingReference = `#${String(booking._id).slice(-6).toUpperCase()}`;
 
-  const submit = async (event) => {
-    event.preventDefault();
-    setError("");
-    setExistingReport(null);
-    if (!category) return setError("Select the issue that best describes what happened.");
-    if (description.trim().length < 20) return setError("Please provide at least 20 characters of incident details.");
+  const review = () => {
+    if (submitting) return;
+    const nextErrors = {
+      category: validateReportCategory(categoryGroups, category),
+      description: validateReportDescription(description),
+    };
+    setFieldErrors(nextErrors);
+    if (nextErrors.category) { categoryRef.current?.focus(); return; }
+    if (nextErrors.description) { descriptionRef.current?.focus(); return; }
+    if (evidenceError) { evidenceRef.current?.focus(); return; }
     try {
       validateReportEvidenceFiles(files);
     } catch (validationError) {
-      return setError(validationError.message || "The selected evidence files are invalid.");
+      setEvidenceError(validationError.message);
+      evidenceRef.current?.focus();
+      return;
     }
+    setReviewing(true);
+  };
 
-    const formData = new FormData();
-    formData.append("bookingId", booking._id);
-    formData.append("category", category);
-    formData.append("description", description.trim());
-    files.forEach((file) => formData.append("evidence", file));
-    setSubmitting(true);
-    try {
-      const response = await API.createReport(formData);
-      onSubmitted?.(response.report);
-      onClose?.();
-    } catch (requestError) {
-      if (requestError.details?.code === "DUPLICATE_REPORT") setExistingReport(requestError.details.reportId || "");
-      setError(requestError.message || "The report could not be submitted.");
-    } finally {
-      setSubmitting(false);
+  const confirm = () => {
+    if (!reviewing || submitting || evidenceError) return;
+    // Recheck the draft at the final action; the server also validates it.
+    if (validateReportCategory(categoryGroups, category) || validateReportDescription(description)) {
+      setReviewing(false);
+      return;
     }
+    try {
+      validateReportEvidenceFiles(files);
+    } catch (validationError) {
+      setEvidenceError(validationError.message);
+      setReviewing(false);
+      return;
+    }
+    void submit(() => {
+      const formData = new FormData();
+      formData.append("bookingId", booking._id);
+      formData.append("category", category);
+      formData.append("description", description.trim());
+      files.forEach((file) => formData.append("evidence", file));
+      return API.createReport(formData);
+    }, (report) => { onSubmitted?.(report); onClose?.(); });
   };
 
   return (
     <ReportModalFrame
       titleId="report-title"
-      title="Report a booking issue"
-      subtitle={`Report ${reportedName} for booking #${String(booking._id).slice(-6).toUpperCase()}.`}
-      submitLabel="Submit report"
+      title={reviewing ? "Submit this report?" : "Report a booking issue"}
+      subtitle={`Report ${reportedName} for booking ${bookingReference}.`}
       submittingLabel="Submitting..."
       submitting={submitting}
+      reviewing={reviewing}
       onClose={onClose}
-      onSubmit={submit}
+      onBack={() => setReviewing(false)}
+      onSubmit={review}
+      onConfirm={confirm}
     >
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900"><span className="font-semibold">Please be factual.</span> Reports are reviewed by an administrator and do not automatically punish another user.</div>
-      <ReportCategorySelect label="Booking issue" placeholder="Select a booking-related category" groups={categoryGroups} value={category} onChange={setCategory} disabled={submitting} />
-      <label className="block"><span className="mb-1.5 block text-sm font-semibold text-slate-800">Incident details</span><textarea value={description} onChange={(event) => setDescription(event.target.value.slice(0, 3000))} rows={6} placeholder="Explain what happened, when it occurred, and any relevant booking details." className="w-full resize-y rounded-xl border border-slate-300 px-3 py-2.5 text-sm leading-6 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" /><span className="mt-1 block text-right text-xs text-slate-400">{description.length}/3000</span></label>
-      <EvidenceFilePicker files={files} onChange={setFiles} onError={setError} disabled={submitting} />
-      {error ? <p role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700"><TriangleAlert size={18} strokeWidth={2} className="mt-0.5 shrink-0" aria-hidden="true" />{error}</p> : null}
-      {existingReport !== null && <a href={(getSessionUser()?.role === "owner" ? "/owner-dashboard?tab=Reports" : "/reports") + (existingReport ? "#report-" + encodeURIComponent(existingReport) : "")} className="inline-block text-sm font-semibold text-blue-700 underline">View existing report</a>}
+      {reviewing ? (
+        <ReportReview reportedName={reportedName} context={bookingReference} category={getReportCategoryLabel(categoryGroups, category)} description={description.trim()} files={files} />
+      ) : (
+        <>
+          <ReportCategorySelect label="Booking issue" placeholder="Select a booking-related category" groups={categoryGroups} value={category} onChange={(value) => { setCategory(value); setFieldErrors((current) => ({ ...current, category: validateReportCategory(categoryGroups, value) })); }} disabled={submitting} error={fieldErrors.category} buttonRef={categoryRef} />
+          <div>
+            <label htmlFor="report-description" className="mb-1.5 block text-sm font-semibold text-slate-800">Incident details <span className="font-normal text-slate-500">(required)</span></label>
+            <p id="report-description-help" className="mb-1.5 text-xs leading-4 text-slate-500">20–3,000 characters after trimming spaces.</p>
+            <textarea
+              id="report-description"
+              ref={descriptionRef}
+              value={description}
+              disabled={submitting}
+              required
+              maxLength={3000}
+              aria-invalid={Boolean(fieldErrors.description)}
+              aria-describedby={`report-description-help report-description-count${fieldErrors.description ? " report-description-error" : ""}`}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDescription(value);
+                if (fieldErrors.description) setFieldErrors((current) => ({ ...current, description: validateReportDescription(value) }));
+              }}
+              onBlur={() => { if (description) setFieldErrors((current) => ({ ...current, description: validateReportDescription(description) })); }}
+              rows={3}
+              placeholder="Explain what happened and when..."
+              className={`block w-full resize-none rounded-xl border px-3 py-2 text-sm leading-5 outline-none focus:ring-4 ${fieldErrors.description ? "border-rose-500 focus:ring-rose-100" : "border-slate-300 focus:border-blue-500 focus:ring-blue-100"}`}
+            />
+            <span id="report-description-count" className="mt-1 block text-right text-xs text-slate-500">{description.trim().length}/3,000 characters</span>
+            {fieldErrors.description && <p id="report-description-error" role="alert" className="mt-1.5 text-sm text-rose-700">{fieldErrors.description}</p>}
+          </div>
+          <EvidenceFilePicker compact files={files} onChange={setFiles} onError={setEvidenceError} disabled={submitting} buttonRef={evidenceRef} error={evidenceError} />
+        </>
+      )}
+      <ReportSubmissionError error={error} existingReport={existingReport} />
     </ReportModalFrame>
   );
 }

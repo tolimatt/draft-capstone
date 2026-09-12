@@ -449,7 +449,8 @@ const serializeOwnerBooking = (req, booking) => {
           name: vehicle.name,
           location: vehicle.location,
           specs: vehicle.specs || {},
-          imageUrl: images[0] || getImageUrl(req, vehicle.imageUrl),
+          imageUrl: getImageUrl(req, vehicle.imageUrl) || images[0],
+          coverDisplayMode: vehicle.coverDisplayMode || "auto",
           images,
         }
       : null,
@@ -462,7 +463,7 @@ const populateFields = [
   {
     path: "vehicle",
     select:
-      "name location specs images imageUrl dailyRentalRate pricingUnit driverOptionEnabled driverDailyRate",
+      "name location specs images imageUrl coverDisplayMode dailyRentalRate pricingUnit driverOptionEnabled driverDailyRate",
   },
 ];
 

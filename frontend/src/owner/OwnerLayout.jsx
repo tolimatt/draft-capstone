@@ -36,7 +36,7 @@ const normalizeOwnerPage = (value) => {
   return normalized;
 };
 
-export default function OwnerLayout() {
+export default function OwnerLayout({ onLogout }) {
   const [activePage, setActivePage] = useState(() => {
     const tabFromUrl = new URLSearchParams(window.location.search).get("tab");
     if (tabFromUrl) return normalizeOwnerPage(tabFromUrl);
@@ -127,6 +127,7 @@ export default function OwnerLayout() {
         setActivePage={navigateToPage}
         isMobileOpen={isSidebarOpen}
         onCloseMobile={closeSidebar}
+        onLogout={onLogout}
       />
 
       {/* main area */}

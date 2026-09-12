@@ -108,6 +108,9 @@ async function request(endpoint, options = {}) {
 }
 
 const API = {
+  checkRegistrationEmail: (email, { signal } = {}) => request("/auth/check-registration-email", {
+    method: "POST", body: JSON.stringify({ email }), signal, cache: "no-store",
+  }),
   register: (body) => request("/auth/register", { method: "POST", body: JSON.stringify(body) }),
   getLoginChallenge: () => request("/auth/login-challenge", { method: "GET" }),
   login: (body) => request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
@@ -123,10 +126,16 @@ const API = {
     request("/auth/upgrade-to-owner", { method: "POST", body: JSON.stringify(body) }),
 
   logout: async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      await request("/auth/logout", { method: "POST" });
-    } catch {
-      // Clear local data even if logout fails.
+      await request("/auth/logout", { method: "POST", signal: controller.signal });
+    } catch (error) {
+      // An expired session is already signed out. Other failures must be retried
+      // before reloading, or the remaining cookie could restore the same account.
+      if (error.status !== 401) throw error;
+    } finally {
+      clearTimeout(timeout);
     }
     localStorage.removeItem("token");
     sessionStorage.removeItem("token");

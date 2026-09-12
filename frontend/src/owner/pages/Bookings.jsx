@@ -1,10 +1,10 @@
+import VehicleThumbnail from "../../components/VehicleThumbnail";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, CarFront, CircleCheck, CircleX, Clock3, CreditCard, Flag, MapPin, X, Users } from "lucide-react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { getTransactionFee } from "../../utils/fees";
 import { formatDurationMinutes, getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
-import { resolveAssetUrl } from "../../utils/media";
 import ReportIssueModal from "../../components/ReportIssueModal";
 import ModalPortal from "../../components/ModalPortal";
 import OwnerPageHeader from "../components/OwnerPageHeader";
@@ -364,19 +364,12 @@ export default function Bookings() {
           const extensionInfo = getExtensionRequestInfo(booking);
           const returnRequestInfo = getReturnRequestInfo(booking);
           const cancellationInfo = getCancellationRequestInfo(booking);
-          const vehicleImage = resolveAssetUrl(booking.vehicle?.imageUrl || booking.vehicle?.images?.[0] || "");
 
           return (
           <article key={booking._id} className="group overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-100/70 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex min-w-0 gap-4">
-                <div className="h-20 w-24 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-100 to-blue-100 sm:h-24 sm:w-32">
-                  {vehicleImage ? (
-                    <img src={vehicleImage} alt={booking.vehicle?.name || "Vehicle"} className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-[#017FE6]"><CarFront size={32} strokeWidth={2} aria-hidden="true" /></div>
-                  )}
-                </div>
+                <VehicleThumbnail vehicle={booking.vehicle} className="h-20 w-24 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-slate-100 to-blue-100 sm:h-24 sm:w-32" imageClassName="transition duration-300 group-hover:scale-105" />
                 <div className="min-w-0 py-1">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#017FE6]">Booking #{String(booking._id || "").slice(-6).toUpperCase()}</p>
                   <h3 className="mt-1 truncate text-xl font-bold text-slate-900">{booking.vehicle?.name || "Vehicle"}</h3>

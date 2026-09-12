@@ -1,3 +1,4 @@
+import VehicleThumbnail from "../../components/VehicleThumbnail";
 import { CarFront, Eye, SlidersHorizontal, Tags, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 import { EmptyState, FilterSelect, SearchField, StatCard, StatusBadge, TableFooter } from "../components/AdminUI";
@@ -49,7 +50,7 @@ export default function VehiclesView({ vehicles, onView }) {
             <tbody className="divide-y divide-slate-100">
               {filtered.map((vehicle) => (
                 <tr key={vehicle.id || vehicle.plateNumber} className="transition-colors hover:bg-blue-50/30">
-                  <td className="px-4 py-3.5"><div className="flex min-w-[250px] items-center gap-3"><VehicleImage vehicle={vehicle} /><div><p className="text-sm font-semibold text-slate-950">{vehicle.name}</p><p className="mt-1 text-xs text-slate-500">{vehicle.type} <span aria-hidden="true">•</span> {vehicle.seats} seats <span aria-hidden="true">•</span> {vehicle.transmission}</p><p className="mt-0.5 text-xs text-slate-500">{vehicle.fuel}</p></div></div></td>
+                  <td className="px-4 py-3.5"><div className="flex min-w-[250px] items-center gap-3"><VehicleThumbnail vehicle={vehicle} className="h-14 w-20 shrink-0 overflow-hidden rounded-xl" /><div><p className="text-sm font-semibold text-slate-950">{vehicle.name}</p><p className="mt-1 text-xs text-slate-500">{vehicle.type} <span aria-hidden="true">•</span> {vehicle.seats} seats <span aria-hidden="true">•</span> {vehicle.transmission}</p><p className="mt-0.5 text-xs text-slate-500">{vehicle.fuel}</p></div></div></td>
                   <td className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-600">{vehicle.plateNumber}</td>
                   <td className="px-4 py-3.5 text-sm text-slate-600">{vehicle.category}</td>
                   <td className="px-4 py-3.5 text-sm text-slate-600">{vehicle.operator}</td>
@@ -65,15 +66,6 @@ export default function VehiclesView({ vehicles, onView }) {
         </div>
         <TableFooter visible={filtered.length} total={vehicles.length} noun="vehicles" />
       </section>
-    </div>
-  );
-}
-
-function VehicleImage({ vehicle }) {
-  return (
-    <div className="relative flex h-14 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400">
-      <CarFront size={24} strokeWidth={2} aria-hidden="true" />
-      {vehicle.image ? <img src={vehicle.image} alt={vehicle.name} onError={(event) => { event.currentTarget.style.display = "none"; }} className="absolute inset-0 h-full w-full object-cover" /> : null}
     </div>
   );
 }

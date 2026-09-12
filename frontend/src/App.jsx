@@ -30,6 +30,7 @@ const AdminLayout = lazy(() => import("./admin/AdminLayout"));
 import LogoutModal from "./components/LogoutModal";
 import IdleWarningModal from "./components/IdleWarningModal";
 import RenterNotificationsModal from "./components/RenterNotificationsModal";
+import SessionSkeleton from "./components/SessionSkeleton";
 import { disconnectSocket } from "./utils/socket";
 import API from "./utils/api";
 import {
@@ -99,6 +100,9 @@ const buildRouteWithQuery = (path, query = {}) => {
 };
 
 const FLOW_STATE_STORAGE_KEY = "rentifypro:flow-state";
+// Product choice to keep the requested startup skeleton from flashing briefly.
+// This timer runs alongside session restoration, not after the network request.
+const SESSION_SKELETON_MIN_MS = 1000;
 
 const readFlowState = () => {
   try {
@@ -235,6 +239,8 @@ const App = () => {
   const [isOwnerLoggedIn, setIsOwnerLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
   const [isSessionBootstrapping, setIsSessionBootstrapping] = useState(true);
+  const [hasSessionMinimumElapsed, setHasSessionMinimumElapsed] = useState(false);
+  const [logoutState, setLogoutState] = useState({ status: "idle", redirectPage: "home" });
 
   // Logout modal state
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -244,6 +250,7 @@ const App = () => {
   const lastActivityRef = useRef(Date.now());
   const idleDeadlineRef = useRef(0);
   const logoutInProgressRef = useRef(false);
+  const logoutRedirectPageRef = useRef("home");
   const idleWarningOpenRef = useRef(false);
 
   useEffect(() => {
@@ -261,6 +268,9 @@ const App = () => {
     purgeLegacyStorage();
 
     let mounted = true;
+    const minimumTimer = window.setTimeout(() => {
+      setHasSessionMinimumElapsed(true);
+    }, SESSION_SKELETON_MIN_MS);
 
     const bootstrapSession = async () => {
       try {
@@ -324,6 +334,7 @@ const App = () => {
 
     return () => {
       mounted = false;
+      window.clearTimeout(minimumTimer);
     };
   }, []);
 
@@ -553,11 +564,17 @@ const App = () => {
   const performLogout = useCallback(async ({ redirectPage = "home" } = {}) => {
     if (logoutInProgressRef.current) return;
     logoutInProgressRef.current = true;
+    setLogoutState({ status: "pending", redirectPage });
+    setShowLogoutModal(false);
+    setShowIdleWarningModal(false);
+    setShowRenterNotificationsModal(false);
 
     try {
       await API.logout();
     } catch {
-      // Local cleanup still runs below.
+      setLogoutState({ status: "error", redirectPage });
+      logoutInProgressRef.current = false;
+      return;
     }
 
     setShowLogoutModal(false);
@@ -592,8 +609,9 @@ const App = () => {
     setForgotEmail("");
     setForgotResetToken("");
     writeFlowState({});
-    setCurrentPage(redirectPage);
-    logoutInProgressRef.current = false;
+    // A document navigation also discards page-local account data and caches.
+    // Keep the pending screen mounted until the new page takes over.
+    window.location.replace(PAGE_TO_ROUTE[redirectPage] || "/");
   }, []);
 
   const keepSessionActive = useCallback(() => {
@@ -607,13 +625,14 @@ const App = () => {
   }, []);
 
   // Open the logout modal
-  const requestLogout = () => {
+  const requestLogout = (redirectPage = "home") => {
+    logoutRedirectPageRef.current = redirectPage === "signin" ? "signin" : "home";
     setShowLogoutModal(true);
   };
 
   // Finish logout
   const confirmLogout = async () => {
-    await performLogout({ redirectPage: "home" });
+    await performLogout({ redirectPage: logoutRedirectPageRef.current });
   };
 
   const cancelLogout = () => {
@@ -627,7 +646,7 @@ const App = () => {
   useEffect(() => {
     const sessionActive = isLoggedIn || isOwnerLoggedIn;
 
-    if (!sessionActive) {
+    if (!sessionActive || logoutState.status !== "idle") {
       setShowIdleWarningModal(false);
       setIdleCountdownSeconds(0);
       idleDeadlineRef.current = 0;
@@ -681,7 +700,7 @@ const App = () => {
         window.removeEventListener(eventName, markActivity);
       });
     };
-  }, [isLoggedIn, isOwnerLoggedIn, keepSessionActive, performLogout]);
+  }, [isLoggedIn, isOwnerLoggedIn, keepSessionActive, performLogout, logoutState.status]);
 
   // Build initials from the full name
   const buildUserData = (name, email, role) => {
@@ -800,12 +819,34 @@ const App = () => {
     return () => window.clearTimeout(timer);
   }, [currentPage, pendingScrollTarget]);
 
-  if (isSessionBootstrapping) {
+  if (logoutState.status === "error") {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center text-slate-600 text-sm">
-        Restoring your session...
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <div role="alert">
+            <h1 className="text-xl font-bold text-slate-900">Sign-out could not finish</h1>
+            <p className="mt-3 text-sm text-slate-600">
+              Check your connection and try again to finish signing out securely.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rp-btn-primary mt-6 w-full py-3"
+            onClick={() => performLogout({ redirectPage: logoutState.redirectPage })}
+          >
+            Retry sign out
+          </button>
+        </div>
+      </main>
     );
+  }
+
+  if (logoutState.status === "pending") {
+    return <SessionSkeleton label="Signing out" />;
+  }
+
+  if (isSessionBootstrapping || !hasSessionMinimumElapsed) {
+    return <SessionSkeleton />;
   }
 
   return (
@@ -832,7 +873,7 @@ const App = () => {
         onViewAllNotifications={handleViewAllRenterNotifications}
       />
 
-      <Suspense fallback={null}>
+      <Suspense fallback={<SessionSkeleton />}>
 
       {/* home */}
       {currentPage === "home" && (
@@ -1243,7 +1284,9 @@ const App = () => {
       )}
 
       {/* owner dashboard */}
-      {currentPage === "owner-dashboard" && isOwnerLoggedIn && <OwnerLayout />}
+      {currentPage === "owner-dashboard" && isOwnerLoggedIn && (
+        <OwnerLayout onLogout={() => requestLogout("signin")} />
+      )}
 
       {/* admin dashboard */}
       {currentPage === "admin-dashboard" && isLoggedIn && user?.role === "admin" && (

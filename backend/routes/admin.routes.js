@@ -80,6 +80,7 @@ const mapVehicle = (vehicle, ownerNames) => {
   return {
     id: vehicle._id.toString(),
     name: asText(vehicle.name, "Unnamed vehicle"),
+    coverDisplayMode: vehicle.coverDisplayMode || "auto",
     image: imageReference ? `/api/admin/vehicles/${vehicle._id.toString()}/image` : "",
     plateNumber: asText(specs.plateNumber, "—"),
     type: asText(specs.type, "Vehicle"),
@@ -211,7 +212,7 @@ router.get("/data", async (_request, response, next) => {
           projection: { name: 1, email: 1, phone: 1, role: 1, isVerified: 1, kycStatus: 1, isDisabled: 1, isArchived: 1, disabledUntil: 1, moderationRestrictions: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("vehicles").find({}, {
-          projection: { owner: 1, name: 1, dailyRentalRate: 1, pricingUnit: 1, location: 1, availabilityStatus: 1, images: 1, imageUrl: 1, driverOptionEnabled: 1, specs: 1, createdAt: 1 },
+          projection: { owner: 1, name: 1, coverDisplayMode: 1, dailyRentalRate: 1, pricingUnit: 1, location: 1, availabilityStatus: 1, images: 1, imageUrl: 1, driverOptionEnabled: 1, specs: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("prekycdocuments").find({}, {
           projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, fileHash: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },

@@ -588,7 +588,8 @@ const serializeBooking = (req, booking) => {
           }),
           specs: vehicle.specs || {},
           images,
-          imageUrl: images[0] || getImageUrl(req, vehicle.imageUrl),
+          imageUrl: getImageUrl(req, vehicle.imageUrl) || images[0],
+          coverDisplayMode: vehicle.coverDisplayMode || "auto",
         }
       : null,
     owner: booking.owner || null,
@@ -600,7 +601,7 @@ const bookingPopulate = [
   {
     path: "vehicle",
     select:
-      "name description location images imageUrl dailyRentalRate pricingUnit driverOptionEnabled driverDailyRate specs owner",
+      "name description location images imageUrl coverDisplayMode dailyRentalRate pricingUnit driverOptionEnabled driverDailyRate specs owner",
   },
   { path: "owner", select: "name email avatar role" },
   { path: "renter", select: "name email avatar role" },

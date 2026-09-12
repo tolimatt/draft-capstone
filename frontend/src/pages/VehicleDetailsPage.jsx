@@ -34,13 +34,13 @@ import {
   sanitizeBookingRange,
 } from "../utils/dateUtils";
 import {
-  DEFAULT_VEHICLE_IMAGE,
   getVehicleGalleryImages,
   resolveAssetUrl,
 } from "../utils/media";
 import { getTransactionFee } from "../utils/fees";
 import { formatVehicleTypeLabel } from "../utils/vehicleText";
 import VehicleCover from "../components/VehicleCover";
+import VehicleThumbnail from "../components/VehicleThumbnail";
 const DOWNPAYMENT_RATE = 0.3;
 const money = (value) => `P${Number(value || 0).toLocaleString()}`;
 const moneyWithCents = (value) =>
@@ -469,13 +469,11 @@ export default function VehicleDetailsPage({
                           : "border-slate-200 hover:border-slate-300"
                       }`}
                     >
-                      <img
+                      <VehicleThumbnail
+                        vehicle={currentVehicle}
                         src={image}
                         alt={`Vehicle preview ${index + 1}`}
-                        className="h-16 w-full object-cover sm:h-[4.5rem]"
-                        onError={(event) => {
-                          event.currentTarget.src = DEFAULT_VEHICLE_IMAGE;
-                        }}
+                        className="h-16 w-full sm:h-[4.5rem]"
                       />
                     </button>
                   ))}

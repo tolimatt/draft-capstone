@@ -36,6 +36,9 @@ import {
 } from "../utils/kycApi";
 import AuthShell from "../components/AuthShell";
 import LegalPolicyModal from "../components/LegalPolicyModal";
+import RegistrationDraftNotice from "../components/RegistrationDraftNotice";
+import useRegistrationDraft from "../hooks/useRegistrationDraft";
+import useRegistrationEmailCheck from "../hooks/useRegistrationEmailCheck";
 import API from "../utils/api";
 import { ALLOWED_EMAIL_DOMAINS, NAME_REGEX } from "../data/registerValidation";
 import { ID_DOCUMENT_TYPES, SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
@@ -133,13 +136,26 @@ function validateOwnerPassword(value) {
   return "";
 }
 
-export default function RegisterOwnerPage({
+export default function RegisterOwnerPage(props) {
+  const [attempt, setAttempt] = useState({ key: 0, reason: "" });
+  const resetDraft = useCallback((reason) => setAttempt((previous) => ({ key: previous.key + 1, reason })), []);
+  return <RegisterOwnerForm key={attempt.key} {...props} onResetDraft={resetDraft} draftResetReason={attempt.reason} />;
+}
+
+function RegisterOwnerForm({
   onBack,
   onNavigateToSignIn,
   onNavigateToHome,
   onNavigateToRegisterOTP,
+  onResetDraft,
+  draftResetReason,
 }) {
-  const [form, setForm] = useState(initialForm);
+  const [isLoading, setIsLoading] = useState(false);
+  const draft = useRegistrationDraft("owner", initialForm, {
+    busy: isLoading, onReset: onResetDraft, resetReason: draftResetReason,
+  });
+  const { form, setForm } = draft;
+  const { check: checkEmail, cancel: cancelEmailCheck, isChecking: isCheckingEmail } = useRegistrationEmailCheck();
   const [files, setFiles] = useState(initialFiles);
   const [kyc, setKyc] = useState(initialKyc);
   const [supportingDocType, setSupportingDocType] = useState("");
@@ -149,7 +165,6 @@ export default function RegisterOwnerPage({
   const [errors, setErrors] = useState({});
   const [touchedStep1, setTouchedStep1] = useState({});
   const [stepErrors, setStepErrors] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [formError, setFormError] = useState("");
   const [legalModalType, setLegalModalType] = useState("");
@@ -170,6 +185,7 @@ export default function RegisterOwnerPage({
 
   const videoRef = useRef(null);
   const idInputRef = useRef(null);
+  const emailRef = useRef(null);
   const lastActionRef = useRef(0);
 
   const fullName = useMemo(
@@ -179,11 +195,12 @@ export default function RegisterOwnerPage({
   const canShowBusinessFields = useMemo(() => form.ownerType === "business", [form.ownerType]);
 
   const canAct = useCallback(() => {
+    if (isLoading) return false;
     const now = Date.now();
     if (now - lastActionRef.current < ACTION_COOLDOWN_MS) return false;
     lastActionRef.current = now;
     return true;
-  }, []);
+  }, [isLoading]);
 
   const closeCamera = useCallback(() => {
     try {
@@ -251,8 +268,6 @@ export default function RegisterOwnerPage({
         if (!active) return;
 
         setProvinces(provinceList);
-        setCities([]);
-        setBarangays([]);
 
         if (provinceList.length === 0) {
           const cityRes = await fetch(`${PSGC_BASE_URL}/regions/${form.region}/cities-municipalities/`);
@@ -292,7 +307,6 @@ export default function RegisterOwnerPage({
         const data = await res.json();
         if (!active) return;
         setCities(Array.isArray(data) ? data : []);
-        setBarangays([]);
       } catch {
         if (!active) return;
         setCities([]);
@@ -431,6 +445,7 @@ export default function RegisterOwnerPage({
     cities,
     barangays,
     validateStep1Field,
+    setForm,
   ]);
 
   const handleStep1Blur = useCallback(
@@ -451,6 +466,7 @@ export default function RegisterOwnerPage({
   const handleChange = useCallback(
     (e) => {
       const { name, value, type, checked } = e.target;
+      if (name === "businessEmail") cancelEmailCheck();
       const normalizedPhone = name === "phone" ? normalizePhMobileInput(value) : value;
       const nextValue =
         name === "businessEmail"
@@ -484,7 +500,7 @@ export default function RegisterOwnerPage({
         setKycUi((prev) => ({ ...prev, statusText: "" }));
       }
     },
-    [form, step]
+    [form, step, setForm, cancelEmailCheck]
   );
 
   const handleRegionChange = useCallback((e) => {
@@ -514,7 +530,7 @@ export default function RegisterOwnerPage({
       barangay: "",
       address: "",
     }));
-  }, [form]);
+  }, [form, setForm]);
 
   const handleProvinceChange = useCallback((e) => {
     const province = e.target.value;
@@ -540,7 +556,7 @@ export default function RegisterOwnerPage({
       barangay: "",
       address: "",
     }));
-  }, [form]);
+  }, [form, setForm]);
 
   const handleCityChange = useCallback((e) => {
     const city = e.target.value;
@@ -563,7 +579,7 @@ export default function RegisterOwnerPage({
       barangay: "",
       address: "",
     }));
-  }, [form]);
+  }, [form, setForm]);
 
   const handleBarangayChange = useCallback((e) => {
     const barangay = e.target.value;
@@ -583,7 +599,7 @@ export default function RegisterOwnerPage({
       barangay: "",
       address: "",
     }));
-  }, [form]);
+  }, [form, setForm]);
 
   const handleOwnerTypeSelect = useCallback(
     (type) => {
@@ -600,7 +616,7 @@ export default function RegisterOwnerPage({
       }));
       setSupportingDocStatus({ submitted: false, message: "" });
     },
-    [form]
+    [form, setForm]
   );
 
   const handleFile = useCallback(async (e) => {
@@ -791,7 +807,26 @@ export default function RegisterOwnerPage({
   const goNext = async () => {
     if (!canAct()) return;
     setSuccessMessage("");
-    if (step === 1 && !validateStep1()) return;
+    if (step === 1) {
+      if (!validateStep1()) return;
+      setFormError("");
+      setIsLoading(true);
+      try {
+        const result = await checkEmail(form.businessEmail);
+        if (!result) return;
+        if (result.available) {
+          setStep(2);
+        } else if (result.fieldError) {
+          setErrors((previous) => ({ ...previous, businessEmail: result.message }));
+          setTimeout(() => emailRef.current?.focus(), 0);
+        } else {
+          setFormError(result.message);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
     if (step === 2) {
       if (!validateStep2()) return;
       const verified = await verifySupportingDoc();
@@ -862,6 +897,7 @@ export default function RegisterOwnerPage({
 
   const openCamera = async () => {
     if (!canAct()) return;
+    setIsLoading(true);
     setCamError("");
     setCamInfo("");
     setKycUi((prev) => ({ ...prev, showCamera: true, statusText: "Initializing camera..." }));
@@ -896,10 +932,13 @@ export default function RegisterOwnerPage({
       if (name === "NotFoundError") message = "No camera found on this device.";
       setCamError(message);
       closeCamera();
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const switchCamera = async (deviceId) => {
+    setIsLoading(true);
     setSelectedDeviceId(deviceId);
     setCamError("");
     setCamInfo("");
@@ -917,6 +956,8 @@ export default function RegisterOwnerPage({
       setCamInfo(`${label} | ${settings.width || "?"}x${settings.height || "?"}`);
     } catch {
       setCamError("Failed to switch camera. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1013,6 +1054,7 @@ export default function RegisterOwnerPage({
       });
 
       const registeredEmail = String(response?.user?.email || form.businessEmail || "").trim().toLowerCase();
+      draft.complete();
       setSuccessMessage(response?.message || "Registration successful. Redirecting to OTP verification...");
       await API.sendOTP(registeredEmail).catch(() => {});
       setTimeout(() => onNavigateToRegisterOTP(registeredEmail, form.phone, fullName), 1200);
@@ -1080,7 +1122,7 @@ export default function RegisterOwnerPage({
       contentMaxWidth="max-w-4xl"
       contentContainerClassName="items-start py-2 sm:py-4"
     >
-      <div className="rp-surface rp-glass rounded-[28px] border-white/70 p-6 shadow-[0_20px_45px_rgba(15,23,42,0.12)] sm:p-8">
+      <div {...draft.activityProps} className="rp-surface rp-glass rounded-[28px] border-white/70 p-6 shadow-[0_20px_45px_rgba(15,23,42,0.12)] sm:p-8">
         <div className="mt-5 text-center">
           <span className="rp-chip bg-blue-50 text-blue-700 ring-1 ring-blue-100">Register</span>
           <h2 className="mt-3 text-3xl font-extrabold text-slate-900 sm:text-4xl">Create your account</h2>
@@ -1101,13 +1143,20 @@ export default function RegisterOwnerPage({
           ))}
         </div>
 
+        <RegistrationDraftNotice draft={draft} busy={isLoading} />
+
         {successMessage && (
           <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 flex items-center gap-2">
             <CircleCheck size={16} strokeWidth={2} aria-hidden="true" /> {successMessage}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          if (step < TOTAL_STEPS) void goNext();
+          else void handleSubmit(event);
+        }} className="space-y-4" noValidate>
+          {isCheckingEmail && <p role="status" className="sr-only">Checking email availability.</p>}
           {formError && (
             <div
               role="alert"
@@ -1117,6 +1166,7 @@ export default function RegisterOwnerPage({
             </div>
           )}
 
+          <fieldset disabled={isLoading} className="min-w-0 space-y-4">
           {step === 1 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
@@ -1179,6 +1229,7 @@ export default function RegisterOwnerPage({
                   label="Enter Email"
                   type="email"
                   name="businessEmail"
+                  inputRef={emailRef}
                   value={form.businessEmail}
                   onChange={handleChange}
                   onBlur={() => handleStep1Blur("businessEmail")}
@@ -1587,7 +1638,7 @@ export default function RegisterOwnerPage({
             </button>
             {step < TOTAL_STEPS ? (
               <button type="button" onClick={goNext} disabled={isLoading} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
-                Next <ArrowRight size={18} />
+                {isCheckingEmail ? <><Loader size={18} className="animate-spin" aria-hidden="true" /> Checking email...</> : <>Next <ArrowRight size={18} /></>}
               </button>
             ) : (
               <button type="submit" disabled={isLoading} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
@@ -1604,6 +1655,7 @@ export default function RegisterOwnerPage({
               </button>
             </p>
           )}
+          </fieldset>
         </form>
       </div>
       <LegalPolicyModal
@@ -1633,6 +1685,7 @@ function Field({
   maxLength,
   prefixText = "",
   onBlur,
+  inputRef,
 }) {
   const handleInputChange = (e) => {
     let nextValue = e.target.value;
@@ -1675,6 +1728,7 @@ function Field({
           </span>
         ) : null}
         <input
+          ref={inputRef}
           type={type}
           name={name}
           value={value}

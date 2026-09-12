@@ -17,14 +17,11 @@ import {
   ChevronRight,
   X,
 } from "lucide-react";
-import LogoutModal from "../../components/LogoutModal";
 import { getOwnerProfileFromStorage } from "../utils/ownerProfile";
 import API from "../../utils/api";
-import { disconnectSocket, getSocket } from "../../utils/socket";
+import { getSocket } from "../../utils/socket";
 import {
   SESSION_OWNER_PROFILE_UPDATED_EVENT,
-  clearSessionOwnerProfile,
-  clearSessionUser,
 } from "../../utils/sessionStore";
 import { LIVE_COUNTERS_REFRESH_EVENT } from "../../utils/liveCounters";
 import "./Sidebar.css";
@@ -36,9 +33,9 @@ function Sidebar({
   setActivePage,
   isMobileOpen = false,
   onCloseMobile,
+  onLogout,
 }) {
   const [owner, setOwner] = useState(() => getOwnerProfileFromStorage());
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const sidebarRef = useRef(null);
 
@@ -163,38 +160,12 @@ function Sidebar({
   ];
 
   const openLogoutModal = () => {
-    setIsLogoutModalOpen(true);
     onCloseMobile?.();
-  };
-
-  const closeLogoutModal = () => {
-    setIsLogoutModalOpen(false);
-  };
-
-  const handleLogout = async () => {
-    setIsLogoutModalOpen(false);
-    try {
-      await API.logout();
-    } catch {
-      // Continue local cleanup even if the request fails.
-    }
-    disconnectSocket();
-    clearSessionOwnerProfile();
-    clearSessionUser();
-    localStorage.removeItem("isNewOwner");
-    localStorage.removeItem("token");
-    sessionStorage.removeItem("token");
-    window.location.href = "/signin";
+    onLogout?.();
   };
 
   return (
     <>
-      <LogoutModal
-        isOpen={isLogoutModalOpen}
-        onCancel={closeLogoutModal}
-        onConfirm={handleLogout}
-      />
-
       <aside
         ref={sidebarRef}
         id="owner-navigation"
