@@ -24,6 +24,24 @@ export const RELATIONSHIP_OPTIONS = [
 ];
 
 const MIN_RENTER_AGE = 18;
+const MAX_RENTER_AGE = 100;
+
+export const getMinBirthDate = (today = new Date()) => {
+  const year = today.getFullYear() - MAX_RENTER_AGE - 1;
+  const month = today.getMonth();
+  const day = Math.min(today.getDate(), new Date(year, month + 1, 0).getDate());
+  // Age 100 is allowed until the day before the 101st birthday.
+  const earliest = new Date(year, month, day + 1);
+  return `${earliest.getFullYear()}-${String(earliest.getMonth() + 1).padStart(2, "0")}-${String(earliest.getDate()).padStart(2, "0")}`;
+};
+
+export const getMaxBirthDate = (today = new Date()) => {
+  const year = today.getFullYear() - MIN_RENTER_AGE;
+  const month = today.getMonth();
+  // Clamp February 29 when the cutoff year is not a leap year.
+  const day = Math.min(today.getDate(), new Date(year, month + 1, 0).getDate());
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
 
 const parseDateInput = (value) => {
   const clean = String(value || "").trim();
@@ -96,15 +114,14 @@ export const VALIDATION_RULES = {
     if (value.length > 10) return "Phone number is too long (max 10 digits).";
     return "";
   },
-  dateOfBirth: (value) => {
+  dateOfBirth: (value, today = new Date()) => {
     if (!value) return "Date of birth is required.";
     const parsed = parseDateInput(value);
     if (!parsed) return "Please enter a valid date of birth.";
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     if (parsed > today) return "Date of birth cannot be in the future.";
     const age = getAgeFromDate(parsed, today);
     if (age < MIN_RENTER_AGE) return "Looks like you're under 18. RentifyPro accounts are for ages 18+.";
+    if (age > MAX_RENTER_AGE) return "Registration is available for ages 18 to 100.";
     return "";
   },
   gender: (value) => {

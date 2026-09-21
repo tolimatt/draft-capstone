@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   CarFront,
   Search,
+  X,
 } from "lucide-react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
@@ -11,6 +12,7 @@ import VehiclePreviewModal from "../components/VehiclePreviewModal";
 import { sanitizeBookingRange } from "../utils/dateUtils";
 import VehicleCard from "../components/VehicleCard";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
+import { matchesLocationSearch, validateLocationSearch } from "../utils/locationSearch";
 
 const normalizeVehicleType = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -118,6 +120,7 @@ export default function VehiclesPage({
   const [showBookingAccessModal, setShowBookingAccessModal] = useState(false);
   const [previewVehicle, setPreviewVehicle] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [locationFilter, setLocationFilter] = useState(() => String(bookingData.location || "").trim());
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState(
     normalizeVehicleType(bookingData.vehicleType || "")
   );
@@ -144,11 +147,15 @@ export default function VehiclesPage({
   const combinedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
 
   useEffect(() => {
-    if (searchValidationError) {
+    setVehicles([]);
+    const locationError = validateLocationSearch(locationFilter);
+    if (searchValidationError || locationError) {
+      setError(locationError || searchValidationError);
       setLoading(false);
       return undefined;
     }
-
+    setLoading(true);
+    setError("");
     let isActive = true;
     const timeoutId = window.setTimeout(async () => {
       setLoading(true);
@@ -157,6 +164,7 @@ export default function VehiclesPage({
       try {
         const response = await API.getPublicVehicles({
           search: combinedSearch,
+          location: locationFilter,
           vehicleType: vehicleTypeFilter,
           page: 1,
           limit: 24,
@@ -165,7 +173,7 @@ export default function VehiclesPage({
         if (!isActive) return;
         const availableVehicles = (response.vehicles || [])
           .map(normalizeVehicle)
-          .filter((vehicle) => vehicle.available);
+          .filter((vehicle) => vehicle.available && matchesLocationSearch(vehicle.location, locationFilter));
         setVehicles(availableVehicles);
       } catch (err) {
         if (!isActive) return;
@@ -179,11 +187,17 @@ export default function VehiclesPage({
       isActive = false;
       window.clearTimeout(timeoutId);
     };
-  }, [combinedSearch, searchValidationError, vehicleTypeFilter, reloadSignal]);
+  }, [combinedSearch, locationFilter, searchValidationError, vehicleTypeFilter, reloadSignal]);
+
+  const clearLocationFilter = () => {
+    setLocationFilter("");
+    setBookingData((prev) => ({ ...prev, location: "" }));
+  };
 
   const clearVehicleSearch = () => {
     setSearchQuery("");
     setVehicleTypeFilter("");
+    clearLocationFilter();
   };
 
   const closeBookingAccessModal = () => setShowBookingAccessModal(false);
@@ -312,6 +326,15 @@ export default function VehiclesPage({
                 </div>
               </div>
 
+              {locationFilter && (
+                <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                  <span>Location:</span>
+                  <button type="button" onClick={clearLocationFilter} aria-label={`Remove location filter: ${locationFilter}`} className="rp-btn-secondary max-w-full px-3 py-2 text-sm">
+                    <span className="min-w-0 break-words">{locationFilter}</span>
+                    <X size={16} className="shrink-0" aria-hidden="true" />
+                  </button>
+                </div>
+              )}
               <div className="rp-quick-filters" role="group" aria-label="Quick vehicle type filters">
                 {VEHICLE_TYPE_FILTERS.map((filter) => (
                   <button
@@ -337,9 +360,9 @@ export default function VehiclesPage({
               {!loading && !error && vehicles.length === 0 && (
                 <div className="rp-results-status">
                   <CarFront size={24} />
-                  <strong>No vehicles match your search</strong>
-                  <span>Try another search term or vehicle type.</span>
-                  {(combinedSearch || vehicleTypeFilter) && (
+                  <strong>{locationFilter ? `No available vehicles found in ${locationFilter}` : "No vehicles match your search"}</strong>
+                  <span>Try another location, search term, or vehicle type.</span>
+                  {(combinedSearch || locationFilter || vehicleTypeFilter) && (
                     <button type="button" onClick={clearVehicleSearch}>Clear search</button>
                   )}
                 </div>

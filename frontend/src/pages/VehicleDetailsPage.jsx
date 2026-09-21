@@ -23,6 +23,7 @@ import {
   getDurationHoursFromMinutes,
   formatDurationMinutes,
   getMinPickupDate,
+  getMaxBookingDate,
   getMinPickupDateTime,
   getMinPickupTime,
   getMinReturnDate,
@@ -48,6 +49,32 @@ const moneyWithCents = (value) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+const bookingReference = (bookingId) => `#${String(bookingId || "").slice(-6).toUpperCase()}`;
+const BALANCE_REASON_CODES = new Set([
+  "OVERDUE_BOOKING_BALANCE",
+  "UNPAID_LATE_RETURN_PENALTY",
+]);
+const getCompactEligibilityMessage = (reason) => {
+  if (!reason) return "Booking unavailable. Please review your bookings.";
+
+  const reference = bookingReference(reason.bookingId);
+  switch (reason.code) {
+    case "OVERDUE_VEHICLE_RETURN":
+      return `Booking ${reference}: Return overdue. Resolve it or request an extension.`;
+    case "UNPAID_LATE_RETURN_PENALTY":
+      return `Booking ${reference} · ${moneyWithCents(reason.amountDue)} due, including a late fee`;
+    case "OVERDUE_BOOKING_BALANCE":
+      return `Booking ${reference} · ${moneyWithCents(reason.amountDue)} due`;
+    case "OPEN_BOOKING_LIMIT":
+      return "3 open bookings reached. Complete or cancel one to continue.";
+    case "PENDING_BOOKING_LIMIT":
+      return "2 pending requests reached. Wait or cancel one to continue.";
+    case "RENTER_SCHEDULE_CONFLICT":
+      return "These dates overlap another booking. Choose different dates.";
+    default:
+      return reason.message || "Booking unavailable. Please review your bookings.";
+  }
+};
 const roundCurrency = (value) => {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric)) return 0;
@@ -96,6 +123,8 @@ export default function VehicleDetailsPage({
   const [sortOption, setSortOption] = useState("recent");
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingError, setBookingError] = useState("");
+  const [eligibilityState, setEligibilityState] = useState(null);
+  const [eligibilityRetry, setEligibilityRetry] = useState(0);
   const [bookingSuccess, setBookingSuccess] = useState("");
   const [bookingRequiresKyc, setBookingRequiresKyc] = useState(false);
   const [chatOwnerError, setChatOwnerError] = useState("");
@@ -105,6 +134,37 @@ export default function VehicleDetailsPage({
   const currentVehicle = useMemo(() => vehicleData || vehicle || {}, [vehicleData, vehicle]);
 
   const { pickupDate, pickupTime, returnDate, returnTime } = bookingData;
+  const renterId = user?._id || user?.id || "";
+  const eligibilityKey = `${isLoggedIn}:${renterId}:${pickupDate}:${pickupTime}:${returnDate}:${returnTime}`;
+  const eligibility = eligibilityState?.key === eligibilityKey ? eligibilityState.data : null;
+  const eligibilityError = eligibilityState?.key === eligibilityKey ? eligibilityState.error : "";
+  const balanceReasons = eligibility?.reasons?.filter((reason) => BALANCE_REASON_CODES.has(reason.code)) || [];
+  const firstNonBalanceReason = eligibility?.reasons?.find((reason) => !BALANCE_REASON_CODES.has(reason.code));
+
+  useEffect(() => {
+    if (!isLoggedIn) return undefined;
+    let active = true;
+    const timer = setTimeout(async () => {
+      const pickupAt = getDateTime(pickupDate, pickupTime);
+      const returnAt = getDateTime(returnDate, returnTime);
+      const validRange = pickupAt && returnAt && Number.isFinite(pickupAt.getTime()) && Number.isFinite(returnAt.getTime()) && returnAt > pickupAt && pickupDate <= getMaxBookingDate() && returnDate <= getMaxBookingDate();
+      try {
+        const response = await API.getBookingEligibility(validRange ? {
+          pickupAt: pickupAt.toISOString(), returnAt: returnAt.toISOString(),
+        } : {});
+        if (active) setEligibilityState({ key: eligibilityKey, data: response.eligibility });
+      } catch {
+        if (active) setEligibilityState({ key: eligibilityKey, error: "Unable to check your booking limits. Retry or submit to check again." });
+      }
+    }, 250);
+    const refresh = () => setEligibilityRetry((value) => value + 1);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [isLoggedIn, eligibilityKey, eligibilityRetry, pickupDate, pickupTime, returnDate, returnTime]);
 
   useEffect(() => {
     setVehicleData(vehicle || null);
@@ -174,7 +234,6 @@ export default function VehicleDetailsPage({
   const lateReturnPolicy = currentVehicle?.lateReturnPolicy || {};
   const lateReturnFeeType = lateReturnPolicy.feeType || currentVehicle?.lateReturnFeeType || "percentage";
   const lateReturnFeeValue = Number(lateReturnPolicy.value ?? currentVehicle?.lateReturnFeeValue ?? 25);
-  const lateReturnGraceMinutes = Number(lateReturnPolicy.graceMinutes ?? currentVehicle?.lateReturnGraceMinutes ?? 0);
 
   useEffect(() => {
     if (!driverOptionEnabled && driverSelected) setDriverSelected(false);
@@ -216,12 +275,8 @@ export default function VehicleDetailsPage({
     return [...reviews].sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [reviews, sortOption]);
 
-  const sameDayMinReturnTime = useMemo(() => {
-    if (!pickupDate || !pickupTime) return "";
-    const minReturnDate = getMinReturnDate(pickupDate, pickupTime);
-    if (!minReturnDate || minReturnDate !== pickupDate) return "";
-    return getMinReturnTime(pickupDate, pickupTime);
-  }, [pickupDate, pickupTime]);
+  const minReturnDate = getMinReturnDate(pickupDate, pickupTime);
+  const minReturnTime = getMinReturnTime(pickupDate, pickupTime);
 
   const validateBookingRange = () => {
     const minPickup = getMinPickupDateTime();
@@ -230,6 +285,9 @@ export default function VehicleDetailsPage({
 
     if (!pickup || !dropoff) {
       return "Please provide valid pickup and return date/time.";
+    }
+    if (pickupDate > getMaxBookingDate() || returnDate > getMaxBookingDate()) {
+      return "Pickup and return must be within 6 months from today.";
     }
     if (pickup < minPickup) {
       return "Pickup must be at least 10 minutes from now.";
@@ -289,6 +347,12 @@ export default function VehicleDetailsPage({
       setBookingSuccess("Booking submitted successfully. Redirecting to booking history...");
       setTimeout(() => onNavigateToBookingHistory?.(), 900);
     } catch (error) {
+      if (error?.details?.eligibility) {
+        setEligibilityState({ key: eligibilityKey, data: error.details.eligibility });
+        // Keep policy errors in the refreshable eligibility panel so a verified
+        // payment or date change cannot leave an obsolete submission error.
+        return;
+      }
       if (error?.details?.code === "IDENTITY_VERIFICATION_REQUIRED") {
         setBookingRequiresKyc(true);
         setBookingError(
@@ -353,6 +417,7 @@ export default function VehicleDetailsPage({
   };
 
   const updateBookingRange = (patch) => {
+    setBookingError("");
     setBookingData((prev) => {
       const merged = { ...prev, ...patch };
       return { ...merged, ...sanitizeBookingRange(merged) };
@@ -545,7 +610,7 @@ export default function VehicleDetailsPage({
             <section className="rp-surface p-5 sm:p-6 xl:sticky xl:top-24">
               <h2 className="rp-detail-section-title">Book This Vehicle</h2>
               <p className="rp-detail-section-copy mt-1.5">
-                Choose your dates and review the total before confirming your booking.
+                Choose pickup and return dates within 6 months, then review your total.
               </p>
 
               <div className="mt-5 space-y-5">
@@ -554,13 +619,16 @@ export default function VehicleDetailsPage({
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     <input
                       type="date"
+                      aria-label="Pickup date"
                       value={pickupDate || ""}
                       min={getMinPickupDate()}
+                      max={getMaxBookingDate()}
                       onChange={(event) => updateBookingRange({ pickupDate: event.target.value })}
                       className="rp-input rp-detail-input"
                     />
                     <input
                       type="time"
+                      aria-label="Pickup time"
                       min={pickupDate === getMinPickupDate() ? getMinPickupTime() : undefined}
                       value={pickupTime || ""}
                       onChange={(event) => updateBookingRange({ pickupTime: event.target.value })}
@@ -574,16 +642,19 @@ export default function VehicleDetailsPage({
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     <input
                       type="date"
+                      aria-label="Return date"
                       value={returnDate || ""}
-                      min={pickupDate || getMinPickupDate()}
+                      min={minReturnDate || getMinPickupDate()}
+                      max={getMaxBookingDate()}
                       onChange={(event) => updateBookingRange({ returnDate: event.target.value })}
                       className="rp-input rp-detail-input"
                     />
                     <input
                       type="time"
+                      aria-label="Return time"
                       min={
-                        returnDate === pickupDate && sameDayMinReturnTime
-                          ? sameDayMinReturnTime
+                        returnDate === minReturnDate && minReturnTime
+                          ? minReturnTime
                           : undefined
                       }
                       value={returnTime || ""}
@@ -637,20 +708,45 @@ export default function VehicleDetailsPage({
                   <SummaryRow label="Estimated total" value={moneyWithCents(estimatedTotal)} strong />
                 </div>
 
-                <div className="rp-detail-note flex items-start gap-2 border border-blue-100 bg-blue-50 text-blue-700">
-                  <ShieldCheck size={16} strokeWidth={2} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
-                  <span>
-                    Booking requests are validated with date/time checks and linked to your authenticated account.
-                  </span>
-                </div>
-                <div className="rp-detail-note border border-amber-200 bg-amber-50 text-amber-800">
-                  Late-return policy: {lateReturnFeeType === "fixed_hourly" ? `${moneyWithCents(lateReturnFeeValue)} per overdue hour` : `${lateReturnFeeValue}% of the booked hourly rate`}
-                  {lateReturnGraceMinutes > 0 ? ` after a ${lateReturnGraceMinutes}-minute grace period` : " with no grace period"}.
-                  The policy and hourly penalty are locked when you book. Complete payment within the booked rental duration, or settle via walk-in upon vehicle return.
+                <div className="rp-detail-note border border-slate-200 bg-slate-50 text-slate-700">
+                  <p className="font-semibold text-slate-900">Booking limits</p>
+                  {isLoggedIn && (
+                    <div className="mt-1" role="status" aria-live="polite" aria-atomic="true">
+                      {eligibility ? (
+                        <>
+                          <p>{eligibility.counts.open}/{eligibility.limits.open} open · {eligibility.counts.pending}/{eligibility.limits.pending} pending</p>
+                          {balanceReasons.length > 0 ? (
+                            <>
+                              <p className="mt-2 font-medium text-amber-950">Pay your remaining balance first.</p>
+                              {balanceReasons.map((reason) => (
+                                <p key={`${reason.code}-${reason.bookingId}`} className="mt-1 text-amber-900">
+                                  {getCompactEligibilityMessage(reason)}
+                                </p>
+                              ))}
+                              <button type="button" onClick={onNavigateToBookingHistory} className="mt-2 font-semibold text-blue-700 underline underline-offset-2">View bookings</button>
+                            </>
+                          ) : firstNonBalanceReason ? (
+                            <>
+                              <p className="mt-2 text-amber-900">{getCompactEligibilityMessage(firstNonBalanceReason)}</p>
+                              <button type="button" onClick={onNavigateToBookingHistory} className="mt-2 font-semibold text-blue-700 underline underline-offset-2">View bookings</button>
+                            </>
+                          ) : null}
+                        </>
+                      ) : eligibilityError ? (
+                        <>
+                          <p>{eligibilityError}</p>
+                          <button type="button" onClick={() => setEligibilityRetry((value) => value + 1)} className="mt-2 font-semibold text-blue-700 underline underline-offset-2">Retry check</button>
+                        </>
+                      ) : "Checking limits..."}
+                    </div>
+                  )}
+                  {!isLoggedIn && (
+                    <p className="mt-1">Up to 3 open · Up to 2 pending</p>
+                  )}
                 </div>
 
-                {bookingError && (
-                  <p className="rounded-2xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700">
+                {bookingError && !eligibility?.reasons?.some((reason) => reason.message === bookingError) && (
+                  <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700">
                     {bookingError}
                   </p>
                 )}

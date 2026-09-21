@@ -1,3 +1,4 @@
+import { parseVehicleListing, prepareApprovedVehicleImages } from "../middleware/vehiclePhoto.middleware.js";
 // Owner signup routes
 import express from "express";
 import {
@@ -14,10 +15,6 @@ import {
 } from "../controllers/ownerVehicle.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { authorize, requireKyc } from "../middleware/rbac.middleware.js";
-import {
-  uploadVehicleImages,
-  validateUploadedVehicleImages,
-} from "../middleware/upload.middleware.js";
 import {
   validateBookingStatusUpdate,
   validatePaymentStatusUpdate,
@@ -54,9 +51,9 @@ router.post(
   authorize("owner"),
   requireKyc,
   requireModerationCapability("listing"),
-  uploadVehicleImages,
-  validateUploadedVehicleImages,
+  parseVehicleListing,
   validateVehicleCreate,
+  prepareApprovedVehicleImages,
   createOwnerVehicle
 );
 router.put(
@@ -65,9 +62,9 @@ router.put(
   authorize("owner"),
   validateObjectIdParam("id"),
   requireModerationCapability("listing"),
-  uploadVehicleImages,
-  validateUploadedVehicleImages,
+  parseVehicleListing,
   validateVehicleUpdate,
+  prepareApprovedVehicleImages,
   updateOwnerVehicle
 );
 router.patch(

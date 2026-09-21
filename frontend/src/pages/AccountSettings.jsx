@@ -1679,12 +1679,15 @@ const AccountSettings = ({
                   </div>
 
                   <div className="flex flex-wrap gap-3">
-                    <button
-                      onClick={() => setShowKycStepper((prev) => !prev)}
-                      className="px-4 py-2 rounded-lg border text-sm font-semibold hover:bg-gray-100"
-                    >
-                      {showKycStepper ? "Hide Verification Steps" : kycStatus === "rejected" ? "Resubmit Document" : "Start Verification"}
-                    </button>
+                    {!['approved', 'challenge_passed'].includes(kycStatus) && (
+                      <button
+                        type="button"
+                        onClick={() => setShowKycStepper((prev) => !prev)}
+                        className="px-4 py-2 rounded-lg bg-[#017FE6] text-sm font-semibold text-white hover:bg-[#0165B8]"
+                      >
+                        {showKycStepper ? "Hide verification" : kycStatus === "rejected" ? "Resubmit verification" : "Verify now"}
+                      </button>
+                    )}
                     <button
                       onClick={loadKycStatus}
                       disabled={kycLoading}

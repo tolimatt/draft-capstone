@@ -218,10 +218,17 @@ export default function NotificationsPage({
   const openSelectedBooking = () => {
     try {
       const data = selectedNotification?.data || {};
+      const hasBalanceDue =
+        Number(data.remainingBalance || 0) > 0 ||
+        ["unpaid", "partial"].includes(String(data.paymentStatus || "").toLowerCase());
       sessionStorage.setItem(
         BOOKING_NAVIGATION_STORAGE_KEY,
         JSON.stringify({
-          view: data.feeStatus === "final" ? "history" : "current",
+          view: data.feeStatus === "final" && hasBalanceDue
+            ? "unsettled"
+            : data.feeStatus === "final"
+              ? "history"
+              : "active",
           bookingId: data.bookingId || selectedNotification?.entityId || "",
         })
       );

@@ -37,14 +37,15 @@ import {
 import AuthShell from "../components/AuthShell";
 import LegalPolicyModal from "../components/LegalPolicyModal";
 import RegistrationDraftNotice from "../components/RegistrationDraftNotice";
+import RegistrationProgress from "../components/RegistrationProgress";
 import useRegistrationDraft from "../hooks/useRegistrationDraft";
 import useRegistrationEmailCheck from "../hooks/useRegistrationEmailCheck";
 import API from "../utils/api";
 import { ALLOWED_EMAIL_DOMAINS, NAME_REGEX } from "../data/registerValidation";
 import { ID_DOCUMENT_TYPES, SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
-const TOTAL_STEPS = 4;
-const STEP_LABELS = ["Personal Details", "Account & Documents", "Face Verification", "Review"];
+const STEP_LABELS = ["Account", "Owner profile", "Address", "Business document", "Identity", "Review"];
+const TOTAL_STEPS = STEP_LABELS.length;
 const ACTION_COOLDOWN_MS = 2000;
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 
@@ -160,6 +161,16 @@ function RegisterOwnerForm({
   const [kyc, setKyc] = useState(initialKyc);
   const [supportingDocType, setSupportingDocType] = useState("");
   const [supportingDocStatus, setSupportingDocStatus] = useState({ submitted: false, message: "" });
+  const [documentStatuses, setDocumentStatuses] = useState({ id: "not_uploaded", supporting: "not_uploaded" });
+  const handleDocumentsChange = useCallback((documents) => {
+    const nextStatuses = { id: "not_uploaded", supporting: "not_uploaded" };
+    documents.forEach((document) => {
+      if (document.docType === "id" || document.docType === "supporting") {
+        nextStatuses[document.docType] = document.status;
+      }
+    });
+    setDocumentStatuses(nextStatuses);
+  }, []);
 
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
@@ -177,6 +188,18 @@ function RegisterOwnerForm({
   const [addressLoadError, setAddressLoadError] = useState("");
 
   const [kycUi, setKycUi] = useState({ showCamera: false, statusText: "" });
+  const idPreviewUrl = useMemo(
+    () => (kyc.idCardFile ? URL.createObjectURL(kyc.idCardFile) : ""),
+    [kyc.idCardFile]
+  );
+  const identityStage = !kyc.idRegistered
+    ? "id"
+    : !kyc.selfieBase64Clean
+      ? "camera"
+      : !kyc.selfieVerified
+        ? "selfie"
+        : "complete";
+  const areDocumentsApproved = documentStatuses.id === "verified" && documentStatuses.supporting === "verified";
   const [cameraStream, setCameraStream] = useState(null);
   const [devices, setDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
@@ -225,8 +248,12 @@ function RegisterOwnerForm({
   }, [cameraStream]);
 
   useEffect(() => {
-    if (step !== 3 && kycUi.showCamera) closeCamera();
+    if (step !== 5 && kycUi.showCamera) closeCamera();
   }, [step, kycUi.showCamera, closeCamera]);
+
+  useEffect(() => () => {
+    if (idPreviewUrl) URL.revokeObjectURL(idPreviewUrl);
+  }, [idPreviewUrl]);
 
   useEffect(() => {
     let active = true;
@@ -433,7 +460,7 @@ function RegisterOwnerForm({
 
     const nextForm = { ...form, address: composedAddress };
     setForm((prev) => (prev.address === composedAddress ? prev : nextForm));
-    if (step === 1 && touchedStep1.address) {
+    if (step === 3 && touchedStep1.address) {
       setErrors((prev) => ({ ...prev, address: validateStep1Field("address", nextForm) }));
     }
   }, [
@@ -450,7 +477,7 @@ function RegisterOwnerForm({
 
   const handleStep1Blur = useCallback(
     (field, values = form) => {
-      if (step !== 1) return;
+      if (![1, 2, 3, 6].includes(step)) return;
       if (!touchedStep1[field]) return;
       setErrors((prev) => {
         const next = { ...prev, [field]: validateStep1Field(field, values) };
@@ -477,7 +504,7 @@ function RegisterOwnerForm({
       const nextForm = { ...form, [name]: nextValue };
       setForm(nextForm);
       setFormError("");
-      if (step === 1) {
+      if ([1, 2, 3, 6].includes(step)) {
         setTouchedStep1((prev) => ({ ...prev, [name]: true }));
       }
       setErrors((prev) => ({ ...prev, [name]: "" }));
@@ -668,44 +695,16 @@ function RegisterOwnerForm({
     closeCamera();
   }, [closeCamera]);
 
-  const validateStep1 = useCallback(() => {
-    const fields = [
-      "firstName",
-      "lastName",
-      "businessEmail",
-      "phone",
-      "region",
-      "province",
-      "city",
-      "barangay",
-      "address",
-      "businessName",
-      "permitNumber",
-      "password",
-      "confirmPassword",
-      "agree",
-    ];
+  const validateFields = useCallback((fields) => {
     const next = {};
     for (const field of fields) {
       const message = validateStep1Field(field, form);
       if (message) next[field] = message;
     }
-    setTouchedStep1({
-      firstName: true,
-      lastName: true,
-      businessEmail: true,
-      phone: true,
-      region: true,
-      province: true,
-      city: true,
-      barangay: true,
-      address: true,
-      businessName: true,
-      permitNumber: true,
-      password: true,
-      confirmPassword: true,
-      agree: true,
-    });
+    setTouchedStep1((previous) => ({
+      ...previous,
+      ...Object.fromEntries(fields.map((field) => [field, true])),
+    }));
     setErrors((prev) => {
       const merged = { ...prev };
       for (const field of fields) {
@@ -717,7 +716,21 @@ function RegisterOwnerForm({
     return Object.keys(next).length === 0;
   }, [form, validateStep1Field]);
 
-  const validateStep2 = useCallback(() => {
+  const validateAccountStep = useCallback(
+    () => validateFields(["businessEmail", "phone", "password", "confirmPassword"]),
+    [validateFields]
+  );
+  const validateOwnerProfileStep = useCallback(
+    () => validateFields(["firstName", "lastName", "businessName", "permitNumber"]),
+    [validateFields]
+  );
+  const validateAddressStep = useCallback(
+    () => validateFields(["region", "province", "city", "barangay", "address"]),
+    [validateFields]
+  );
+  const validateReviewStep = useCallback(() => validateFields(["agree"]), [validateFields]);
+
+  const validateSupportingDocumentStep = useCallback(() => {
     const next = {};
     if (!supportingDocType) next.supportingDocType = "Please select a document type.";
     if (!files.supportingDocument) next.supportingDocument = "Please upload a supporting document.";
@@ -794,7 +807,7 @@ function RegisterOwnerForm({
     }
   };
 
-  const validateStep3 = useCallback(() => {
+  const validateIdentityStep = useCallback(() => {
     const next = {};
     if (!kyc.idType) next.idType = "Please select your ID type.";
     if (!kyc.idCardFile) next.idCardFile = "Please upload your government ID.";
@@ -808,7 +821,7 @@ function RegisterOwnerForm({
     if (!canAct()) return;
     setSuccessMessage("");
     if (step === 1) {
-      if (!validateStep1()) return;
+      if (!validateAccountStep()) return;
       setFormError("");
       setIsLoading(true);
       try {
@@ -827,12 +840,14 @@ function RegisterOwnerForm({
       }
       return;
     }
-    if (step === 2) {
-      if (!validateStep2()) return;
+    if (step === 2 && !validateOwnerProfileStep()) return;
+    if (step === 3 && !validateAddressStep()) return;
+    if (step === 4) {
+      if (!validateSupportingDocumentStep()) return;
       const verified = await verifySupportingDoc();
       if (!verified) return;
     }
-    if (step === 3 && !validateStep3()) return;
+    if (step === 5 && !validateIdentityStep()) return;
     setStep((prev) => Math.min(TOTAL_STEPS, prev + 1));
   };
 
@@ -930,8 +945,8 @@ function RegisterOwnerForm({
       if (name === "NotAllowedError") message = "Camera permission denied. Please allow access.";
       if (name === "NotReadableError") message = "Your camera is being used by another app.";
       if (name === "NotFoundError") message = "No camera found on this device.";
-      setCamError(message);
       closeCamera();
+      setCamError(message);
     } finally {
       setIsLoading(false);
     }
@@ -1017,16 +1032,29 @@ function RegisterOwnerForm({
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isLoading || !canAct()) return;
-    if (!validateStep1()) {
+    if (!validateAccountStep()) {
       setStep(1);
       return;
     }
-    if (!validateStep2()) {
+    if (!validateOwnerProfileStep()) {
       setStep(2);
       return;
     }
-    if (!validateStep3()) {
+    if (!validateAddressStep()) {
       setStep(3);
+      return;
+    }
+    if (!validateSupportingDocumentStep()) {
+      setStep(4);
+      return;
+    }
+    if (!validateIdentityStep()) {
+      setStep(5);
+      return;
+    }
+    if (!validateReviewStep()) return;
+    if (!areDocumentsApproved) {
+      setFormError("Your ID and supporting document must be approved before you can finish registration.");
       return;
     }
 
@@ -1113,34 +1141,24 @@ function RegisterOwnerForm({
       onNavigateToHome={onNavigateToHome}
       badge="Guided account onboarding"
       panelTitle="Create your RentifyPro account."
-      panelDescription="Finish setup in guided steps with secure identity checks and instant access."
+      panelDescription="Complete your owner details, document checks, and email confirmation in focused steps."
       highlights={[
-        "Clear step-by-step onboarding with progress tracking",
+        "Clear 6-step onboarding with progress tracking",
         "Supporting document, ID, and face verification",
         "Ready after successful OTP verification",
       ]}
       contentMaxWidth="max-w-4xl"
       contentContainerClassName="items-start py-2 sm:py-4"
     >
-      <div {...draft.activityProps} className="rp-surface rp-glass rounded-[28px] border-white/70 p-6 shadow-[0_20px_45px_rgba(15,23,42,0.12)] sm:p-8">
+      <div {...draft.activityProps} className="rp-surface rp-glass min-w-0 overflow-hidden rounded-[28px] border-white/70 p-6 shadow-[0_20px_45px_rgba(15,23,42,0.12)] sm:p-8">
         <div className="mt-5 text-center">
           <span className="rp-chip bg-blue-50 text-blue-700 ring-1 ring-blue-100">Register</span>
-          <h2 className="mt-3 text-3xl font-extrabold text-slate-900 sm:text-4xl">Create your account</h2>
+          <h2 className="mt-3 text-2xl font-extrabold text-slate-900 sm:text-4xl">Create your account</h2>
           <p className="mt-2 text-sm text-slate-500 sm:text-base">Fast, secure onboarding in {TOTAL_STEPS} guided steps.</p>
         </div>
 
-        <div className="mb-7 mt-6 flex items-center justify-center gap-2">
-          {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map((s) => (
-            <React.Fragment key={s}>
-              <div className="flex flex-col items-center gap-1">
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition-all ${step > s ? "bg-[#017FE6] text-white" : step === s ? "bg-[#017FE6] text-white ring-4 ring-blue-100" : "bg-gray-100 text-gray-400"}`}>
-                  {step > s ? <Check size={16} strokeWidth={2} aria-hidden="true" /> : s}
-                </div>
-                <span className="text-[10px] font-medium text-gray-400 hidden sm:block">{STEP_LABELS[s - 1]}</span>
-              </div>
-              {s < TOTAL_STEPS && <div className={`h-1 w-10 sm:w-14 rounded-full transition-all self-start mt-[18px] ${step > s ? "bg-[#017FE6]" : "bg-gray-100"}`} />}
-            </React.Fragment>
-          ))}
+        <div className="mt-6">
+          <RegistrationProgress currentStep={step} steps={STEP_LABELS} />
         </div>
 
         <RegistrationDraftNotice draft={draft} busy={isLoading} />
@@ -1167,12 +1185,13 @@ function RegisterOwnerForm({
           )}
 
           <fieldset disabled={isLoading} className="min-w-0 space-y-4">
-          {step === 1 && (
+          {[1, 2, 3].includes(step) && (
             <>
+              {step === 2 && (
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <p className="font-semibold text-gray-900 mb-2">Owner Type</p>
                 <p className="text-sm text-gray-500 mb-3">Choose if you are registering as an individual or business owner.</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {[
                     { type: "individual", label: "Individual", sub: "Personal lessor", icon: User },
                     { type: "business", label: "Business", sub: "Company lessor", icon: Building2 },
@@ -1187,12 +1206,18 @@ function RegisterOwnerForm({
                   ))}
                 </div>
               </div>
+              )}
 
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
-                <p className="font-semibold text-gray-900 mb-1">Step 1 — Personal Details</p>
-                <p className="text-sm text-gray-500">Enter your information to create your owner account.</p>
+                <p className="font-semibold text-gray-900 mb-1">Step {step} — {STEP_LABELS[step - 1]}</p>
+                <p className="text-sm text-gray-500">
+                  {step === 1 && "Set up your owner account contact details and password."}
+                  {step === 2 && "Enter the legal owner and business details shown on your documents."}
+                  {step === 3 && "Select the address tied to your owner registration."}
+                </p>
               </div>
 
+              {step === 2 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field
                   label="First Name"
@@ -1223,7 +1248,9 @@ function RegisterOwnerForm({
                   maxLength={50}
                 />
               </div>
+              )}
 
+              {step === 1 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field
                   label="Enter Email"
@@ -1256,7 +1283,9 @@ function RegisterOwnerForm({
                   prefixText="+63"
                 />
               </div>
+              )}
 
+              {step === 3 && (
               <div className="rounded-2xl border border-gray-200 p-4 bg-white space-y-3">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
@@ -1331,7 +1360,9 @@ function RegisterOwnerForm({
                 {errors.address && <p className="text-xs text-red-500">{errors.address}</p>}
                 {addressLoadError && <p className="text-xs text-red-500">{addressLoadError}</p>}
               </div>
+              )}
 
+              {step === 2 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field
                   label={form.ownerType === "individual" ? "Business / Trade Name" : "Business Name"}
@@ -1360,7 +1391,9 @@ function RegisterOwnerForm({
                   maxLength={50}
                 />
               </div>
+              )}
 
+              {step === 1 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <PasswordField
                   label="Create Password"
@@ -1391,49 +1424,17 @@ function RegisterOwnerForm({
                   maxLength={128}
                 />
               </div>
-
-              <div className="space-y-2">
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <input type="checkbox" name="agree" checked={form.agree} onChange={handleChange} onBlur={() => handleStep1Blur("agree")} disabled={isLoading} className="w-5 h-5 accent-[#017FE6] cursor-pointer flex-shrink-0 disabled:opacity-60" />
-                  <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
-                    I agree to the{" "}
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setLegalModalType("terms");
-                      }}
-                      className="text-[#017FE6] font-semibold hover:underline"
-                    >
-                      Terms and Conditions
-                    </button>{" "}
-                    and{" "}
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setLegalModalType("privacy");
-                      }}
-                      className="text-[#017FE6] font-semibold hover:underline"
-                    >
-                      Privacy Policy
-                    </button>
-                  </span>
-                </label>
-                {errors.agree && <p className="text-red-500 text-sm font-medium">{errors.agree}</p>}
-              </div>
+              )}
             </>
           )}
 
-          {step === 2 && (
+          {step === 4 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0"><FileText size={20} className="text-[#017FE6]" /></div>
                   <div>
-                    <p className="font-semibold text-gray-900">Step 2 — Account & Documents</p>
+                    <p className="font-semibold text-gray-900">Step 4 — Business document</p>
                     <p className="text-sm text-gray-500 mt-1">Upload your supporting document for owner verification.</p>
                   </div>
                 </div>
@@ -1466,18 +1467,19 @@ function RegisterOwnerForm({
             </>
           )}
 
-          {step === 3 && (
+          {step === 5 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0"><ShieldCheck size={20} className="text-[#017FE6]" /></div>
                   <div>
-                    <p className="font-semibold text-gray-900">Step 3 — Identity Verification</p>
+                    <p className="font-semibold text-gray-900">Step 5 — Identity verification</p>
                     <p className="text-sm text-gray-500 mt-1">Upload your government ID, then capture a live selfie to verify your identity.</p>
                   </div>
                 </div>
               </div>
 
+              {identityStage === "id" && <>
               <SelectField
                 label="ID Type"
                 name="idType"
@@ -1493,6 +1495,7 @@ function RegisterOwnerForm({
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <p className="font-semibold text-gray-900">Government ID (front side)</p>
                 <p className="text-sm text-gray-600 mt-1">Upload a clear photo of a Philippine government ID.</p>
+                {idPreviewUrl && <img src={idPreviewUrl} alt="Selected government ID preview" className="mt-3 max-h-64 w-full rounded-xl border border-slate-200 bg-slate-50 object-contain" />}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <input
                     ref={idInputRef}
@@ -1546,29 +1549,25 @@ function RegisterOwnerForm({
                 {stepErrors.idCardFile && <p className="text-red-500 text-sm font-medium mt-2">{stepErrors.idCardFile}</p>}
               </div>
 
-              <div className="rounded-2xl border border-gray-200 p-4 bg-white">
-                <p className="font-semibold text-gray-900 mb-3">Verification Steps</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button type="button" disabled={isLoading || !kyc.idType || !kyc.idCardFile} onClick={registerId} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.idRegistered ? "bg-green-500 text-white cursor-default" : "bg-gray-900 text-white hover:opacity-95"} disabled:opacity-50`}>
-                    {isLoading && !kyc.idRegistered ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Processing...</> : kyc.idRegistered ? "ID Registered" : "1. Register ID"}
-                  </button>
-                  <button type="button" disabled={isLoading || !kyc.idRegistered} onClick={kycUi.showCamera ? closeCamera : openCamera} className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-[#017FE6] to-[#0165B8] hover:opacity-95 disabled:opacity-50 transition">
-                    {kycUi.showCamera ? "Close Camera" : "2. Open Camera"}
-                  </button>
-                  <button type="button" disabled={isLoading || !cameraStream || !kyc.idRegistered} onClick={captureSelfie} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.selfieBase64Clean ? "bg-blue-500 text-white" : "bg-gray-700 text-white hover:opacity-95"} disabled:opacity-50`}>
-                    {isLoading && !kyc.selfieBase64Clean ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Capturing...</> : kyc.selfieBase64Clean ? "3. Retake Selfie" : "3. Capture Selfie"}
-                  </button>
-                  <button type="button" disabled={isLoading || !kyc.selfieBase64Clean || kyc.selfieVerified} onClick={verifySelfie} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-semibold text-sm transition ${kyc.selfieVerified ? "bg-green-500 text-white cursor-default" : "bg-green-600 text-white hover:opacity-95"} disabled:opacity-50`}>
-                    {isLoading && !kyc.selfieVerified ? <><Loader size={16} strokeWidth={2} className="animate-spin" aria-hidden="true" /> Verifying...</> : kyc.selfieVerified ? "Face Verified" : "4. Verify Face Match"}
-                  </button>
+              {identityStage === "id" && (
+                <button type="button" disabled={isLoading || !kyc.idType || !kyc.idCardFile} onClick={registerId} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:opacity-50">
+                  {isLoading ? <><Loader size={16} className="animate-spin" aria-hidden="true" /> Checking ID...</> : "Use this ID photo"}
+                </button>
+              )}
+              </>}
+
+              {(identityStage === "camera" || identityStage === "selfie") && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="font-semibold text-slate-900">Take a live selfie</p>
+                  <p className="mt-1 text-sm text-slate-600">Face the camera in even lighting and make sure only you are visible.</p>
                 </div>
+              )}
 
-                {kycUi.statusText && <p className={`text-sm font-medium mt-3 ${kyc.selfieVerified ? "text-green-600" : "text-gray-600"}`}>{kycUi.statusText}</p>}
-                {stepErrors.idRegistered && <p className="text-red-500 text-sm font-medium mt-2">{stepErrors.idRegistered}</p>}
-                {stepErrors.selfieVerified && <p className="text-red-500 text-sm font-medium mt-1">{stepErrors.selfieVerified}</p>}
-              </div>
+              {identityStage === "camera" && !kycUi.showCamera && (
+                <button type="button" disabled={isLoading} onClick={openCamera} className="rp-btn-primary flex w-full items-center justify-center py-3 disabled:opacity-50">Open camera</button>
+              )}
 
-              {kycUi.showCamera && (
+              {identityStage === "camera" && kycUi.showCamera && (
                 <div className="rounded-2xl border border-gray-200 p-4 bg-gray-50 space-y-3">
                   <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-xl bg-black aspect-video object-cover" style={{ transform: "scaleX(-1)" }} />
                   {devices.length > 0 && (
@@ -1581,24 +1580,51 @@ function RegisterOwnerForm({
                   )}
                   {camError && <p className="text-sm text-red-600 p-2 bg-red-50 rounded-lg">{camError}</p>}
                   {camInfo && <p className="text-xs text-gray-600 p-2 bg-gray-100 rounded-lg break-words">{camInfo}</p>}
-                  <button type="button" disabled={isLoading} onClick={closeCamera} className="w-full px-4 py-2 rounded-xl font-semibold border border-gray-200 text-gray-900 hover:bg-white transition disabled:opacity-50">Close Camera</button>
-                  {kyc.selfieDataUrl && (
-                    <div>
-                      <p className="text-xs font-semibold text-gray-700 mb-2">Selfie Preview</p>
-                      <img src={kyc.selfieDataUrl} alt="Selfie" className="w-full rounded-xl border border-gray-200" style={{ transform: "scaleX(-1)" }} />
-                    </div>
-                  )}
+                  <button type="button" disabled={isLoading || !cameraStream} onClick={captureSelfie} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:opacity-50">{isLoading ? "Capturing..." : "Take photo"}</button>
                 </div>
               )}
+
+              {identityStage === "selfie" && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <img src={kyc.selfieDataUrl} alt="Captured selfie preview" className="w-full rounded-xl border border-slate-200" style={{ transform: "scaleX(-1)" }} />
+                  <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
+                    <button type="button" disabled={isLoading} onClick={() => setKyc((previous) => ({ ...previous, selfieDataUrl: "", selfieBase64Clean: "", selfieVerified: false }))} className="rp-btn-secondary flex w-full items-center justify-center py-3">Retake</button>
+                    <button type="button" disabled={isLoading} onClick={verifySelfie} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3">{isLoading ? "Matching..." : "Use selfie and continue"}</button>
+                  </div>
+                </div>
+              )}
+
+              {identityStage === "complete" && (
+                <div role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
+                  <div className="flex items-center gap-2 font-semibold"><CircleCheck size={20} aria-hidden="true" /> Selfie matched</div>
+                  <p className="mt-1 text-sm">Your face match is complete. Both documents still require approval.</p>
+                </div>
+              )}
+              {kycUi.statusText && <p role="status" className="text-sm font-medium text-slate-600">{kycUi.statusText}</p>}
+              {stepErrors.idRegistered && <p className="text-red-500 text-sm font-medium">{stepErrors.idRegistered}</p>}
+              {stepErrors.selfieVerified && <p className="text-red-500 text-sm font-medium">{stepErrors.selfieVerified}</p>}
             </>
           )}
 
-          <PreKycReviewNotice email={form.businessEmail} role="owner" enabled={kyc.idRegistered || supportingDocStatus.submitted} onResubmit={(type) => { if (type === "supporting") { setSupportingDocStatus({ submitted: false, message: "" }); setStep(2); } else setStep(3); }} />
+          {(step === 4 || step === 5 || step === 6) && (
+            <PreKycReviewNotice
+              email={form.businessEmail}
+              role="owner"
+              enabled={kyc.idRegistered || supportingDocStatus.submitted}
+              onDocumentsChange={handleDocumentsChange}
+              onResubmit={(type) => {
+                if (type === "supporting") {
+                  setSupportingDocStatus({ submitted: false, message: "" });
+                  setStep(4);
+                } else setStep(5);
+              }}
+            />
+          )}
 
-          {step === 4 && (
+          {step === 6 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
-                <p className="font-semibold text-gray-900">Step 4 — Review & Submit</p>
+                <p className="font-semibold text-gray-900">Step 6 — Review & submit</p>
                 <p className="text-sm text-gray-500 mt-1">Confirm your details before creating your account.</p>
               </div>
 
@@ -1618,7 +1644,7 @@ function RegisterOwnerForm({
                   { label: "Supporting Document Type", value: supportingDocType || "-" },
                   { label: "Supporting Document", value: files.supportingDocument ? "Uploaded" : "Missing" },
                   { label: "ID Type", value: kyc.idType || "-" },
-                  { label: "Face Verification", value: kyc.selfieVerified ? "Verified" : "Not verified", highlight: kyc.selfieVerified },
+                  { label: "Identity verification", value: kyc.selfieVerified ? "Selfie matched" : "Not verified", highlight: kyc.selfieVerified },
                 ].map(({ label, value, highlight }, i, arr) => (
                   <React.Fragment key={label}>
                     <div className="flex items-center justify-between">
@@ -1628,6 +1654,15 @@ function RegisterOwnerForm({
                     {i < arr.length - 1 && <div className="h-px bg-gray-200" />}
                   </React.Fragment>
                 ))}
+              </div>
+              <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+                <label className="flex items-start gap-3 cursor-pointer group">
+                  <input type="checkbox" name="agree" checked={form.agree} onChange={handleChange} onBlur={() => handleStep1Blur("agree")} disabled={isLoading} className="mt-0.5 h-5 w-5 flex-shrink-0 cursor-pointer accent-[#017FE6]" />
+                  <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
+                    I agree to the{" "}<button type="button" onClick={() => setLegalModalType("terms")} className="font-semibold text-[#017FE6] hover:underline">Terms and Conditions</button>{" "}and{" "}<button type="button" onClick={() => setLegalModalType("privacy")} className="font-semibold text-[#017FE6] hover:underline">Privacy Policy</button>.
+                  </span>
+                </label>
+                {errors.agree && <p className="text-red-500 text-sm font-medium">{errors.agree}</p>}
               </div>
             </>
           )}
@@ -1641,8 +1676,8 @@ function RegisterOwnerForm({
                 {isCheckingEmail ? <><Loader size={18} className="animate-spin" aria-hidden="true" /> Checking email...</> : <>Next <ArrowRight size={18} /></>}
               </button>
             ) : (
-              <button type="submit" disabled={isLoading} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
-                {isLoading ? <><Loader size={18} className="animate-spin" /> Registering...</> : "Register as Owner"}
+              <button type="submit" disabled={isLoading || !areDocumentsApproved} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
+                {isLoading ? <><Loader size={18} className="animate-spin" /> Registering...</> : !areDocumentsApproved ? "Waiting for document approval" : "Register as Owner"}
               </button>
             )}
           </div>

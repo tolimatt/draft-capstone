@@ -59,3 +59,7 @@ export function writeRegistrationDraft(storage, role, form, expiresAt) {
 export function clearRegistrationDraft(storage, role) {
   try { storage.removeItem(draftStorageKey(role)); } catch { /* Keep the form usable. */ }
 }
+
+export function clearAllRegistrationDrafts(storage) {
+  for (const role of Object.keys(FIELDS)) clearRegistrationDraft(storage, role);
+}

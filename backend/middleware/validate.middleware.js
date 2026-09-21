@@ -1,5 +1,6 @@
 // Auth input validation
 import mongoose from "mongoose";
+import { normalizeListingText, validateListingFields } from "../utils/vehicleListingValidation.js";
 import { normalizePhilippineMobile } from "../utils/phone.js";
 import { cleanupUploadedVehicleFiles } from "../utils/localMedia.js";
 
@@ -17,6 +18,7 @@ const ALLOWED_GENDERS = new Set(["Male", "Female", "Prefer not to say"]);
 const ALLOWED_RELATIONSHIPS = new Set(["Parent", "Sibling", "Spouse", "Partner", "Relative", "Friend", "Guardian", "Other"]);
 const ALLOWED_OWNER_TYPES = new Set(["individual", "business"]);
 const MIN_RENTER_AGE = 18;
+const MAX_RENTER_AGE = 100;
 const MAX_EMAIL_LENGTH = 254;
 const MAX_PHONE_LENGTH = 10;
 const MAX_BUSINESS_NAME = 120;
@@ -47,10 +49,7 @@ const parseDateOfBirth = (value) => {
     return null;
   }
 
-  const parsed = new Date(clean);
-  if (Number.isNaN(parsed.getTime())) return null;
-  parsed.setHours(0, 0, 0, 0);
-  return parsed;
+  return null;
 };
 
 const getAgeFromDate = (birthDate, today) => {
@@ -148,6 +147,9 @@ export const validateRegister = (req, res, next) => {
         const age = getAgeFromDate(parsedDate, today);
         if (age < MIN_RENTER_AGE) {
           errors.dateOfBirth = "Looks like you're under 18. RentifyPro accounts are for ages 18+.";
+        }
+        if (age > MAX_RENTER_AGE) {
+          errors.dateOfBirth = "Registration is available for ages 18 to 100.";
         }
       }
     }
@@ -313,6 +315,11 @@ const parseStringArray = (value) => {
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 const sanitizeVehicleBody = (req, { isUpdate = false } = {}) => {
+  for (const field of ["name", "description", "location", "specSubType", "specPlateNumber"]) {
+    if (typeof req.body[field] === "string") req.body[field] = normalizeListingText(req.body[field], field === "description");
+  }
+  if (typeof req.body.specPlateNumber === "string") req.body.specPlateNumber = req.body.specPlateNumber.toUpperCase();
+  req.body.approvedImageIds = parseStringArray(req.body.approvedImageIds);
   if (typeof req.body.name === "string") req.body.name = req.body.name.trim();
   if (typeof req.body.description === "string") req.body.description = req.body.description.trim();
   if (typeof req.body.location === "string") req.body.location = req.body.location.trim();
@@ -415,6 +422,7 @@ const validateLateReturnPolicy = (body, errors, { required = false } = {}) => {
 export const validateVehicleCreate = async (req, res, next) => {
   const body = sanitizeVehicleBody(req);
   const errors = {};
+  const listingErrors = validateListingFields(body);
 
   if (!body.name) errors.name = "Vehicle name is required.";
   if (!body.description) errors.description = "Description is required.";
@@ -457,7 +465,7 @@ export const validateVehicleCreate = async (req, res, next) => {
 
   validateLateReturnPolicy(body, errors, { required: true });
 
-  const uploadedImages = Array.isArray(req.files) ? req.files.length : 0;
+  const uploadedImages = (Array.isArray(req.files) ? req.files.length : 0) + body.approvedImageIds.length;
   const linkedImages = body.imageUrls.length;
   if (uploadedImages + linkedImages === 0) {
     errors.images = "At least one image is required.";
@@ -465,13 +473,14 @@ export const validateVehicleCreate = async (req, res, next) => {
 
   if (body.coverUploadIndex) {
     const coverUploadIndex = Number.parseInt(body.coverUploadIndex, 10);
-    if (!Number.isFinite(coverUploadIndex) || coverUploadIndex < 0) {
+    if (!/^\d+$/.test(String(body.coverUploadIndex)) || !Number.isSafeInteger(coverUploadIndex) || coverUploadIndex < 0) {
       errors.coverUploadIndex = "Cover image selection is invalid.";
     } else {
       body.coverUploadIndex = coverUploadIndex;
     }
   }
 
+  Object.assign(errors, listingErrors);
   if (Object.keys(errors).length) {
     await cleanupUploadedVehicleFiles(req.files);
     return res.status(400).json({ success: false, message: "Validation failed.", errors });
@@ -483,6 +492,7 @@ export const validateVehicleCreate = async (req, res, next) => {
 export const validateVehicleUpdate = async (req, res, next) => {
   const body = sanitizeVehicleBody(req, { isUpdate: true });
   const errors = {};
+  const listingErrors = validateListingFields(body, { partial: true });
 
   if (body.name !== undefined && !body.name) errors.name = "Vehicle name cannot be empty.";
   if (body.description !== undefined && !body.description) errors.description = "Description cannot be empty.";
@@ -535,10 +545,11 @@ export const validateVehicleUpdate = async (req, res, next) => {
   }
 
   validateLateReturnPolicy(body, errors);
+  Object.assign(errors, listingErrors);
 
   if (body.coverUploadIndex) {
     const coverUploadIndex = Number.parseInt(body.coverUploadIndex, 10);
-    if (!Number.isFinite(coverUploadIndex) || coverUploadIndex < 0) {
+    if (!/^\d+$/.test(String(body.coverUploadIndex)) || !Number.isSafeInteger(coverUploadIndex) || coverUploadIndex < 0) {
       errors.coverUploadIndex = "Cover image selection is invalid.";
     } else {
       body.coverUploadIndex = coverUploadIndex;

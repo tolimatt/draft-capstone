@@ -5,6 +5,7 @@ import {
   cancelMyBooking,
   createBooking,
   getBookingById,
+  getMyBookingEligibility,
   getMyBookings,
   getOwnerBookings,
   proceedBookingLateReturn,
@@ -26,6 +27,7 @@ const router = express.Router();
 
 router.post("/", protect, authorize("user", "owner", "admin"), requireKyc, requireModerationCapability("booking"), bookingCreateLimiter, createBooking);
 router.get("/me", protect, authorize("user", "owner", "admin"), getMyBookings);
+router.get("/eligibility", protect, authorize("user", "owner", "admin"), getMyBookingEligibility);
 router.get("/owner", protect, authorize("owner", "admin"), getOwnerBookings);
 router.get("/:id", protect, authorize("user", "owner", "admin"), validateObjectIdParam("id"), getBookingById);
 router.patch("/:id/cancel", protect, authorize("user", "owner", "admin"), validateObjectIdParam("id"), cancelMyBooking);

@@ -56,6 +56,9 @@ const userSchema = new mongoose.Schema(
     archivedBy: { type: String, trim: true, default: "" },
     archiveReason: { type: String, trim: true, default: "" },
     sessionVersion: { type: Number, default: 0 },
+    // Serialize booking creation and schedule extensions across API instances.
+    bookingMutationToken: { type: String, default: null, select: false },
+    bookingMutationUntil: { type: Date, default: null, select: false },
     kycStatusUpdatedAt: { type: Date },
     kycStatus: {
       type: String,

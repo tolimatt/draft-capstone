@@ -4,6 +4,7 @@ import { HOURLY_RATE_UNIT, getVehicleHourlyRate } from "../utils/pricing.js";
 import { getVehicleLateReturnPolicy } from "../utils/lateReturnPolicy.js";
 import {
   cleanupUploadedVehicleFiles,
+  getUploadedVehicleImageReference,
   MAX_VEHICLE_IMAGES,
   normalizeVehicleImageReference,
   removeLocalVehicleImages,
@@ -54,7 +55,7 @@ const buildSpecsFromBody = (body, previous = {}) => ({
 });
 
 const extractUploadedPaths = (files) =>
-  ensureArray(files).map((file) => normalizeImagePath(file.path)).filter(Boolean);
+  ensureArray(files).map((file) => getUploadedVehicleImageReference(file)).filter(Boolean);
 
 const buildImageSet = ({ uploadedPaths = [], linkedPaths = [], existingPaths = [] }) => {
   const merged = [...ensureArray(existingPaths), ...ensureArray(uploadedPaths), ...ensureArray(linkedPaths)]
@@ -228,6 +229,7 @@ export const createOwnerVehicle = async (req, res) => {
       availabilityStatus: req.body.availabilityStatus,
       availabilityHoldReason: req.body.availabilityStatus === "unavailable" ? "manual" : "none",
       images,
+      imageReviews: req.approvedPhotoMetadata || [],
       imageUrl: coverImagePath || images[0] || "",
       coverDisplayMode: normalizeCoverDisplayMode(req.body.coverDisplayMode),
       driverOptionEnabled,
@@ -354,6 +356,7 @@ export const updateOwnerVehicle = async (req, res) => {
       });
     }
 
+    if (req.approvedPhotoMetadata) vehicle.imageReviews = req.approvedPhotoMetadata;
     await vehicle.save();
     if (removedImages.length) {
       await removeLocalVehicleImages(removedImages);

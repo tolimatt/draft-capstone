@@ -939,7 +939,7 @@ export default function Dashboard() {
       {error && <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
 
       {/* ── Summary Cards ─────────────────────────────── */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <SummaryCard
           title="Vehicles"
           value={stats.myVehicles}
@@ -1567,19 +1567,19 @@ function SummaryCard({
   const hasVisibilityToggle = typeof onToggleValueVisibility === "function";
 
   return (
-    <Panel className="p-4 sm:p-5">
-      <div className="flex items-start gap-4">
-        <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${iconClassName}`}>
-          <SummaryIcon size={24} strokeWidth={2} aria-hidden="true" />
+    <Panel className="h-full !p-3 sm:!p-5">
+      <div className="relative flex h-full flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:h-14 sm:w-14 sm:rounded-2xl ${iconClassName}`}>
+          <SummaryIcon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={2} aria-hidden="true" />
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-slate-600">{title}</p>
+            <p className="text-xs font-medium leading-4 text-slate-600 sm:text-sm">{title}</p>
             {hasVisibilityToggle && (
               <button
                 type="button"
                 onClick={onToggleValueVisibility}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40"
+                className="absolute right-0 top-0 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40 sm:static sm:h-8 sm:w-8"
                 aria-label={isValueVisible ? `Hide ${title}` : `Show ${title}`}
                 title={isValueVisible ? `Hide ${title}` : `Show ${title}`}
               >
@@ -1587,12 +1587,12 @@ function SummaryCard({
               </button>
             )}
           </div>
-          <p className="mt-1 text-3xl font-bold tracking-tight text-slate-900">{value}</p>
+          <p className="mt-1 break-words text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{value}</p>
           {subtitle && (
             <button
               type="button"
               onClick={onAction}
-              className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#017FE6] transition hover:text-[#0168be]"
+              className="mt-auto inline-flex min-h-11 items-center justify-between gap-1 pt-3 text-left text-xs font-semibold leading-4 text-[#017FE6] transition hover:text-[#0168be] sm:min-h-0 sm:justify-start sm:pt-2"
               aria-label={subtitle}
             >
               {subtitle}

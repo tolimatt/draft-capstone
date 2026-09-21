@@ -13,6 +13,7 @@ import {
   MessageCircle,
   EllipsisVertical,
   Pencil,
+  RefreshCw,
   Send,
   Trash2,
   WalletCards,
@@ -30,6 +31,7 @@ import {
   formatDateInput,
   formatDurationMinutes,
   formatTimeInput,
+  getMaxBookingDate,
   getInitialsFromName,
   getDateTime,
   getDurationHoursFromMinutes,
@@ -52,6 +54,7 @@ const statusStyles = {
 
 const DOWNPAYMENT_RATE = 0.3;
 const CURRENT_BOOKING_STATUSES = ["pending", "confirmed", "extended"];
+const ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
 const PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
 const BOOKING_NAVIGATION_STORAGE_KEY = "rentifypro:booking-navigation";
 
@@ -59,21 +62,24 @@ const getInitialBookingView = () => {
   try {
     const value = JSON.parse(sessionStorage.getItem(BOOKING_NAVIGATION_STORAGE_KEY) || "{}");
     sessionStorage.removeItem(BOOKING_NAVIGATION_STORAGE_KEY);
-    return ["current", "history", "all"].includes(value?.view) ? value.view : "current";
+    const requestedView = value?.view === "current" ? "active" : value?.view;
+    return ["active", "unsettled", "history", "all"].includes(requestedView) ? requestedView : "active";
   } catch {
-    return "current";
+    return "active";
   }
 };
 
 const bookingMatchesView = (booking, view) => {
   const status = String(booking?.status || "").toLowerCase();
   if (view === "current") return CURRENT_BOOKING_STATUSES.includes(status);
+  if (view === "active") return ACTIVE_BOOKING_STATUSES.includes(status);
+  if (view === "unsettled") return isBookingUnsettled(booking);
   if (view === "history") return PAST_BOOKING_STATUSES.includes(status);
   if (view === "all") return true;
   return status === view;
 };
 
-const getBookingDisplayState = (booking) => {
+const getBookingDisplayState = (booking, { unsettled = false } = {}) => {
   const status = String(booking?.status || "").trim().toLowerCase();
   const payment = String(booking?.paymentStatus || "").trim().toLowerCase();
   const isOverdue = Boolean(booking?.lateReturn?.isOverdue || booking?.late_return?.isOverdue);
@@ -82,6 +88,8 @@ const getBookingDisplayState = (booking) => {
   if (isOverdue && ["confirmed", "extended"].includes(status)) {
     return { label: `${bookingLabel} · Overdue`, tone: "overdue" };
   }
+
+  if (unsettled) return { label: bookingLabel, tone: status };
 
   const paymentLabel = {
     unpaid: "Unpaid",
@@ -98,6 +106,8 @@ const getBookingDisplayState = (booking) => {
 
 const renterViewMeta = {
   current: { label: "Current bookings", description: "Your pending, upcoming, and active rentals", icon: CalendarDays },
+  active: { label: "Active bookings", description: "Your approved and ongoing rentals", icon: CalendarDays },
+  unsettled: { label: "Unsettled bookings", description: "Balances that are due or awaiting walk-in settlement", icon: WalletCards },
   history: { label: "Booking history", description: "Your completed, cancelled, and declined rentals", icon: History },
   all: { label: "All bookings", description: "Every reservation in one place", icon: CarFront },
   pending: { label: "Awaiting approval", description: "Reservations waiting on the owner", icon: Clock3 },
@@ -155,6 +165,13 @@ const getLateReturnPenaltyFee = (booking) => {
   return Number.isFinite(latePenaltyFee) && latePenaltyFee > 0 ? roundCurrency(latePenaltyFee) : 0;
 };
 
+const getBookingTransactionFee = (booking) => {
+  const persistedFee = Number(booking?.transactionFee);
+  return Number.isFinite(persistedFee) && persistedFee >= 0
+    ? roundCurrency(persistedFee)
+    : getTransactionFee();
+};
+
 const getBaseRentalTotal = (booking) => {
   const latePenaltyFee = getLateReturnPenaltyFee(booking);
 
@@ -181,7 +198,7 @@ const getBaseRentalTotal = (booking) => {
 
   const payable = Number(booking?.amountPayable);
   if (Number.isFinite(payable) && payable >= 0) {
-    return Math.max(roundCurrency(payable - getTransactionFee() - latePenaltyFee), 0);
+    return Math.max(roundCurrency(payable - getBookingTransactionFee(booking) - latePenaltyFee), 0);
   }
 
   return 0;
@@ -190,7 +207,7 @@ const getBaseRentalTotal = (booking) => {
 const getRentalTotal = (booking) =>
   roundCurrency(getBaseRentalTotal(booking) + getLateReturnPenaltyFee(booking));
 
-const getAmountPayable = (booking) => getRentalTotal(booking) + getTransactionFee();
+const getAmountPayable = (booking) => getRentalTotal(booking) + getBookingTransactionFee(booking);
 
 const roundCurrency = (value) => {
   const numeric = Number(value || 0);
@@ -215,10 +232,35 @@ const getPaymentRemainingAmount = (booking) => {
   return roundCurrency(Math.max(totalPayable - getPaymentPaidAmount(booking), 0));
 };
 
+const getOutstandingBalance = (booking) => {
+  if (String(booking?.paymentStatus || "").toLowerCase() === "refunded") return 0;
+  const storedDue = Number(booking?.paymentAmountDue || 0);
+  const calculatedDue = getPaymentRemainingAmount(booking);
+  return roundCurrency(Math.max(Number.isFinite(storedDue) ? storedDue : 0, calculatedDue));
+};
+
 const getWalkInStatus = (booking) =>
   String(booking?.walkInPayment?.status || booking?.walk_in_payment?.status || "none")
     .trim()
     .toLowerCase();
+
+function isBookingUnsettled(booking, currentTimeMs = Date.now()) {
+  const status = String(booking?.status || "").trim().toLowerCase();
+  if (!["confirmed", "extended", "completed"].includes(status)) return false;
+  if (getOutstandingBalance(booking) <= 0) return false;
+
+  const walkInStatus = getWalkInStatus(booking);
+  if (["requested", "approved"].includes(walkInStatus)) return true;
+
+  const returnStatus = String(
+    booking?.returnStatus || booking?.returnRequest?.status || booking?.return_request?.status || ""
+  ).trim().toLowerCase();
+  const returned = status === "completed" || Boolean(booking?.actualReturnAt) || returnStatus === "confirmed";
+  if (returned) return true;
+
+  const returnAtMs = booking?.returnAt ? new Date(booking.returnAt).getTime() : Number.NaN;
+  return Number.isFinite(returnAtMs) && currentTimeMs > returnAtMs;
+}
 
 const getLateReturnInfo = (booking, currentTimeMs = Date.now()) => {
   const lateReturn = booking?.lateReturn || booking?.late_return || {};
@@ -574,6 +616,10 @@ export default function BookingsPage({
     }
     if (!currentReturnAt || Number.isNaN(currentReturnAt.getTime())) {
       setError("Current return schedule is invalid for this booking.");
+      return;
+    }
+    if (extensionForm.newReturnDate > getMaxBookingDate()) {
+      setError("The extended return must be within 6 months from today.");
       return;
     }
     if (newReturnAt.getTime() <= currentReturnAt.getTime()) {
@@ -1073,17 +1119,25 @@ export default function BookingsPage({
 
       <div className="rp-page-shell mx-auto max-w-7xl space-y-6 px-4 pb-16 pt-24 sm:px-6">
         <div className="rp-page-header">
-          <div>
-            <span className="rp-page-eyebrow">Your rental workspace</span>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">My bookings</h1>
-            <p className="mt-1 text-sm text-slate-500">Manage your reservations, payments, and trip updates.</p>
+          <span className="rp-page-eyebrow">Your rental workspace</span>
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="min-w-0 text-3xl font-bold tracking-tight text-slate-900">My bookings</h1>
+            <button type="button" disabled={loading || refreshing || loadingMore} onClick={() => load({ background: true })} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
+              <RefreshCw size={16} strokeWidth={2} className={refreshing ? "animate-spin" : ""} aria-hidden="true" />
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
           </div>
-          <button type="button" disabled={loading || refreshing || loadingMore} onClick={() => load({ background: true })} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{refreshing ? "Refreshing..." : "Refresh"}</button>
+          <p className="mt-1 text-sm text-slate-500">Manage your reservations, payments, and trip updates.</p>
         </div>
 
-        <div className="flex w-full gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm sm:w-fit">
+        <div
+          className="flex w-full gap-1.5 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm sm:w-fit"
+          role="group"
+          aria-label="Booking views"
+        >
           {[
-            { id: "current", label: "Current" },
+            { id: "active", label: "Active" },
+            { id: "unsettled", label: "Unsettled" },
             { id: "history", label: "History" },
             { id: "all", label: "All" },
           ].map((filter) => (
@@ -1091,7 +1145,8 @@ export default function BookingsPage({
               key={filter.id}
               type="button"
               onClick={() => setStatusFilter(filter.id)}
-              className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition sm:flex-none sm:px-4 ${
+              aria-pressed={statusFilter === filter.id}
+              className={`shrink-0 rounded-xl px-3 py-2.5 text-sm font-semibold transition sm:px-4 ${
                 statusFilter === filter.id
                   ? "bg-[#017FE6] text-white shadow-md shadow-blue-100"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
@@ -1111,9 +1166,19 @@ export default function BookingsPage({
         {!loading && !loadError && filteredBookings.length === 0 && (
           <div className="rp-minimal-card border-dashed p-10 text-center">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#017FE6]"><ActiveViewIcon size={24} strokeWidth={2} aria-hidden="true" /></div>
-            <h2 className="mt-4 text-lg font-bold text-slate-900">No {activeView.label.toLowerCase()} yet</h2>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">{activeView.description}. Your reservations will appear here as soon as there is activity.</p>
-            <button type="button" onClick={onNavigateToVehicles} className="mt-4 rounded-xl bg-[#017FE6] px-4 py-2 text-sm font-semibold text-white">Browse vehicles</button>
+            <h2 className="mt-4 text-lg font-bold text-slate-900">
+              {statusFilter === "unsettled" ? "No unsettled balances" : `No ${activeView.label.toLowerCase()} yet`}
+            </h2>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
+              {statusFilter === "unsettled"
+                ? "You're all caught up. No payments need your attention."
+                : `${activeView.description}. Your reservations will appear here as soon as there is activity.`}
+            </p>
+            {statusFilter === "unsettled" ? (
+              <button type="button" onClick={() => setStatusFilter("active")} className="mt-4 rounded-xl bg-[#017FE6] px-4 py-2 text-sm font-semibold text-white">View active bookings</button>
+            ) : (
+              <button type="button" onClick={onNavigateToVehicles} className="mt-4 rounded-xl bg-[#017FE6] px-4 py-2 text-sm font-semibold text-white">Browse vehicles</button>
+            )}
           </div>
         )}
 
@@ -1130,7 +1195,10 @@ export default function BookingsPage({
             const returnRequestInfo = getReturnRequestInfo(booking);
             const walkInStatus = getWalkInStatus(booking);
             const ownerDisplayName = getOwnerDisplayName(booking);
-            const displayState = getBookingDisplayState(booking);
+            const unsettled = isBookingUnsettled(booking, bookingClock);
+            const outstandingBalance = unsettled ? getOutstandingBalance(booking) : 0;
+            const settlementPending = unsettled && ["requested", "approved"].includes(walkInStatus);
+            const displayState = getBookingDisplayState(booking, { unsettled });
             const hasActiveWalkInBalanceSettlement =
               String(booking.paymentStatus || "").toLowerCase() === "partial" &&
               ["requested", "approved"].includes(walkInStatus);
@@ -1167,6 +1235,15 @@ export default function BookingsPage({
                   >
                     {displayState.label}
                   </span>
+                  {unsettled && (
+                    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                      settlementPending
+                        ? "border-amber-200 bg-amber-100 text-amber-800"
+                        : "border-rose-200 bg-rose-100 text-rose-800"
+                    }`}>
+                      {settlementPending ? "Settlement pending" : "Balance due"} · {moneyWithCents(outstandingBalance)}
+                    </span>
+                  )}
                   {extensionInfo.status !== "none" && (
                     <span
                       className={`inline-flex items-center text-xs font-semibold px-3 py-1 rounded-full ${
@@ -1206,7 +1283,7 @@ export default function BookingsPage({
                   title={isEstimatedLatePenalty ? "Estimated Late Penalty" : "Late Penalty"}
                   value={moneyWithCents(displayedLatePenalty)}
                 />
-                <Info title="Transaction Fee" value={moneyWithCents(getTransactionFee())} />
+                <Info title="Transaction Fee" value={moneyWithCents(getBookingTransactionFee(booking))} />
                 <Info
                   icon={WalletCards}
                   title={isEstimatedLatePenalty ? "Estimated Amount Payable" : "Amount Payable"}
@@ -1807,7 +1884,7 @@ export default function BookingsPage({
                   {confirmHasLateReturnFee && (
                     <Line label="Late-return Fee" value={moneyWithCents(confirmLateReturnFee)} strong />
                   )}
-                  <Line label="Transaction Fee" value={moneyWithCents(getTransactionFee())} />
+                  <Line label="Transaction Fee" value={moneyWithCents(getBookingTransactionFee(paymentConfirmBooking))} />
                   <Line label="Already Paid" value={moneyWithCents(confirmPaidAmount)} />
                   <Line label="Total Amount Payable" value={moneyWithCents(confirmTotalPayable)} strong />
                   <Line label="Remaining Balance" value={moneyWithCents(confirmRemainingAmount)} />
@@ -1964,8 +2041,10 @@ export default function BookingsPage({
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="date"
+                    aria-label="Extended return date"
                     value={extensionForm.newReturnDate}
                     min={formatDateInput(extensionModalBooking.returnAt || new Date())}
+                    max={getMaxBookingDate()}
                     onChange={(event) =>
                       setExtensionForm((prev) => ({ ...prev, newReturnDate: event.target.value }))
                     }
@@ -1973,6 +2052,7 @@ export default function BookingsPage({
                   />
                   <input
                     type="time"
+                    aria-label="Extended return time"
                     value={extensionForm.newReturnTime}
                     onChange={(event) =>
                       setExtensionForm((prev) => ({ ...prev, newReturnTime: event.target.value }))

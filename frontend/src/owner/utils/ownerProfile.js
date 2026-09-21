@@ -54,6 +54,7 @@ export const normalizeOwnerProfile = (source = {}, fallback = {}) => {
     businessName: toText(src.businessName) || toText(fb.businessName),
     permitNumber: toText(src.permitNumber) || toText(fb.permitNumber),
     licenseNumber: toText(src.licenseNumber) || toText(fb.licenseNumber),
+    kycStatus: toText(src.kycStatus) || toText(fb.kycStatus) || "not_started",
   };
 };
 
@@ -80,6 +81,7 @@ export const persistOwnerProfile = (profile) => {
     email: normalized.email || currentUser.email,
     avatar: hasProfileAvatar ? normalized.avatar : normalized.avatar || currentUser.avatar || "",
     role: currentUser.role || "owner",
+    kycStatus: normalized.kycStatus || currentUser.kycStatus || "not_started",
   };
   setSessionUser(mergedUser);
 

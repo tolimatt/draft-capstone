@@ -223,7 +223,7 @@ import Navbar from "../components/Navbar";
               <h4 className="font-bold mb-4">Contacts</h4>
               <ul className="space-y-2 text-blue-100">
                 <li>+63 912 324 5678</li>
-                <li>message@rentifypro.com</li>
+                <li>rentifypro.official@gmail.com</li>
                 <li>Dagupan, Pangasinan,</li>
                 <li>Philippines</li>
               </ul>

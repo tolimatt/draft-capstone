@@ -14,6 +14,11 @@ export const formatTimeInput = (value = new Date()) => {
 
 export const getTodayDate = () => formatDateInput(new Date());
 
+export const getMaxBookingDate = (today = new Date()) => {
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 7, 0).getDate();
+  return formatDateInput(new Date(today.getFullYear(), today.getMonth() + 6, Math.min(today.getDate(), lastDay)));
+};
+
 export const getTomorrowDate = () => {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -51,9 +56,12 @@ export const getMinReturnTime = (pickupDate, pickupTime, minutes = 60) => {
   return minReturn ? formatTimeInput(minReturn) : "";
 };
 export const getDateTime = (date, time) => {
-  if (!date || !time) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) return null;
   const value = new Date(`${date}T${time}`);
-  return Number.isNaN(value.getTime()) ? null : value;
+  if (Number.isNaN(value.getTime())) return null;
+  // Date parsing can roll February 30 into March or 24:00 into tomorrow.
+  if (formatDateInput(value) !== date || formatTimeInput(value) !== time.slice(0, 5)) return null;
+  return value;
 };
 
 export const getDurationMinutesBetween = (start, end) => {

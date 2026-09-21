@@ -28,6 +28,7 @@ const PASSWORD_RESET_TOKEN_SECRET = process.env.PASSWORD_RESET_TOKEN_SECRET || p
 // Local fallback only. Production multi-instance deployments must use Redis keyed by a hashed jti.
 const tokenBlacklist = new Map();
 const MIN_RENTER_AGE = 18;
+const MAX_RENTER_AGE = 100;
 const EMERGENCY_CONTACT_NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 const MAX_EMERGENCY_CONTACT_NAME_LENGTH = 50;
 const LOGIN_CHALLENGE_TTL_MINUTES = Number(process.env.LOGIN_CHALLENGE_TTL_MINUTES || 180);
@@ -126,10 +127,7 @@ const parseDateOfBirth = (value) => {
     return null;
   }
 
-  const parsed = new Date(clean);
-  if (Number.isNaN(parsed.getTime())) return null;
-  parsed.setHours(0, 0, 0, 0);
-  return parsed;
+  return null;
 };
 
 const getAgeFromDate = (birthDate, today) => {
@@ -1219,8 +1217,31 @@ export const upgradeToOwner = async (req, res) => {
     if (licenseNumber) user.licenseNumber = licenseNumber;
     if (permitNumber) user.permitNumber = permitNumber;
 
+    const verifiedAt = new Date();
     user.role = "owner";
+    user.kycStatus = "approved";
+    user.kycStatusUpdatedAt = verifiedAt;
     await user.save();
+
+    try {
+      await KycVerification.findOneAndUpdate(
+        { user: user._id },
+        {
+          user: user._id,
+          status: "approved",
+          verifiedAt,
+          remarks: "Identity approved during owner upgrade verification.",
+        },
+        { upsert: true, new: true }
+      );
+    } catch (kycCaseError) {
+      // The user summary is the authorization source. Keep the verified owner
+      // from being stranded if the secondary KYC audit write is unavailable.
+      auditLog.error("KYC", "Failed to create owner upgrade KYC case", {
+        userId: user._id.toString(),
+        detail: kycCaseError.message,
+      });
+    }
 
     auditLog.info("AUTH", "Upgraded to owner", { userId: user._id.toString() });
 
@@ -1297,6 +1318,12 @@ export const updateProfile = async (req, res) => {
             return res.status(400).json({
               success: false,
               message: "Looks like you're under 18. RentifyPro accounts are for ages 18+.",
+            });
+          }
+          if (age > MAX_RENTER_AGE) {
+            return res.status(400).json({
+              success: false,
+              message: "Date of birth must correspond to an age of 18 to 100.",
             });
           }
         }

@@ -1,5 +1,7 @@
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
+import { findRenterScheduleConflict } from "../services/bookingEligibility.service.js";
+import { acquireBookingMutationLock, BookingPolicyError } from "../utils/bookingMutationLock.js";
 import eventBus from "../events/eventBus.js";
 import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import { emitToUser } from "../socket/index.js";
@@ -655,6 +657,12 @@ export const updateOwnerBookingStatus = async (req, res) => {
     }
 
     if (status === "confirmed") {
+      if (await findRenterScheduleConflict(booking, booking.returnAt)) {
+        return res.status(409).json({
+          success: false, code: "RENTER_SCHEDULE_CONFLICT",
+          message: "The renter has another booking that overlaps this schedule. Ask them to resolve the conflicting booking first.",
+        });
+      }
       const vehicleId = booking.vehicle?._id || booking.vehicle;
       const conflictingBooking = await Booking.findOne({
         _id: { $ne: booking._id },
@@ -715,45 +723,121 @@ export const updateOwnerBookingPaymentStatus = async (req, res) => {
     if (!PAYMENT_STATUSES.has(requestedPaymentStatus)) {
       return res.status(400).json({ success: false, message: "Invalid payment status." });
     }
-    if (requestedPaymentStatus === "paid") {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Manual paid updates are blocked. Use walk-in confirmation or renter payment verification instead.",
-      });
-    }
-
     const booking = await Booking.findOne({ _id: req.params.id, owner: req.user._id }).populate(populateFields);
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
-    await syncOwnerBookingLifecycleState(booking);
-
-    booking.paymentStatus = requestedPaymentStatus;
-    booking.paymentUpdatedAt = new Date();
-    if (requestedPaymentStatus === "partial") {
-      booking.paidAt = null;
-    } else if (requestedPaymentStatus === "unpaid" || requestedPaymentStatus === "refunded") {
-      const totalPayable = getOwnerBookingPayableAmount(booking);
-      booking.paymentAmountPaid = 0;
-      booking.paymentAmountDue = totalPayable;
-      booking.paymentCheckoutAmount = 0;
-      booking.paymentScope = null;
-      booking.paymentChannel = null;
-      booking.paidAt = null;
-      resetWalkInPaymentState(booking);
+    // The status and amounts are one update. Compare the version the owner saw
+    // as well as the current database version so stale tabs cannot silently
+    // overwrite a payment, final late fee, or another owner's decision.
+    const expectedUpdatedAt = req.body?.expectedUpdatedAt;
+    if (expectedUpdatedAt !== undefined &&
+        (typeof expectedUpdatedAt !== "string" || !toDate(expectedUpdatedAt))) {
+      return res.status(400).json({ success: false, message: "Invalid booking version. Refresh the booking and try again." });
     }
-    await booking.save();
+    if (expectedUpdatedAt && toDate(expectedUpdatedAt).getTime() !== toDate(booking.updatedAt)?.getTime()) {
+      return res.status(409).json({
+        success: false, code: "BOOKING_PAYMENT_CHANGED",
+        message: "This booking changed. Review its latest payment status and try again.",
+        booking: serializeOwnerBooking(req, booking),
+      });
+    }
+
+    // Calculate before switching status: older unpaid records can still need
+    // the configured transaction-fee fallback, which must be preserved on Paid.
+    const transactionFee = getOwnerBookingTransactionFee(booking);
+    const totalPayable = getOwnerBookingPayableAmount(booking);
+    const now = new Date();
+    const changes = {
+      paymentStatus: requestedPaymentStatus,
+      transactionFee,
+      paymentUpdatedAt: now,
+      manualPaymentUpdatedAt: now,
+      manualPaymentUpdatedBy: req.user._id,
+      manualPaymentStatus: requestedPaymentStatus,
+      paymentCheckoutAmount: 0,
+      paymentChannel: null,
+    };
+    if (requestedPaymentStatus === "partial") {
+      const rawAmount = req.body?.paymentAmountPaid ?? booking.paymentAmountPaid;
+      const amount = ["number", "string"].includes(typeof rawAmount) && String(rawAmount).trim() !== ""
+        ? Number(rawAmount) : NaN;
+      if (!Number.isFinite(amount) || roundCurrency(amount) <= 0 || roundCurrency(amount) >= totalPayable) {
+        return res.status(400).json({
+          success: false,
+          message: "For Partial, enter the total amount received so far. It must be greater than zero and less than the full amount payable.",
+        });
+      }
+      changes.paymentAmountPaid = roundCurrency(amount);
+      changes.paymentAmountDue = roundCurrency(totalPayable - changes.paymentAmountPaid);
+      changes.paymentScope = "downpayment";
+      changes.paidAt = null;
+    } else if (requestedPaymentStatus === "paid") {
+      if (!(totalPayable > 0)) {
+        return res.status(400).json({ success: false, message: "This booking has no valid amount to mark as paid." });
+      }
+      changes.paymentAmountPaid = totalPayable;
+      changes.paymentAmountDue = 0;
+      changes.paymentScope = "full";
+      changes.paidAt = booking.paidAt || now;
+      changes.paymentMethod = booking.paymentMethod || "Owner-confirmed";
+      changes.balancePaymentMethod = "Owner-confirmed";
+    } else {
+      changes.paymentAmountPaid = 0;
+      changes.paymentAmountDue = totalPayable;
+      changes.paymentScope = null;
+      changes.paidAt = null;
+    }
+
+    const walkInState = {};
+    resetWalkInPaymentState(walkInState);
+    if (requestedPaymentStatus === "paid") {
+      // A manually confirmed balance settles an outstanding walk-in request too.
+      if (["requested", "approved"].includes(normalizeWalkInStatus(booking.walkInPaymentStatus))) {
+        Object.assign(walkInState, {
+          balancePaymentMethod: "Walk-in", walkInPaymentStatus: "completed",
+          walkInRequestedAt: booking.walkInRequestedAt, walkInRequestedBy: booking.walkInRequestedBy,
+          walkInRequestNote: booking.walkInRequestNote,
+          walkInReviewedAt: booking.walkInReviewedAt || now, walkInReviewedBy: booking.walkInReviewedBy || req.user._id,
+          walkInReviewNote: booking.walkInReviewNote,
+          walkInConfirmedAt: now, walkInConfirmedBy: req.user._id,
+          walkInConfirmationNote: "Payment recorded as paid by the owner.",
+        });
+      } else {
+        // Preserve a completed walk-in receipt when Paid is selected again.
+        if (normalizeWalkInStatus(booking.walkInPaymentStatus) === "completed") {
+          for (const key of Object.keys(walkInState)) walkInState[key] = booking[key];
+        } else walkInState.balancePaymentMethod = "Owner-confirmed";
+      }
+    }
+    Object.assign(changes, walkInState);
+
+    const updated = await Booking.findOneAndUpdate(
+      {
+        _id: booking._id, owner: req.user._id, updatedAt: booking.updatedAt,
+        manualPaymentRevision: booking.manualPaymentRevision || { $in: [0, null] },
+      },
+      { $set: changes, $inc: { manualPaymentRevision: 1 } },
+      { new: true, runValidators: true }
+    ).populate(populateFields);
+    if (!updated) {
+      const latest = await Booking.findOne({ _id: booking._id, owner: req.user._id }).populate(populateFields);
+      return res.status(409).json({
+        success: false, code: "BOOKING_PAYMENT_CHANGED",
+        message: "This booking changed. Review its latest payment status and try again.",
+        ...(latest ? { booking: serializeOwnerBooking(req, latest) } : {}),
+      });
+    }
 
     eventBus.emit(NOTIFICATION_EVENTS.PAYMENT_STATUS_UPDATED, {
-      booking,
+      booking: updated,
       actor: req.user,
       paymentStatus: requestedPaymentStatus,
     });
 
-    const payload = serializeOwnerBooking(req, booking);
-    emitToUser(String(booking.renter._id), "booking:updated", payload);
-    emitToUser(String(booking.owner._id), "booking:updated", payload);
+    const payload = serializeOwnerBooking(req, updated);
+    emitToUser(String(updated.renter?._id || updated.renter), "booking:updated", payload);
+    emitToUser(String(updated.owner?._id || updated.owner), "booking:updated", payload);
 
     res.json({
       success: true,
@@ -919,16 +1003,23 @@ export const confirmOwnerVehicleReturn = async (req, res) => {
 };
 
 export const reviewOwnerBookingExtensionRequest = async (req, res) => {
+  let renterLock;
   try {
     const action = String(req.body?.action || "").trim().toLowerCase();
     if (!EXTENSION_REVIEW_ACTIONS.has(action)) {
       return res.status(400).json({ success: false, message: "Invalid extension review action." });
     }
 
-    const booking = await Booking.findOne({ _id: req.params.id, owner: req.user._id }).populate(populateFields);
+    let booking = await Booking.findOne({ _id: req.params.id, owner: req.user._id }).populate(populateFields);
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
+
+    renterLock = await acquireBookingMutationLock(booking.renter?._id || booking.renter);
+    // Read again under the lease: a concurrent review may already have changed
+    // the request while this owner was acquiring the renter's schedule lock.
+    booking = await Booking.findOne({ _id: req.params.id, owner: req.user._id }).populate(populateFields);
+    if (!booking) return res.status(404).json({ success: false, message: "Booking not found." });
 
     await syncOwnerBookingLifecycleState(booking);
 
@@ -983,6 +1074,13 @@ export const reviewOwnerBookingExtensionRequest = async (req, res) => {
         });
       }
 
+      if (await findRenterScheduleConflict(booking, requestedReturnAt)) {
+        return res.status(409).json({
+          success: false, code: "RENTER_SCHEDULE_CONFLICT",
+          message: "This extension overlaps another booking held by the renter. Ask them to resolve that booking or request a different return time.",
+        });
+      }
+
       const recalculated = recalculateOwnerBookingAmountsForRange(booking, requestedReturnAt);
       if (!recalculated) {
         return res.status(400).json({
@@ -1008,6 +1106,7 @@ export const reviewOwnerBookingExtensionRequest = async (req, res) => {
       booking.actualReturnAt = null;
       booking.paymentUpdatedAt = now;
       syncOwnerBookingPaymentSnapshot(booking);
+      await renterLock.renew();
       await booking.save();
       await syncVehicleAvailabilityByBookingState(vehicleId);
 
@@ -1036,6 +1135,7 @@ export const reviewOwnerBookingExtensionRequest = async (req, res) => {
     booking.extensionReviewNote = note;
     booking.lateReturnAction = "none";
     booking.paymentUpdatedAt = now;
+    await renterLock.renew();
     await booking.save();
 
     const refreshed = await Booking.findById(booking._id).populate(populateFields);
@@ -1054,8 +1154,13 @@ export const reviewOwnerBookingExtensionRequest = async (req, res) => {
       message: "Extension request rejected.",
       booking: payload,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof BookingPolicyError) {
+      return res.status(409).json({ success: false, code: error.code, message: error.message });
+    }
     return res.status(500).json({ success: false, message: "Failed to review extension request." });
+  } finally {
+    await renterLock?.release();
   }
 };
 

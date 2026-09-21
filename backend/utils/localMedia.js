@@ -41,6 +41,12 @@ export const normalizeVehicleImageReference = (value = "") => {
   return `${VEHICLE_MEDIA_PREFIX}${fileName}`;
 };
 
+export const getUploadedVehicleImageReference = (file = {}) => {
+  const filename = path.basename(String(file?.filename || "").trim());
+  if (filename) return normalizeVehicleImageReference(`${VEHICLE_MEDIA_PREFIX}${filename}`);
+  return normalizeVehicleImageReference(file?.path || "");
+};
+
 export const getVehicleImagePath = (value = "") => {
   const key = normalizeVehicleImageReference(value);
   if (!key || /^https?:\/\//i.test(key)) return "";
@@ -71,7 +77,7 @@ export const removeLocalVehicleImages = async (values = []) => {
 
 export const cleanupUploadedVehicleFiles = async (files = []) => {
   const keys = (Array.isArray(files) ? files : [])
-    .map((file) => normalizeVehicleImageReference(file?.path || file?.filename || ""))
+    .map((file) => getUploadedVehicleImageReference(file))
     .filter(Boolean);
   await removeLocalVehicleImages(keys);
 };

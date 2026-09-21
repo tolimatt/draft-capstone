@@ -160,9 +160,14 @@ const API = {
 
   getPublicVehicles: (params = {}) =>
     request(`/vehicles${buildQueryString(params)}`, { cache: "no-store" }),
+  getVehicleLocations: (params = {}, signal) =>
+    request(`/vehicles/locations${buildQueryString(params)}`, { cache: "no-store", signal }),
   getPublicVehicleById: (id) =>
     request(`/vehicles/${encodeURIComponent(id)}`, { cache: "no-store" }),
   getOwnerVehicles: () => request("/owner/vehicles"),
+  getVehiclePhotos: () => request("/vehicle-photos", { cache: "no-store" }),
+  uploadVehiclePhoto: (body) => request("/vehicle-photos", { method: "POST", body }),
+  reviewVehiclePhoto: (id, body) => request(`/vehicle-photos/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   createOwnerVehicle: (formData) => request("/owner/vehicles", { method: "POST", body: formData }),
   updateOwnerVehicle: (id, formData) => request(`/owner/vehicles/${id}`, { method: "PUT", body: formData }),
   deleteOwnerVehicle: (id) => request(`/owner/vehicles/${id}`, { method: "DELETE" }),
@@ -173,6 +178,8 @@ const API = {
     }),
 
   createBooking: (body) => request("/bookings", { method: "POST", body: JSON.stringify(body) }),
+  getBookingEligibility: (options = {}) =>
+    request(`/bookings/eligibility${buildQueryString(options)}`, { cache: "no-store" }),
   getMyBookings: (options = "all") => {
     const params = typeof options === "string" ? { view: options } : options;
     return request(`/bookings/me${buildQueryString(params)}`);
@@ -230,10 +237,10 @@ const API = {
       method: "PATCH",
       body: JSON.stringify({ action, ...body }),
     }),
-  updateOwnerBookingPaymentStatus: (id, paymentStatus) =>
+  updateOwnerBookingPaymentStatus: (id, paymentStatus, details = {}) =>
     request(`/owner/bookings/${id}/payment-status`, {
       method: "PATCH",
-      body: JSON.stringify({ paymentStatus }),
+      body: JSON.stringify({ paymentStatus, paymentAmountPaid: details.paymentAmountPaid, expectedUpdatedAt: details.expectedUpdatedAt }),
     }),
   reviewOwnerBookingExtensionRequest: (id, action, body = {}) =>
     request(`/owner/bookings/${id}/extension-request`, {

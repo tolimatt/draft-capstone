@@ -1,13 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
-import { BadgeCheck, CarFront, Check, ImagePlus, MapPin, Settings2, UploadCloud, UserRoundCheck, Users, Wrench, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BadgeCheck, CarFront, Check, ImagePlus, MapPin, Save, Settings2, UploadCloud, UserRoundCheck, Users, Wrench, X } from "lucide-react";
 import API from "../../utils/api";
 import { isPhilippineLocation } from "../../utils/locationValidation";
 import VehicleCover from "../../components/VehicleCover";
 import VehicleCard from "../../components/VehicleCard";
 import "./Vehicles.css";
 import ModalPortal from "../../components/ModalPortal";
+import InfoModal from "../../components/InfoModal";
+import ConfirmationModal from "../../components/ConfirmationModal";
 import { validateVehicleImageFiles } from "../../utils/fileValidation";
 import OwnerPageHeader from "../components/OwnerPageHeader";
+import VehiclePhotoReviews from "../../components/VehiclePhotoReviews";
+import {
+  LISTING_LIMITS,
+  getPlateNumberLimit,
+  normalizeListingText,
+  sanitizeDecimalInput,
+  sanitizeIntegerInput,
+  sanitizeListingInput,
+  validateListingFields,
+} from "../../utils/vehicleListingValidation";
 
 const createInitialForm = () => ({
   name: "",
@@ -33,6 +45,17 @@ const createInitialForm = () => ({
   coverUploadIndex: "",
   coverDisplayMode: "auto",
 });
+
+const LISTING_TEXT_FIELDS = new Set(["name", "description", "location", "specSubType", "specPlateNumber"]);
+const LISTING_DECIMAL_FIELDS = new Set(["dailyRentalRate", "driverDailyRate", "lateReturnFeeValue"]);
+const LISTING_INTEGER_FIELDS = new Set(["specSeats", "lateReturnGraceMinutes"]);
+
+const sanitizeVehicleField = (field, value, specType) => {
+  if (LISTING_TEXT_FIELDS.has(field)) return sanitizeListingInput(value, field, { specType });
+  if (LISTING_DECIMAL_FIELDS.has(field)) return sanitizeDecimalInput(value);
+  if (LISTING_INTEGER_FIELDS.has(field)) return sanitizeIntegerInput(value);
+  return value;
+};
 
 const getVehicleOperationalStatus = (vehicle) => {
   if (vehicle?.availabilityStatus === "available") return "available";
@@ -63,6 +86,49 @@ const getFallbackCoverState = ({ existingImagePaths = [], newImageFiles = [] } =
   return { coverImagePath: "", coverUploadIndex: "" };
 };
 
+const getVehicleFormErrors = (form) => {
+  const errors = validateListingFields(form);
+  if (!errors.location && form.location.trim() && !isPhilippineLocation(form.location.trim())) {
+    errors.location = "Enter a valid location within the Philippines.";
+  }
+  if (!form.existingImages.length && !form.newImageFiles.length) {
+    errors.images = "Add at least one vehicle photo.";
+  }
+  return errors;
+};
+
+const getVehicleSubmissionError = (error) => {
+  return error?.message || "Failed to save vehicle.";
+};
+
+const VEHICLE_ERROR_FIELD_ALIASES = Object.freeze({
+  approvedImageIds: "images",
+  coverImagePath: "images",
+  coverUploadIndex: "images",
+  imageUrls: "images",
+});
+
+const normalizeVehicleFieldErrors = (errors = {}) => Object.fromEntries(
+  Object.entries(errors).map(([field, message]) => [VEHICLE_ERROR_FIELD_ALIASES[field] || field, message])
+);
+
+const focusVehicleField = (field) => {
+  const targetField = VEHICLE_ERROR_FIELD_ALIASES[field] || field;
+  window.requestAnimationFrame(() => {
+    const target = document.getElementById(`owner-vehicle-${targetField}`);
+    if (!target) return;
+    const scrollRegion = document.getElementById("owner-vehicle-form-scroll-region");
+    if (scrollRegion) {
+      const targetRect = target.getBoundingClientRect();
+      const scrollRect = scrollRegion.getBoundingClientRect();
+      const centeredTop = scrollRegion.scrollTop + targetRect.top - scrollRect.top
+        - Math.max(16, (scrollRegion.clientHeight - targetRect.height) / 2);
+      scrollRegion.scrollTo({ top: centeredTop, behavior: "smooth" });
+    }
+    target.focus({ preventScroll: true });
+  });
+};
+
 function VehicleFormSectionHeader({ step, icon: Icon, title, description }) {
   return (
     <div className="flex items-start gap-3 border-b border-slate-100 pb-4">
@@ -81,17 +147,25 @@ function VehicleFormSectionHeader({ step, icon: Icon, title, description }) {
   );
 }
 
-function VehicleSelectField({ label, value, onChange, options }) {
+function VehicleSelectField({ field, label, value, onChange, onBlur, options, error }) {
+  const helpId = `owner-vehicle-${field}-help`;
   return (
-    <label className="block">
+    <label htmlFor={`owner-vehicle-${field}`} className="block">
       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
         {label}
       </span>
       <span className="relative block">
         <select
-          className="h-11 w-full cursor-pointer rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-800 shadow-sm outline-none transition hover:border-slate-300 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
+          id={`owner-vehicle-${field}`}
+          aria-invalid={Boolean(error)}
+          aria-describedby={helpId}
+          className={`h-11 w-full cursor-pointer rounded-xl border bg-white px-3.5 text-sm font-medium text-slate-800 shadow-sm outline-none transition ${error
+            ? "border-red-300 bg-red-50/80 focus:border-red-400 focus:ring-4 focus:ring-red-100"
+            : "border-slate-200 hover:border-slate-300 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
+          }`}
           value={value}
           onChange={onChange}
+          onBlur={onBlur}
         >
           {options.map((option) => (
             <option key={option.value} value={option.value}>
@@ -100,6 +174,9 @@ function VehicleSelectField({ label, value, onChange, options }) {
           ))}
         </select>
       </span>
+      <p id={helpId} aria-live="polite" className={`mt-1 text-xs ${error ? "font-medium text-red-700" : "text-slate-600"}`}>
+        {error}
+      </p>
     </label>
   );
 }
@@ -110,12 +187,14 @@ function VehicleModal({
   setForm,
   loading,
   error,
-  locationError,
+  serverFieldErrors = {},
   onFileError,
-  onLocationChange,
+  onClearFieldError,
   onClose,
   onSubmit,
 }) {
+  const [touchedFields, setTouchedFields] = useState({});
+  const originalVehicleType = useRef(form.specType).current;
   const newImagePreviews = useMemo(
     () =>
       form.newImageFiles.map((file, index) => ({
@@ -155,9 +234,45 @@ function VehicleModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [loading, onClose]);
 
-  const inputClass =
-    "h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-[#017FE6] focus:outline-none focus:ring-4 focus:ring-blue-100";
+  const inputClass = "h-11 w-full rounded-xl border bg-white px-3.5 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:outline-none";
   const labelClass = "mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500";
+  const clientFieldErrors = getVehicleFormErrors(form);
+  const fieldErrors = { ...clientFieldErrors, ...serverFieldErrors };
+  const canSubmit = Object.keys(clientFieldErrors).length === 0 && Object.keys(serverFieldErrors).length === 0;
+  const visibleFieldError = (field) => serverFieldErrors[field] || (touchedFields[field] ? fieldErrors[field] : "");
+  const fieldClass = (field, extra = "") => `${inputClass} ${extra} ${
+    visibleFieldError(field)
+      ? "border-red-300 bg-red-50/80 focus:border-red-400 focus:ring-4 focus:ring-red-100"
+      : "border-slate-200 hover:border-slate-300 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
+  }`;
+  const updateField = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: sanitizeVehicleField(field, value, prev.specType) }));
+    onClearFieldError?.(field);
+  };
+  const updateChoice = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    onClearFieldError?.(field);
+  };
+  const markTouched = (field) => setTouchedFields((prev) => ({ ...prev, [field]: true }));
+  const listingInputProps = (field) => ({
+    id: `owner-vehicle-${field}`,
+    maxLength: field === "specPlateNumber" ? getPlateNumberLimit(form.specType) + 1 : LISTING_LIMITS[field],
+    "aria-invalid": Boolean(visibleFieldError(field)),
+    "aria-describedby": `owner-vehicle-${field}-help`,
+    onBlur: () => {
+      setTouchedFields((prev) => ({ ...prev, [field]: true }));
+      if (LISTING_LIMITS[field]) setForm((prev) => ({ ...prev, [field]: normalizeListingText(prev[field], field === "description") }));
+    },
+  });
+  const fieldHint = (field) => <p id={`owner-vehicle-${field}-help`} aria-live="polite" className={`mt-1 text-xs ${visibleFieldError(field) ? "font-medium text-red-700" : "text-slate-600"}`}>
+    {visibleFieldError(field)}
+    {field === "description" && <span className="block">{form.description.length}/2,000 characters · minimum 30. Describe condition, features, and renter expectations.</span>}
+    {field === "specPlateNumber" && (
+      <span className="block">
+        {form.specPlateNumber.replace(/[^A-Z0-9]/gi, "").length}/{getPlateNumberLimit(form.specType)} letters or numbers for {form.specType === "motorcycle" ? "motorcycles" : "cars, vans, and trucks"}. A space or hyphen is optional.
+      </span>
+    )}
+  </p>;
 
   const listingChecks = [
     { label: "Listing details", complete: Boolean(form.name.trim() && form.location.trim() && form.description.trim()) },
@@ -173,12 +288,18 @@ function VehicleModal({
       <div className="rp-modal-layer" role="dialog" aria-modal="true" aria-labelledby="vehicle-modal-title">
         <button type="button" className="rp-modal-backdrop" onClick={loading ? undefined : onClose} aria-label="Close vehicle form" />
         <form
+          aria-busy={loading}
           onSubmit={(event) => {
             event.preventDefault();
-            onSubmit();
+          setTouchedFields((prev) => ({
+            ...prev,
+            ...Object.fromEntries(Object.keys(clientFieldErrors).map((field) => [field, true])),
+          }));
+          onSubmit();
           }}
           className="relative flex max-h-[94dvh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.32)] sm:rounded-3xl"
         >
+          <fieldset disabled={loading} className="contents">
           <div className="border-b border-slate-200 bg-white px-5 py-4 sm:px-7 sm:py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
@@ -207,14 +328,8 @@ function VehicleModal({
             </div>
           </div>
 
-          <div className="grid flex-1 overflow-y-auto bg-[#f7f9fc] xl:grid-cols-[minmax(0,1.75fr)_minmax(300px,0.75fr)]">
+          <div id="owner-vehicle-form-scroll-region" className="grid flex-1 overflow-y-auto bg-[#f7f9fc] xl:grid-cols-[minmax(0,1.75fr)_minmax(300px,0.75fr)]">
             <div className="min-w-0 space-y-5 p-4 sm:p-6">
-            {error && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-                {error}
-              </div>
-            )}
-
             <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] sm:p-5">
               <VehicleFormSectionHeader
                 step="01"
@@ -225,77 +340,93 @@ function VehicleModal({
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className={labelClass}>Vehicle Name</label>
-                  <input
-                    className={inputClass}
+                  <label htmlFor="owner-vehicle-name" className={labelClass}>Vehicle Name</label>
+                  <input {...listingInputProps("name")}
+                    className={fieldClass("name")}
                     placeholder="Ex. Honda Civic RS"
                     value={form.name}
-                    onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                    onChange={(e) => updateField("name", e.target.value)}
                   />
+                  {fieldHint("name")}
                 </div>
                 <div>
-                  <label className={labelClass}>Location</label>
-                  <input
-                    className={inputClass}
+                  <label htmlFor="owner-vehicle-location" className={labelClass}>Location</label>
+                  <input {...listingInputProps("location")}
+                    className={fieldClass("location")}
                     placeholder="Ex. Quezon City"
                     value={form.location}
-                    onChange={(e) => onLocationChange(e.target.value)}
+                    onChange={(e) => updateField("location", e.target.value)}
                   />
-                  {locationError && (
-                    <p className="mt-2 text-xs font-semibold text-rose-600">{locationError}</p>
-                  )}
+                  {fieldHint("location")}
                 </div>
               </div>
 
               <div>
-                <label className={labelClass}>Description</label>
-                <textarea
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-[#017FE6] focus:outline-none focus:ring-4 focus:ring-blue-100"
+                <label htmlFor="owner-vehicle-description" className={labelClass}>Description</label>
+                <textarea {...listingInputProps("description")}
+                  className={`${fieldClass("description")} h-auto min-h-24 py-2.5`}
                   rows={3}
                   placeholder="Describe the vehicle condition, notable features, and renter expectations."
                   value={form.description}
-                  onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                  onChange={(e) => updateField("description", e.target.value)}
                 />
+                  {fieldHint("description")}
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
-                  <label className={labelClass}>Hourly Rate</label>
+                  <label htmlFor="owner-vehicle-dailyRentalRate" className={labelClass}>Hourly Rate</label>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">₱</span>
-                    <input
-                      type="number"
-                      min="0"
-                      className={`${inputClass} pl-8`}
+                    <input {...listingInputProps("dailyRentalRate")}
+                      type="text"
+                      inputMode="decimal"
+                      className={fieldClass("dailyRentalRate", "pl-8")}
                       placeholder="0"
                       value={form.dailyRentalRate}
-                      onChange={(e) => setForm((prev) => ({ ...prev, dailyRentalRate: e.target.value }))}
+                      onChange={(e) => updateField("dailyRentalRate", e.target.value)}
                     />
                   </div>
+                  {fieldHint("dailyRentalRate")}
                 </div>
                 <div>
-                  <label className={labelClass}>Availability</label>
-                  <div className="grid h-11 grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1">
+                  <label id="owner-vehicle-availabilityStatus-label" className={labelClass}>Availability</label>
+                  <div
+                    id="owner-vehicle-availabilityStatus"
+                    role="group"
+                    tabIndex={-1}
+                    aria-labelledby="owner-vehicle-availabilityStatus-label"
+                    aria-invalid={Boolean(visibleFieldError("availabilityStatus"))}
+                    aria-describedby="owner-vehicle-availabilityStatus-help"
+                    className={`grid h-11 grid-cols-2 rounded-xl border p-1 focus:outline-none focus:ring-4 ${visibleFieldError("availabilityStatus")
+                      ? "border-red-300 bg-red-50/80 focus:ring-red-100"
+                      : "border-slate-200 bg-slate-100 focus:ring-blue-100"
+                    }`}
+                  >
                     {["available", "unavailable"].map((status) => (
                       <button
                         key={status}
                         type="button"
-                        onClick={() => setForm((prev) => ({ ...prev, availabilityStatus: status }))}
+                        onClick={() => updateChoice("availabilityStatus", status)}
                         className={`rounded-lg text-xs font-semibold capitalize transition ${form.availabilityStatus === status ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
                       >
                         {status}
                       </button>
                     ))}
                   </div>
+                  <p id="owner-vehicle-availabilityStatus-help" aria-live="polite" className={`mt-1 text-xs ${visibleFieldError("availabilityStatus") ? "font-medium text-red-700" : "text-slate-600"}`}>
+                    {visibleFieldError("availabilityStatus")}
+                  </p>
                 </div>
                 <div>
-                  <label className={labelClass}>Plate Number</label>
-                  <input
-                    className={inputClass}
+                  <label htmlFor="owner-vehicle-specPlateNumber" className={labelClass}>Plate Number</label>
+                  <input {...listingInputProps("specPlateNumber")}
+                    className={fieldClass("specPlateNumber")}
                     placeholder="Ex. ABC-1234"
                     value={form.specPlateNumber}
-                    onChange={(e) => setForm((prev) => ({ ...prev, specPlateNumber: e.target.value }))}
+                    onChange={(e) => updateField("specPlateNumber", e.target.value)}
                   />
+                  {fieldHint("specPlateNumber")}
                 </div>
               </div>
 
@@ -308,44 +439,45 @@ function VehicleModal({
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                   <VehicleSelectField
+                    field="lateReturnFeeType"
                     label="Fee type"
                     value={form.lateReturnFeeType}
-                    onChange={(event) => setForm((prev) => ({ ...prev, lateReturnFeeType: event.target.value }))}
+                    onChange={(event) => updateChoice("lateReturnFeeType", event.target.value)}
+                    onBlur={() => markTouched("lateReturnFeeType")}
+                    error={visibleFieldError("lateReturnFeeType")}
                     options={[
                       { value: "percentage", label: "Percentage" },
                       { value: "fixed_hourly", label: "Fixed per hour" },
                     ]}
                   />
                   <div>
-                    <label className={labelClass}>
+                    <label htmlFor="owner-vehicle-lateReturnFeeValue" className={labelClass}>
                       {form.lateReturnFeeType === "fixed_hourly" ? "Fee per overdue hour" : "Percentage"}
                     </label>
                     <div className="relative">
                       <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">
                         {form.lateReturnFeeType === "fixed_hourly" ? "₱" : "%"}
                       </span>
-                      <input
-                        type="number"
-                        min="0"
-                        max={form.lateReturnFeeType === "fixed_hourly" ? "100000" : "100"}
-                        step="0.01"
-                        className={`${inputClass} pl-8`}
+                      <input {...listingInputProps("lateReturnFeeValue")}
+                        type="text"
+                        inputMode="decimal"
+                        className={fieldClass("lateReturnFeeValue", "pl-8")}
                         value={form.lateReturnFeeValue}
-                        onChange={(event) => setForm((prev) => ({ ...prev, lateReturnFeeValue: event.target.value }))}
+                        onChange={(event) => updateField("lateReturnFeeValue", event.target.value)}
                       />
                     </div>
+                    {fieldHint("lateReturnFeeValue")}
                   </div>
                   <div>
-                    <label className={labelClass}>Grace period (minutes)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="1440"
-                      step="1"
-                      className={inputClass}
+                    <label htmlFor="owner-vehicle-lateReturnGraceMinutes" className={labelClass}>Grace period (minutes)</label>
+                    <input {...listingInputProps("lateReturnGraceMinutes")}
+                      type="text"
+                      inputMode="numeric"
+                      className={fieldClass("lateReturnGraceMinutes")}
                       value={form.lateReturnGraceMinutes}
-                      onChange={(event) => setForm((prev) => ({ ...prev, lateReturnGraceMinutes: event.target.value }))}
+                      onChange={(event) => updateField("lateReturnGraceMinutes", event.target.value)}
                     />
+                    {fieldHint("lateReturnGraceMinutes")}
                   </div>
                 </div>
                 <p className="mt-3 text-xs font-medium text-amber-900">
@@ -365,9 +497,18 @@ function VehicleModal({
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-5">
                     <VehicleSelectField
+                      field="specType"
                       label="Type"
                       value={form.specType}
-                      onChange={(e) => setForm((prev) => ({ ...prev, specType: e.target.value }))}
+                      onChange={(e) => {
+                        updateChoice("specType", e.target.value);
+                        setTouchedFields((prev) => ({ ...prev, specPlateNumber: true, specSeats: true }));
+                        onClearFieldError?.("specPlateNumber");
+                        onClearFieldError?.("specSeats");
+                        onClearFieldError?.("images");
+                      }}
+                      onBlur={() => markTouched("specType")}
+                      error={visibleFieldError("specType")}
                       options={[
                         { value: "car", label: "Car" },
                         { value: "motorcycle", label: "Motorcycle" },
@@ -376,38 +517,46 @@ function VehicleModal({
                       ]}
                     />
                 <div>
-                  <label className={labelClass}>Sub-type</label>
-                  <input
-                    className={inputClass}
+                  <label htmlFor="owner-vehicle-specSubType" className={labelClass}>Sub-type</label>
+                  <input {...listingInputProps("specSubType")}
+                    className={fieldClass("specSubType")}
                     placeholder="Ex. Sedan"
                     value={form.specSubType}
-                    onChange={(e) => setForm((prev) => ({ ...prev, specSubType: e.target.value }))}
+                    onChange={(e) => updateField("specSubType", e.target.value)}
                   />
+                  {fieldHint("specSubType")}
                 </div>
                 <div>
-                  <label className={labelClass}>Seats</label>
-                  <input
-                    type="number"
-                    min="1"
-                    className={inputClass}
+                  <label htmlFor="owner-vehicle-specSeats" className={labelClass}>Seats</label>
+                  <input {...listingInputProps("specSeats")}
+                    type="text"
+                    inputMode="numeric"
+                    className={fieldClass("specSeats")}
                     placeholder="4"
                     value={form.specSeats}
-                    onChange={(e) => setForm((prev) => ({ ...prev, specSeats: e.target.value }))}
+                    onChange={(e) => updateField("specSeats", e.target.value)}
                   />
+                  {fieldHint("specSeats")}
                 </div>
                     <VehicleSelectField
+                      field="specTransmission"
                       label="Transmission"
                       value={form.specTransmission}
-                      onChange={(e) => setForm((prev) => ({ ...prev, specTransmission: e.target.value }))}
+                      onChange={(e) => updateChoice("specTransmission", e.target.value)}
+                      onBlur={() => markTouched("specTransmission")}
+                      error={visibleFieldError("specTransmission")}
                       options={[
                         { value: "Automatic", label: "Automatic" },
                         { value: "Manual", label: "Manual" },
                       ]}
                     />
                     <VehicleSelectField
+                      field="specFuel"
                       label="Fuel"
                       value={form.specFuel}
-                      onChange={(e) => setForm((prev) => ({ ...prev, specFuel: e.target.value }))}
+                      onChange={(e) => updateChoice("specFuel", e.target.value)}
+                      onBlur={() => markTouched("specFuel")}
+                      error={visibleFieldError("specFuel")}
                       options={[
                         { value: "Gasoline", label: "Gasoline" },
                         { value: "Diesel", label: "Diesel" },
@@ -428,12 +577,13 @@ function VehicleModal({
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    setTouchedFields((prev) => ({ ...prev, driverDailyRate: true }));
                     setForm((prev) => ({
                       ...prev,
                       driverOptionEnabled: true,
-                    }))
-                  }
+                    }));
+                  }}
                   className={`rounded-xl border px-4 py-3 text-left transition ${
                     form.driverOptionEnabled
                       ? "border-[#017FE6] bg-blue-50 text-blue-700 ring-2 ring-blue-100"
@@ -464,21 +614,22 @@ function VehicleModal({
               </div>
               {form.driverOptionEnabled && (
                 <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
-                  <label className={labelClass}>Driver hourly rate</label>
+                  <label htmlFor="owner-vehicle-driverDailyRate" className={labelClass}>Driver hourly rate</label>
                   <div className="flex items-center gap-3">
                     <div className="relative w-full max-w-xs">
                       <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-500">₱</span>
-                      <input
-                        type="number"
-                        min="0"
-                        className={`${inputClass} pl-8`}
+                      <input {...listingInputProps("driverDailyRate")}
+                        type="text"
+                        inputMode="decimal"
+                        className={fieldClass("driverDailyRate", "pl-8")}
                         placeholder="0"
                         value={form.driverDailyRate}
-                        onChange={(event) => setForm((prev) => ({ ...prev, driverDailyRate: event.target.value }))}
+                        onChange={(event) => updateField("driverDailyRate", event.target.value)}
                       />
                     </div>
                     <span className="text-xs text-slate-500">Added to the vehicle rate per hour</span>
                   </div>
+                  {fieldHint("driverDailyRate")}
                 </div>
               )}
             </section>
@@ -498,6 +649,12 @@ function VehicleModal({
                 Choose one cover image for the renter and owner cards. The rest stay in the gallery.
               </p>
 
+              {mode === "edit" && form.specType !== originalVehicleType && form.existingImages.length > 0 && (
+                <div role="status" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                  Existing photos will be checked against the <span className="font-semibold">{form.specType}</span> category when you save. If the category cannot be confirmed automatically, the listing stays unchanged until an administrator approves the photo review.
+                </div>
+              )}
+
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                 <div className="max-w-2xl">
                   <p className="text-sm font-semibold text-slate-800">Cover presentation</p>
@@ -505,7 +662,15 @@ function VehicleModal({
                     Auto uses a full photo for opaque images and the RentifyPro background for transparent cutouts.
                   </p>
 
-                  <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Cover presentation">
+                  <div
+                    id="owner-vehicle-coverDisplayMode"
+                    className={`mt-3 grid grid-cols-3 gap-2 rounded-xl focus:outline-none focus:ring-4 ${visibleFieldError("coverDisplayMode") ? "ring-2 ring-red-200 focus:ring-red-100" : "focus:ring-blue-100"}`}
+                    role="group"
+                    tabIndex={-1}
+                    aria-label="Cover presentation"
+                    aria-invalid={Boolean(visibleFieldError("coverDisplayMode"))}
+                    aria-describedby="owner-vehicle-coverDisplayMode-help"
+                  >
                     {[
                       { value: "auto", label: "Auto" },
                       { value: "photo", label: "Photo" },
@@ -515,10 +680,12 @@ function VehicleModal({
                         key={option.value}
                         type="button"
                         aria-pressed={form.coverDisplayMode === option.value}
-                        onClick={() => setForm((prev) => ({ ...prev, coverDisplayMode: option.value }))}
+                        onClick={() => updateChoice("coverDisplayMode", option.value)}
                         className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
                           form.coverDisplayMode === option.value
-                            ? "border-[#017FE6] bg-blue-50 text-blue-700 ring-2 ring-blue-100"
+                            ? visibleFieldError("coverDisplayMode")
+                              ? "border-red-400 bg-red-50 text-red-700 ring-2 ring-red-100"
+                              : "border-[#017FE6] bg-blue-50 text-blue-700 ring-2 ring-blue-100"
                             : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"
                         }`}
                       >
@@ -527,57 +694,94 @@ function VehicleModal({
                     ))}
                   </div>
 
+                  <p id="owner-vehicle-coverDisplayMode-help" aria-live="polite" className={`mt-2 text-xs ${visibleFieldError("coverDisplayMode") ? "font-medium text-red-700" : "text-slate-600"}`}>
+                    {visibleFieldError("coverDisplayMode")}
+                  </p>
+
                   <p className="mt-3 text-xs text-slate-500">
                     Use Photo for regular JPGs. Use Cutout only when the image background is transparent.
                   </p>
                 </div>
               </div>
 
-              <label className="group flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 transition hover:border-[#017FE6] hover:bg-blue-50/40">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-[#017FE6] shadow-sm ring-1 ring-slate-200">
-                    <UploadCloud size={16} />
+              <div
+                id="owner-vehicle-images"
+                role="group"
+                tabIndex={-1}
+                aria-invalid={Boolean(visibleFieldError("images"))}
+                aria-describedby="owner-vehicle-images-help"
+                className={`rounded-xl border border-dashed transition focus:outline-none focus:ring-4 ${visibleFieldError("images")
+                  ? "border-red-400 bg-red-50/80 focus:ring-red-100"
+                  : "border-slate-300 bg-slate-50 focus:ring-blue-100"
+                }`}
+              >
+                <label className="group flex cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-blue-50/40">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg bg-white shadow-sm ring-1 ${visibleFieldError("images") ? "text-red-600 ring-red-200" : "text-[#017FE6] ring-slate-200"}`}>
+                      <UploadCloud size={16} />
+                    </div>
+                    <div>
+                      <p className={`text-sm font-semibold ${visibleFieldError("images") ? "text-red-800" : "text-slate-700"}`}>Upload vehicle photos</p>
+                      <p className={`text-xs ${visibleFieldError("images") ? "text-red-700" : "text-slate-500"}`}>PNG, JPG, or WEBP format</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-700">Upload vehicle photos</p>
-                    <p className="text-xs text-slate-500">PNG, JPG, or WEBP format</p>
-                  </div>
-                </div>
-                <span className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
-                  Choose Files
-                </span>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={(e) => {
-                    const selected = Array.from(e.target.files || []);
-                    if (!selected.length) return;
-                    const combined = [...form.newImageFiles, ...selected];
-                    try {
-                      validateVehicleImageFiles(combined);
-                      onFileError?.("");
-                    } catch (validationError) {
-                      onFileError?.(validationError.message || "Please choose valid vehicle photos.");
+                  <span className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                    Choose Files
+                  </span>
+                  <input
+                    id="owner-vehicle-images-input"
+                    type="file"
+                    multiple
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      setTouchedFields((prev) => ({ ...prev, images: true }));
+                      onClearFieldError?.("images");
+                      const selected = Array.from(e.target.files || []);
+                      if (!selected.length) return;
+                      const combined = [...form.newImageFiles, ...selected];
+                      try {
+                        if (form.existingImages.length + combined.length > 8) throw new Error("Choose up to eight photos in total.");
+                        validateVehicleImageFiles(combined);
+                        onFileError?.("");
+                      } catch (validationError) {
+                        onFileError?.(validationError.message || "Please choose valid vehicle photos.");
+                        e.target.value = "";
+                        return;
+                      }
+                      setForm((prev) => ({
+                        ...prev,
+                        newImageFiles: combined,
+                        ...(prev.coverImagePath || prev.coverUploadIndex !== ""
+                          ? {}
+                          : getFallbackCoverState({
+                              existingImagePaths: prev.existingImagePaths,
+                              newImageFiles: combined,
+                            })),
+                      }));
                       e.target.value = "";
-                      return;
-                    }
-                    setForm((prev) => ({
-                      ...prev,
-                      newImageFiles: combined,
-                      ...(prev.coverImagePath || prev.coverUploadIndex !== ""
-                        ? {}
-                        : getFallbackCoverState({
-                            existingImagePaths: prev.existingImagePaths,
-                            newImageFiles: combined,
-                          })),
-                    }));
-                    e.target.value = "";
-                  }}
-                />
-              </label>
+                    }}
+                  />
+                </label>
+              </div>
 
+              <p id="owner-vehicle-images-help" aria-live="assertive" className={`text-xs ${visibleFieldError("images") ? "font-medium text-red-700" : "text-slate-600"}`}>
+                {visibleFieldError("images")}
+              </p>
+
+              <p className="mt-3 text-sm text-slate-600">Photos are checked when you save. Use clear JPG, PNG, or WEBP images (320 by 200 pixels minimum, 5 MB maximum). Pending photos stay private; the cover must show the vehicle exterior.</p>
+              <details className="mt-3">
+                <summary className="cursor-pointer py-2 text-sm font-semibold">Your photo reviews</summary>
+                <VehiclePhotoReviews vehicleType={form.specType} refreshSignal={form.newImageFiles.map((file) => file.reviewId || "").join(",")} onRefresh={() => onClearFieldError?.("images")} onSelect={(file) => {
+                  if (form.existingImages.length + form.newImageFiles.length >= 8) { onFileError("Choose up to eight photos."); return; }
+                  if (form.newImageFiles.some((item) => item.reviewId === file.reviewId)) { onFileError("This photo is already selected."); return; }
+                  onClearFieldError?.("images");
+                  setForm((prev) => {
+                    const files = [...prev.newImageFiles, file];
+                    return { ...prev, newImageFiles: files, ...(!prev.coverImagePath && prev.coverUploadIndex === "" ? getFallbackCoverState({ existingImagePaths: prev.existingImagePaths, newImageFiles: files }) : {}) };
+                  });
+                }} />
+              </details>
               {form.newImageFiles.length > 0 && (
                 <p className="text-xs text-slate-500">
                   {form.newImageFiles.length} new image(s) selected
@@ -597,7 +801,9 @@ function VehicleModal({
                       <button
                         type="button"
                         className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-700 shadow transition hover:bg-red-500 hover:text-white"
-                        onClick={() =>
+                        onClick={() => {
+                          markTouched("images");
+                          onClearFieldError?.("images");
                           setForm((prev) => {
                             const nextExistingImages = prev.existingImages.filter((_, idx) => idx !== index);
                             const nextExistingImagePaths = prev.existingImagePaths.filter((_, idx) => idx !== index);
@@ -618,8 +824,8 @@ function VehicleModal({
                                   })
                                 : {}),
                             };
-                          })
-                        }
+                          });
+                        }}
                         aria-label="Remove existing image"
                       >
                         <X size={16} strokeWidth={2} />
@@ -657,7 +863,9 @@ function VehicleModal({
                       <button
                         type="button"
                         className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-700 shadow transition hover:bg-red-500 hover:text-white"
-                        onClick={() =>
+                        onClick={() => {
+                          markTouched("images");
+                          onClearFieldError?.("images");
                           setForm((prev) => {
                             const nextNewImageFiles = prev.newImageFiles.filter((_, idx) => idx !== index);
                             const currentCoverUploadIndex = Number.parseInt(String(prev.coverUploadIndex), 10);
@@ -688,8 +896,8 @@ function VehicleModal({
                               coverImagePath: nextCoverImagePath,
                               coverUploadIndex: nextCoverUploadIndex,
                             };
-                          })
-                        }
+                          });
+                        }}
                         aria-label="Remove new image"
                       >
                         <X size={16} strokeWidth={2} />
@@ -798,9 +1006,17 @@ function VehicleModal({
           </div>
 
           <div className="flex flex-col gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-            <div className="hidden items-center gap-2 text-xs text-slate-500 sm:flex">
-              <BadgeCheck size={16} strokeWidth={2} className="text-[#017FE6]" aria-hidden="true" />
-              Changes are reviewed before they appear to renters.
+            <div className="min-w-0 flex-1" aria-live="polite">
+              {error ? (
+                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                  {error}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <BadgeCheck size={16} strokeWidth={2} className="shrink-0 text-[#017FE6]" aria-hidden="true" />
+                  {canSubmit ? "Ready to save. Changes are reviewed before they appear to renters." : "Fix the highlighted fields to enable saving."}
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3">
             <button
@@ -813,13 +1029,16 @@ function VehicleModal({
             </button>
             <button
               type="submit"
-              disabled={loading}
-              className="rounded-xl bg-[#017FE6] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(1,127,230,0.25)] transition hover:bg-[#016fc8] disabled:cursor-wait disabled:opacity-70"
+              disabled={loading || !canSubmit}
+              aria-disabled={loading || !canSubmit}
+              title={!loading && !canSubmit ? "Fix the highlighted fields and complete all required details before saving." : undefined}
+              className="rounded-xl bg-[#017FE6] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(1,127,230,0.25)] transition hover:bg-[#016fc8] disabled:cursor-not-allowed disabled:opacity-55"
             >
-              {loading ? "Saving..." : mode === "edit" ? "Save Changes" : "Add Vehicle"}
+              {loading ? "Checking photos and saving..." : mode === "edit" ? "Save Changes" : "Add Vehicle"}
             </button>
             </div>
           </div>
+          </fieldset>
         </form>
       </div>
     </ModalPortal>
@@ -827,6 +1046,12 @@ function VehicleModal({
 }
 
 function Vehicles() {
+  const submissionRef = useRef(false);
+  const deletionRef = useRef(false);
+  const searchRef = useRef(null);
+  const [vehicleToDelete, setVehicleToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -837,10 +1062,31 @@ function Vehicles() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState("create");
   const [modalError, setModalError] = useState("");
+  const [modalFieldErrors, setModalFieldErrors] = useState({});
   const [modalLoading, setModalLoading] = useState(false);
-  const [locationError, setLocationError] = useState("");
+  const [editConfirmationOpen, setEditConfirmationOpen] = useState(false);
+  const [vehicleSuccess, setVehicleSuccess] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(createInitialForm());
+
+  const showModalFieldErrors = (errors) => {
+    const normalizedErrors = normalizeVehicleFieldErrors(errors);
+    setModalError("");
+    setModalFieldErrors(normalizedErrors);
+    const firstField = Object.keys(normalizedErrors)[0];
+    if (firstField) focusVehicleField(firstField);
+  };
+
+  const setModalFieldError = (field, message) => {
+    setModalError("");
+    setModalFieldErrors((prev) => {
+      const next = { ...prev };
+      if (message) next[field] = message;
+      else delete next[field];
+      return next;
+    });
+    if (message) focusVehicleField(field);
+  };
 
   const loadVehicles = async () => {
     setLoading(true);
@@ -865,6 +1111,8 @@ function Vehicles() {
       setEditingId(null);
       setForm(createInitialForm());
       setModalError("");
+      setModalFieldErrors({});
+      setEditConfirmationOpen(false);
       setModalOpen(true);
     };
     window.addEventListener("open-add-vehicle", openAdd);
@@ -913,18 +1161,12 @@ function Vehicles() {
       coverDisplayMode: vehicle.coverDisplayMode || "auto",
     });
     setModalError("");
-    setLocationError("");
+    setModalFieldErrors({});
+    setEditConfirmationOpen(false);
     setModalOpen(true);
   };
 
-  const handleLocationChange = (value) => {
-    setForm((prev) => ({ ...prev, location: value }));
-    if (locationError && (!value.trim() || isPhilippineLocation(value))) {
-      setLocationError("");
-    }
-  };
-
-  const buildFormData = () => {
+  const buildFormData = (approvedImageIds) => {
     const body = new FormData();
     body.append("name", form.name);
     body.append("description", form.description);
@@ -947,61 +1189,91 @@ function Vehicles() {
     if (form.coverUploadIndex !== "") body.append("coverUploadIndex", String(form.coverUploadIndex));
     body.append("coverDisplayMode", form.coverDisplayMode || "auto");
 
-    form.newImageFiles.forEach((file) => body.append("images", file));
+    body.append("approvedImageIds", JSON.stringify(approvedImageIds));
     return body;
   };
 
   const submitModal = async () => {
+    if (submissionRef.current) return;
+    submissionRef.current = true;
     setModalLoading(true);
     setModalError("");
-    setLocationError("");
+    setModalFieldErrors({});
     try {
-      const trimmedLocation = form.location.trim();
-      if (!trimmedLocation) {
-        setModalError("Please enter a vehicle location.");
-        setLocationError("Location is required.");
+      const validationErrors = getVehicleFormErrors(form);
+      if (Object.keys(validationErrors).length) {
+        showModalFieldErrors(validationErrors);
         return;
       }
-      if (!isPhilippineLocation(trimmedLocation)) {
-        const message = "Only vehicle locations within the Philippines are allowed.";
-        setModalError(message);
-        setLocationError(message);
+      let reviews;
+      try {
+        validateVehicleImageFiles(form.newImageFiles);
+        const currentReviews = form.newImageFiles.length ? (await API.getVehiclePhotos()).photos || [] : [];
+        reviews = [];
+        for (const file of form.newImageFiles) {
+          let review = file.reviewType === form.specType ? currentReviews.find((photo) => photo.id === file.reviewId) : null;
+          if (!review) {
+            const upload = new FormData();
+            upload.append("vehicleType", form.specType);
+            upload.append("image", file);
+            review = (await API.uploadVehiclePhoto(upload)).photo;
+            file.reviewId = review.id;
+            file.reviewType = form.specType;
+          }
+          reviews.push(review);
+        }
+      } catch (imageError) {
+        showModalFieldErrors({ images: getVehicleSubmissionError(imageError) });
         return;
       }
-      const lateReturnFeeValue = Number(form.lateReturnFeeValue);
-      const lateReturnGraceMinutes = Number(form.lateReturnGraceMinutes);
-      const maxLateReturnFee = form.lateReturnFeeType === "fixed_hourly" ? 100000 : 100;
-      if (!Number.isFinite(lateReturnFeeValue) || lateReturnFeeValue < 0 || lateReturnFeeValue > maxLateReturnFee) {
-        setModalError(
-          form.lateReturnFeeType === "fixed_hourly"
-            ? "Late-return fee must be between ₱0 and ₱100,000 per overdue hour."
-            : "Late-return percentage must be between 0% and 100%."
-        );
+      const unapproved = reviews.find((photo) => photo.status !== "approved");
+      if (unapproved) {
+        showModalFieldErrors({ images: `${unapproved.reason} Your listing has not changed. Open Your photo reviews below to check the decision, then refresh the reviews before saving again.` });
         return;
       }
-      if (
-        !Number.isInteger(lateReturnGraceMinutes) ||
-        lateReturnGraceMinutes < 0 ||
-        lateReturnGraceMinutes > 1440
-      ) {
-        setModalError("Late-return grace period must be a whole number from 0 to 1,440 minutes.");
-        return;
-      }
-      validateVehicleImageFiles(form.newImageFiles);
+      const approvedImageIds = reviews.map((photo) => photo.id);
 
       if (modalMode === "create") {
-        await API.createOwnerVehicle(buildFormData());
+        await API.createOwnerVehicle(buildFormData(approvedImageIds));
       } else {
-        await API.updateOwnerVehicle(editingId, buildFormData());
+        await API.updateOwnerVehicle(editingId, buildFormData(approvedImageIds));
       }
       setModalOpen(false);
       setForm(createInitialForm());
       await loadVehicles();
+      setVehicleSuccess(modalMode === "create"
+        ? {
+            title: "Vehicle Added",
+            message: `${form.name.trim()} was added successfully and is now in your vehicle list.`,
+          }
+        : {
+            title: "Vehicle Updated",
+            message: `${form.name.trim()} was updated successfully.`,
+          });
     } catch (err) {
-      setModalError(err.message || "Failed to save vehicle.");
+      const serverErrors = err?.details?.errors;
+      if (serverErrors && typeof serverErrors === "object" && Object.keys(serverErrors).length) {
+        showModalFieldErrors(serverErrors);
+      } else {
+        setModalError(getVehicleSubmissionError(err));
+      }
     } finally {
       setModalLoading(false);
+      submissionRef.current = false;
     }
+  };
+
+  const requestModalSubmit = () => {
+    if (modalMode === "edit") {
+      setEditConfirmationOpen(true);
+      return;
+    }
+    submitModal();
+  };
+
+  const confirmVehicleEdit = async () => {
+    await submitModal();
+    setEditConfirmationOpen(false);
   };
 
   const updateVehicleStatus = async (vehicle, operationalStatus) => {
@@ -1034,13 +1306,21 @@ function Vehicles() {
     }
   };
 
-  const deleteVehicle = async (vehicleId) => {
-    if (!window.confirm("Delete this vehicle?")) return;
+  const deleteVehicle = async () => {
+    if (!vehicleToDelete || deletionRef.current) return;
+    const vehicleId = vehicleToDelete._id;
+    deletionRef.current = true;
+    setDeleting(true);
+    setDeleteError("");
     try {
       await API.deleteOwnerVehicle(vehicleId);
       setVehicles((prev) => prev.filter((vehicle) => vehicle._id !== vehicleId));
+      setVehicleToDelete(null);
     } catch (err) {
-      setError(err.message || "Failed to delete vehicle.");
+      setDeleteError(err.message || "Failed to delete vehicle. Please try again.");
+    } finally {
+      deletionRef.current = false;
+      setDeleting(false);
     }
   };
 
@@ -1055,6 +1335,8 @@ function Vehicles() {
         <input
           className="min-w-0 flex-1 rounded-lg border px-3 py-2"
           placeholder="Search by name, location, or plate number"
+          ref={searchRef}
+          aria-label="Search your vehicles"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -1067,7 +1349,7 @@ function Vehicles() {
             <option value="all">All Vehicles</option>
             <option value="available">Available</option>
             <option value="unavailable">Unavailable</option>
-            <option value="inspection">Under inspection/maintenance</option>
+            <option value="inspection">Under Inspection</option>
           </select>
         </div>
       </div>
@@ -1101,7 +1383,7 @@ function Vehicles() {
                 >
                   <option value="available">Available</option>
                   <option value="unavailable">Unavailable</option>
-                  <option value="inspection">Under inspection/maintenance</option>
+                  <option value="inspection">Under Inspection</option>
                 </select>
               </label>
             }
@@ -1111,7 +1393,7 @@ function Vehicles() {
               </button>
               <button
                 type="button"
-                onClick={() => deleteVehicle(vehicle._id)}
+                onClick={() => { setDeleteError(""); setVehicleToDelete(vehicle); }}
                 className="bg-rose-50 text-rose-700 transition hover:bg-rose-100"
                 aria-label={`Delete ${vehicle.name}`}
               >
@@ -1128,13 +1410,52 @@ function Vehicles() {
           setForm={setForm}
           loading={modalLoading}
           error={modalError}
-          locationError={locationError}
-          onFileError={setModalError}
-          onLocationChange={handleLocationChange}
-          onClose={() => setModalOpen(false)}
-          onSubmit={submitModal}
+          serverFieldErrors={modalFieldErrors}
+          onFileError={(message) => setModalFieldError("images", message)}
+          onClearFieldError={(field) => setModalFieldErrors((prev) => {
+            if (!prev[field]) return prev;
+            const next = { ...prev };
+            delete next[field];
+            return next;
+          })}
+          onClose={() => {
+            setEditConfirmationOpen(false);
+            setModalOpen(false);
+          }}
+          onSubmit={requestModalSubmit}
         />
       )}
+      {editConfirmationOpen && (
+        <ConfirmationModal
+          title="Save vehicle changes?"
+          message={`Save the changes to ${form.name.trim()}? Updated details and photos will be checked before they appear to renters.`}
+          confirmLabel="Save Changes"
+          busyLabel="Saving..."
+          icon={Save}
+          busy={modalLoading}
+          onCancel={() => setEditConfirmationOpen(false)}
+          onConfirm={confirmVehicleEdit}
+        />
+      )}
+      {vehicleToDelete && (
+        <ConfirmationModal
+          title="Delete vehicle?"
+          message={`Delete ${vehicleToDelete.name} from your listings? This cannot be undone.`}
+          confirmLabel="Delete"
+          busy={deleting}
+          error={deleteError}
+          fallbackFocusRef={searchRef}
+          onCancel={() => { if (!deletionRef.current) setVehicleToDelete(null); }}
+          onConfirm={deleteVehicle}
+        />
+      )}
+      <InfoModal
+        isOpen={Boolean(vehicleSuccess)}
+        title={vehicleSuccess?.title}
+        message={vehicleSuccess?.message}
+        confirmLabel="Done"
+        onClose={() => setVehicleSuccess(null)}
+      />
     </div>
   );
 }

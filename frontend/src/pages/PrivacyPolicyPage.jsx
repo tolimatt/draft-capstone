@@ -159,8 +159,8 @@ export default function PrivacyPolicyPage({
           <Section title="11. Contact">
             <p>
               For privacy questions or requests, contact us at{" "}
-              <a href="mailto:message@rentifypro.com" className="text-[#0B75E7] hover:underline">
-                message@rentifypro.com
+              <a href="mailto:rentifypro.official@gmail.com" className="text-[#0B75E7] hover:underline">
+                rentifypro.official@gmail.com
               </a>
               .
             </p>

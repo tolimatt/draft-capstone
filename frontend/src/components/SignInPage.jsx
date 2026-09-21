@@ -6,6 +6,7 @@ import AuthShell from "./AuthShell";
 import { SIGN_IN_VALIDATION_RULES } from "../data/signInValidation";
 import API from "../utils/api";
 import { setSessionUser } from "../utils/sessionStore";
+import { clearAllRegistrationDrafts } from "../utils/registrationDraft";
 import { normalizeOwnerProfile, persistOwnerProfile } from "../owner/utils/ownerProfile";
 
 // Delay between submit attempts
@@ -237,7 +238,11 @@ export default function SignInPage({
 
       localStorage.removeItem("token");
       sessionStorage.removeItem("token");
-      if (response.user) setSessionUser(response.user);
+      if (response.user) {
+        // Do not retain abandoned personal-data drafts after authentication succeeds.
+        clearAllRegistrationDrafts(sessionStorage);
+        setSessionUser(response.user);
+      }
 
       const isOwner = response.user?.role === "owner";
 

@@ -87,7 +87,7 @@ const PRIVACY_SECTIONS = [
     title: "5. Your Rights",
     paragraphs: [
       "Depending on applicable law, you may request access, correction, deletion, or restriction of your personal data.",
-      "You may contact us for privacy requests at message@rentifypro.com.",
+      "You may contact us for privacy requests at rentifypro.official@gmail.com.",
     ],
   },
   {

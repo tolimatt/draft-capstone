@@ -1,15 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Bike,
   CarFront,
-  MapPin,
   Search,
   Truck,
   Van,
   ArrowRight,
   CalendarCheck,
-  ChevronLeft,
-  ChevronRight,
   KeyRound,
 } from "lucide-react";
 import Navbar from "../components/Navbar";
@@ -21,11 +18,12 @@ import {
   getMinPickupDateTime,
   formatTimeInput,
 } from "../utils/dateUtils";
-import InfoModal from "../components/InfoModal";
+import LocationSearchInput from "../components/LocationSearchInput";
 import VehicleCard from "../components/VehicleCard";
 import VehicleTypeCarousel from "../components/VehicleTypeCarousel";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
 import { formatVehicleTypeLabel } from "../utils/vehicleText";
+import { normalizeLocationSearch, validateLocationSearch } from "../utils/locationSearch";
 
 const categories = [
   {
@@ -163,19 +161,6 @@ const processSteps = [
   },
 ];
 
-const locations = [
-  "Urdaneta City, Pangasinan",
-  "Dagupan City, Pangasinan",
-  "Calasiao, Pangasinan",
-  "Lingayen, Pangasinan",
-  "Mangaldan, Pangasinan",
-  "University of Pangasinan",
-  "San Carlos City, Pangasinan",
-  "Sta Barbara, Pangasinan",
-  "SM Dagupan",
-  "Robinsons Place Pangasinan",
-];
-
 const getDefaultSearchDates = () => {
   const minPickupDateTime = getMinPickupDateTime();
   const pickupDate = formatDateInput(minPickupDateTime);
@@ -231,27 +216,14 @@ export default function RentifyPro({
   const [featuredLoading, setFeaturedLoading] = useState(true);
   const [featuredError, setFeaturedError] = useState("");
   const [location, setLocation] = useState("");
-  const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
+  const [locationError, setLocationError] = useState("");
+  const locationInputRef = useRef(null);
   const [vehicleType, setVehicleType] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState(categories[0].id);
-  const [featuredNavigation, setFeaturedNavigation] = useState({
-    canGoPrevious: false,
-    canGoNext: false,
-  });
   const [showAI, setShowAI] = useState(false);
   const [previewVehicle, setPreviewVehicle] = useState(null);
-  const [validationModalMessage, setValidationModalMessage] = useState("");
   const homeRef = useRef(null);
   const featuredCarouselRef = useRef(null);
-  const featuredScrollFrameRef = useRef(null);
-
-  const filteredLocations = useMemo(
-    () =>
-      locations.filter((entry) =>
-        entry.toLowerCase().includes(location.trim().toLowerCase())
-      ),
-    [location]
-  );
 
   const selectVehicleCategory = (category) => {
     setActiveCategoryId(category.id);
@@ -259,13 +231,13 @@ export default function RentifyPro({
   };
 
   const handleSearch = (typeOverride = vehicleType) => {
-    const normalizedLocation = location.trim();
-    const normalizedType = String(typeOverride || "").trim();
-    if (!normalizedLocation && !normalizedType) {
-      setValidationModalMessage("Please enter a location or choose a vehicle type to search.");
+    const error = validateLocationSearch(location);
+    setLocationError(error);
+    if (error) {
+      locationInputRef.current?.focus();
       return;
     }
-    onSearch(mapSearchPayload(location, typeOverride));
+    onSearch(mapSearchPayload(normalizeLocationSearch(location), typeOverride));
   };
 
   useEffect(() => {
@@ -294,38 +266,7 @@ export default function RentifyPro({
     };
   }, []);
 
-  useEffect(() => () => {
-    window.cancelAnimationFrame(featuredScrollFrameRef.current);
-  }, []);
 
-  useEffect(() => {
-    const carousel = featuredCarouselRef.current;
-    if (!carousel) return undefined;
-
-    const syncNavigation = () => {
-      const maximumScroll = Math.max(0, carousel.scrollWidth - carousel.clientWidth);
-      setFeaturedNavigation({
-        canGoPrevious: carousel.scrollLeft > 2,
-        canGoNext: carousel.scrollLeft < maximumScroll - 2,
-      });
-    };
-    const handleScroll = () => {
-      window.cancelAnimationFrame(featuredScrollFrameRef.current);
-      featuredScrollFrameRef.current = window.requestAnimationFrame(syncNavigation);
-    };
-    const resizeObserver = typeof ResizeObserver === "undefined"
-      ? null
-      : new ResizeObserver(syncNavigation);
-
-    syncNavigation();
-    carousel.addEventListener("scroll", handleScroll, { passive: true });
-    resizeObserver?.observe(carousel);
-
-    return () => {
-      carousel.removeEventListener("scroll", handleScroll);
-      resizeObserver?.disconnect();
-    };
-  }, [featuredVehicles.length]);
 
   useEffect(() => {
     const landing = homeRef.current;
@@ -376,14 +317,7 @@ export default function RentifyPro({
     onViewDetails(vehicle);
   };
 
-  const scrollFeaturedVehicles = (direction) => {
-    const carousel = featuredCarouselRef.current;
-    const firstCard = carousel?.querySelector("[data-featured-card]");
-    if (!carousel || !firstCard) return;
 
-    const cardWidth = firstCard.getBoundingClientRect().width;
-    carousel.scrollBy({ left: direction * (cardWidth + 24), behavior: "smooth" });
-  };
 
   const handleChatOwner = (vehicle) => {
     if (!vehicle) return;
@@ -460,7 +394,7 @@ export default function RentifyPro({
 
             <div className="rp-hero-motion__actions mt-8 flex flex-wrap items-center gap-3">
               <span className="rp-hero-motion__action">
-                <button onClick={onNavigateToVehicles} className="rp-btn-primary px-6 py-3 text-sm sm:text-base">
+                <button onClick={onNavigateToVehicles} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 py-3 text-sm font-semibold text-white underline underline-offset-4 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white sm:text-base">
                   Browse Vehicles
                 </button>
               </span>
@@ -475,55 +409,21 @@ export default function RentifyPro({
         </div>
       </section>
 
-      <section className="rp-hero-search relative z-20 mx-auto -mt-16 max-w-6xl px-4 sm:-mt-20 sm:px-6">
-        <div className="rp-surface p-5 sm:p-7">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="sm:col-span-2 relative">
-              <label className="text-xs font-semibold text-slate-500">Location</label>
-              <div className="relative mt-1.5">
-                <MapPin
-                  size={16}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#0B75E7]"
-                />
-                <input
-                  value={location}
-                  onChange={(event) => {
-                    setLocation(event.target.value);
-                    setShowLocationSuggestions(true);
-                  }}
-                  onFocus={() => setShowLocationSuggestions(true)}
-                  onBlur={() => {
-                    window.setTimeout(() => setShowLocationSuggestions(false), 120);
-                  }}
-                  className="rp-input pr-9"
-                  placeholder="Search location"
-                />
-              </div>
-
-              {showLocationSuggestions && location && filteredLocations.length > 0 && (
-                <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-56 overflow-y-auto">
-                  {filteredLocations.map((entry) => (
-                    <button
-                      key={entry}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        setLocation(entry);
-                        setShowLocationSuggestions(false);
-                      }}
-                      className="w-full text-left px-3 py-2.5 text-sm hover:bg-[#0B75E7]/10 flex items-center gap-2"
-                    >
-                      <MapPin size={16} strokeWidth={2} className="text-[#0B75E7]" aria-hidden="true" />
-                      {entry}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+      <section aria-labelledby="home-search-heading" className="rp-hero-search relative z-20 mx-auto -mt-16 max-w-6xl px-4 sm:-mt-20 sm:px-6">
+        <form role="search" aria-labelledby="home-search-heading" onSubmit={(event) => { event.preventDefault(); handleSearch(); }} className="rounded-2xl bg-white p-5 shadow-lg shadow-slate-900/10 sm:p-6">
+          <h2 id="home-search-heading" className="mb-4 text-lg font-semibold text-slate-900">Find a vehicle for your next trip</h2>
+          <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
+            <LocationSearchInput
+              value={location} onChange={setLocation} vehicleType={vehicleType}
+              error={locationError} onError={setLocationError} inputRef={locationInputRef}
+            />
 
             <div>
-              <label className="text-xs font-semibold text-slate-500">Vehicle Type</label>
+              <label htmlFor="home-search-type" className="text-xs font-semibold text-slate-600">Vehicle type</label>
               <div className="mt-1.5">
                 <select
+                  id="home-search-type"
+                  name="vehicleType"
                   className="rp-input cursor-pointer"
                   value={vehicleType}
                   onChange={(event) => {
@@ -543,18 +443,15 @@ export default function RentifyPro({
                 </select>
               </div>
             </div>
-          </div>
-
-          <div className="mt-5 flex justify-center">
             <button
-              onClick={() => handleSearch()}
-              className="rp-btn-primary px-8 py-3 text-sm sm:text-base flex items-center gap-2"
+              type="submit"
+              className="rp-btn-primary md:mt-[30px] min-h-12 w-full justify-center px-6 py-3 text-sm sm:text-base flex items-center gap-2 md:w-auto"
             >
-              <Search size={18} />
-              Search Available Vehicles
+              <Search size={18} aria-hidden="true" />
+              Find vehicles
             </button>
           </div>
-        </div>
+        </form>
       </section>
 
       <section id="categories" className="rp-home-section mx-auto max-w-7xl scroll-mt-24 px-5 py-16 sm:px-8 sm:py-20">
@@ -586,42 +483,20 @@ export default function RentifyPro({
       <section id="featured" className="rp-featured-section scroll-mt-24 py-16 sm:py-20">
         <div className="rp-featured-section__content mx-auto max-w-7xl px-5 sm:px-8">
           <div
-            className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between rp-scroll-reveal rp-reveal-up"
+            className="mb-10 rp-section-heading rp-scroll-reveal rp-reveal-up"
             data-rp-reveal=""
           >
-            <div className="rp-section-heading max-w-2xl">
-              <span className="rp-page-eyebrow">Available near you</span>
-              <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
+            <span className="rp-page-eyebrow">Available near you</span>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <h2 className="min-w-0 text-3xl font-bold sm:text-4xl">
                 Featured <span className="text-[#0B75E7]">vehicles</span>
               </h2>
-              <p className="mt-3 text-slate-600">A small selection of verified listings ready to book.</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 self-start sm:self-auto">
-              <div className="rp-featured-carousel__controls" role="group" aria-label="Featured vehicle navigation">
-                <button
-                  type="button"
-                  className="rp-featured-carousel__arrow"
-                  onClick={() => scrollFeaturedVehicles(-1)}
-                  disabled={!featuredNavigation.canGoPrevious}
-                  aria-label="Previous vehicles"
-                >
-                  <ChevronLeft size={18} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="rp-featured-carousel__arrow"
-                  onClick={() => scrollFeaturedVehicles(1)}
-                  disabled={!featuredNavigation.canGoNext}
-                  aria-label="Next vehicles"
-                >
-                  <ChevronRight size={18} aria-hidden="true" />
-                </button>
-              </div>
-              <button type="button" onClick={onNavigateToVehicles} className="rp-btn-secondary px-4 py-2.5 text-sm">
-                View all vehicles
-                <ArrowRight size={16} />
+              <button type="button" onClick={onNavigateToVehicles} className="rp-btn-secondary max-w-[46%] shrink-0 px-3 py-2.5 text-sm sm:max-w-none sm:px-4">
+                <span>View all vehicles</span>
+                <ArrowRight size={16} className="shrink-0" aria-hidden="true" />
               </button>
             </div>
+            <p className="mt-3 max-w-2xl text-slate-600">A small selection of verified listings ready to book.</p>
           </div>
 
           {featuredError && (
@@ -870,7 +745,7 @@ export default function RentifyPro({
               <h4 className="font-bold mb-3">Contact</h4>
               <ul className="space-y-2 text-blue-100 text-sm">
                 <li>+63 912 324 5678</li>
-                <li>message@rentifypro.com</li>
+                <li>rentifypro.official@gmail.com</li>
                 <li>Dagupan, Pangasinan</li>
                 <li>Philippines</li>
               </ul>
@@ -911,12 +786,6 @@ export default function RentifyPro({
           handleChatOwner(previewVehicle);
         }}
         disableChat={disablePreviewChat}
-      />
-      <InfoModal
-        isOpen={Boolean(validationModalMessage)}
-        title="RentifyPro says"
-        message={validationModalMessage}
-        onClose={() => setValidationModalMessage("")}
       />
     </div>
   );

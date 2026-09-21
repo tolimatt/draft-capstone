@@ -25,6 +25,7 @@ import { requestLogger, errorHandler } from "./middleware/auditLogger.middleware
 import authRoutes from "./routes/auth.routes.js";
 import kycRoutes from "./routes/kyc.routes.js";
 import vehicleRoutes from "./routes/vehicle.routes.js";
+import vehiclePhotoRoutes from "./routes/vehiclePhoto.routes.js";
 import ownerRoutes from "./routes/owner.routes.js";
 import bookingRoutes from "./routes/booking.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
@@ -125,6 +126,7 @@ app.use(requestLogger);
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/kyc", kycLimiter, kycRoutes);
 app.use("/api/vehicles", vehicleRoutes);
+app.use("/api/vehicle-photos", vehiclePhotoRoutes);
 app.use("/api/owner", ownerRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/chat", chatRoutes);

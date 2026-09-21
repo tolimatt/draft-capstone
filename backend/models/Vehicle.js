@@ -115,6 +115,10 @@ const vehicleSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    imageReviews: {
+      type: [{ path: String, exterior: Boolean, vehicleType: String, sourceId: mongoose.Schema.Types.ObjectId }],
+      default: [],
+    },
     coverDisplayMode: {
       type: String,
       enum: ["auto", "photo", "cutout"],

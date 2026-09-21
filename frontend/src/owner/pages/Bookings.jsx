@@ -1,6 +1,6 @@
 import VehicleThumbnail from "../../components/VehicleThumbnail";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, CarFront, CircleCheck, CircleX, Clock3, CreditCard, Flag, MapPin, X, Users } from "lucide-react";
+import { CalendarDays, CarFront, CircleCheck, CircleX, Clock3, CreditCard, Flag, MapPin, RefreshCw, X, Users } from "lucide-react";
 import API from "../../utils/api";
 import { getSocket } from "../../utils/socket";
 import { getTransactionFee } from "../../utils/fees";
@@ -42,7 +42,15 @@ const toTitleCase = (value = "") =>
   String(value)
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
-const normalizeBookingStatus = (booking) => booking;
+const normalizeBookingStatus = (booking) => ({
+  ...booking,
+  paymentStatus: String(booking.paymentStatus || booking.payment_status || "unpaid").trim().toLowerCase(),
+});
+const latestBooking = (current, incoming) => {
+  const normalized = normalizeBookingStatus(incoming);
+  return current && new Date(current.updatedAt).getTime() > new Date(normalized.updatedAt).getTime()
+    ? current : normalized;
+};
 const ACTIVE_BOOKING_STATUSES = ["confirmed", "extended"];
 const PAST_BOOKING_STATUSES = ["completed", "cancelled", "rejected"];
 const bookingNeedsOwnerAction = (booking) => {
@@ -181,7 +189,10 @@ const getRentalTotal = (booking) => {
   return safeLatePenalty;
 };
 
-const getPayableAmount = (booking) => getRentalTotal(booking) + getTransactionFee();
+const getPayableAmount = (booking) => {
+  if (booking.amountPayable != null && Number.isFinite(Number(booking.amountPayable))) return Number(booking.amountPayable);
+  return getRentalTotal(booking) + Number(booking.transactionFee ?? getTransactionFee());
+};
 
 export default function Bookings() {
   const [bookings, setBookings] = useState([]);
@@ -200,6 +211,7 @@ export default function Bookings() {
   const [reportNotice, setReportNotice] = useState("");
   const [returnReview, setReturnReview] = useState(null);
   const [returnReviewNote, setReturnReviewNote] = useState("");
+  const [partialPaymentDraft, setPartialPaymentDraft] = useState(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setBookingClock(Date.now()), 30000);
@@ -220,7 +232,11 @@ export default function Bookings() {
       });
       const mapped = (response.bookings || []).map(normalizeBookingStatus);
       if (sequence !== requestSequence.current) return;
-      setBookings((previous) => (append ? [...previous, ...mapped] : mapped));
+      setBookings((previous) => {
+        const current = new Map(previous.map((booking) => [booking._id, booking]));
+        const incoming = mapped.map((booking) => latestBooking(current.get(booking._id), booking));
+        return append ? [...previous.filter((booking) => !incoming.some((item) => item._id === booking._id)), ...incoming] : incoming;
+      });
       setBookingPage(response.page || { hasMore: false, nextCursor: null });
     } catch (err) {
       if (sequence !== requestSequence.current) return;
@@ -248,7 +264,7 @@ export default function Bookings() {
         const normalized = normalizeBookingStatus(booking);
         const exists = prev.some((item) => item._id === normalized._id);
         if (exists) {
-          return prev.map((item) => (item._id === normalized._id ? normalized : item));
+          return prev.map((item) => (item._id === normalized._id ? latestBooking(item, normalized) : item));
         }
         return [normalized, ...prev];
       });
@@ -272,10 +288,13 @@ export default function Bookings() {
     setReportNotice("");
     try {
       const response = await action();
-      if (response.booking) setBookings((previous) => previous.map((booking) => booking._id === bookingId ? response.booking : booking));
+      if (response.booking) setBookings((previous) => previous.map((booking) => booking._id === bookingId ? latestBooking(booking, response.booking) : booking));
       setReportNotice(response.message || fallback);
       return true;
     } catch (error) {
+      if (error?.details?.booking) {
+        setBookings((previous) => previous.map((booking) => booking._id === bookingId ? latestBooking(booking, error.details.booking) : booking));
+      }
       setActionErrors((previous) => ({ ...previous, [bookingId]: error.message || "The update could not be completed. Refresh this booking and try again." }));
       return false;
     } finally {
@@ -289,8 +308,22 @@ export default function Bookings() {
     status === "confirmed" ? "Approving booking..." : status === "rejected" ? "Rejecting booking..." : "Updating booking...",
     "Booking " + bookingStatusLabel(status).toLowerCase() + ".");
 
-  const updatePaymentStatus = (id, status) => runBookingAction(id,
-    () => API.updateOwnerBookingPaymentStatus(id, status), "Updating payment...", "Payment status updated.");
+  const updatePaymentStatus = async (booking, status, paymentAmountPaid) => {
+    const saved = await runBookingAction(booking._id,
+      () => API.updateOwnerBookingPaymentStatus(booking._id, status, { paymentAmountPaid, expectedUpdatedAt: booking.updatedAt }),
+      "Updating payment...", "Payment status updated.");
+    if (saved) setPartialPaymentDraft(null);
+  };
+
+  const selectPaymentStatus = (booking, status) => {
+    if (status === "partial") {
+      const paid = Number(booking.paymentAmountPaid || 0);
+      setPartialPaymentDraft({ bookingId: booking._id, amount: paid > 0 && paid < getPayableAmount(booking) ? String(paid) : "" });
+      return;
+    }
+    setPartialPaymentDraft(null);
+    updatePaymentStatus(booking, status);
+  };
 
   const reviewExtensionRequest = (id, action) => runBookingAction(id,
     () => API.reviewOwnerBookingExtensionRequest(id, action), "Reviewing extension...", "Extension decision saved.");
@@ -324,7 +357,7 @@ export default function Bookings() {
       <OwnerPageHeader
         title="Booking Management"
         description="Review renter requests, active rentals, and payment activity."
-        actions={<button type="button" disabled={loading || refreshing || loadingMore} onClick={() => loadBookings({ background: true })} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{refreshing ? "Refreshing..." : "Refresh"}</button>}
+        actions={<button type="button" disabled={loading || refreshing || loadingMore} onClick={() => loadBookings({ background: true })} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold disabled:opacity-50"><RefreshCw size={16} strokeWidth={2} className={refreshing ? "animate-spin" : ""} aria-hidden="true" />{refreshing ? "Refreshing..." : "Refresh"}</button>}
       />
 
       <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
@@ -499,8 +532,18 @@ export default function Bookings() {
 
 
 
-            <div className="mt-5 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 md:grid-cols-2">
-              <div className="flex flex-wrap gap-2">
+            <div className="mt-4 grid min-w-0 grid-cols-1 items-start gap-3 border-t border-slate-100 pt-4 md:grid-cols-[minmax(0,1fr)_auto]">
+              <div
+                role="group"
+                aria-label={`Booking actions for ${booking.vehicle?.name || "vehicle"}. Scroll horizontally for more actions.`}
+                tabIndex={0}
+                onFocusCapture={(event) => {
+                  if (event.target !== event.currentTarget) {
+                    event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+                  }
+                }}
+                className="flex min-w-0 items-center gap-2 overflow-x-auto overscroll-x-contain p-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 [&>button]:inline-flex [&>button]:h-11 [&>button]:shrink-0 [&>button]:items-center [&>button]:justify-center [&>button]:whitespace-nowrap [&>button]:focus-visible:outline [&>button]:focus-visible:outline-2 [&>button]:focus-visible:outline-offset-2 [&>button]:focus-visible:outline-blue-600"
+              >
                 {booking.status === "pending" && (
                   <>
                     <button
@@ -611,6 +654,44 @@ export default function Bookings() {
                       Confirm Walk-in Received
                     </button>
                   )}
+                <button type="button" onClick={() => setReportBooking(booking)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"><Flag size={18} strokeWidth={2} aria-hidden="true" />Report renter</button>
+              </div>
+
+              <div className="flex flex-col gap-2 md:items-end">
+                <div className="flex items-center gap-2 p-1">
+                <label htmlFor={`payment-status-${booking._id}`} className="text-sm font-medium text-slate-600">Payment</label>
+                <select
+                  id={`payment-status-${booking._id}`}
+                  className="h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-[#017FE6]"
+                  value={booking.paymentStatus}
+                  disabled={Boolean(bookingActions[booking._id])}
+                  onChange={(e) => selectPaymentStatus(booking, e.target.value)}
+                >
+                  <option value="unpaid">Unpaid</option>
+                  <option value="partial">Partial</option>
+                  <option value="paid">Paid</option>
+                  <option value="refunded">Refunded</option>
+                </select>
+                </div>
+                {partialPaymentDraft?.bookingId === booking._id && (
+                  <form className="w-full max-w-xs space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3" onSubmit={(event) => {
+                    event.preventDefault();
+                    updatePaymentStatus(booking, "partial", Number(partialPaymentDraft.amount));
+                  }}>
+                    <label htmlFor={`partial-amount-${booking._id}`} className="block text-sm font-medium text-slate-700">Total amount received so far (PHP)</label>
+                    <input id={`partial-amount-${booking._id}`} type="number" inputMode="decimal" min="0.01" max={(getPayableAmount(booking) - 0.01).toFixed(2)} step="0.01" required autoFocus
+                      value={partialPaymentDraft.amount} disabled={Boolean(bookingActions[booking._id])}
+                      onChange={(event) => setPartialPaymentDraft({ bookingId: booking._id, amount: event.target.value })}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                    <p className="text-xs text-slate-600">Full amount payable: {money(getPayableAmount(booking))}. Include earlier payments in the amount received.</p>
+                    <div className="flex gap-2">
+                      <button type="submit" disabled={Boolean(bookingActions[booking._id])} className="rounded-lg bg-[#017FE6] px-3 py-2 text-sm font-medium text-white disabled:opacity-60">Save partial payment</button>
+                      <button type="button" disabled={Boolean(bookingActions[booking._id])} onClick={() => setPartialPaymentDraft(null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">Cancel</button>
+                    </div>
+                  </form>
+                )}
+              </div>
+              <div className="space-y-2 empty:hidden md:col-span-2">
                 {getWalkInStatus(booking) === "rejected" && (
                   <p className="w-full text-xs text-rose-700">Walk-in request was rejected.</p>
                 )}
@@ -622,7 +703,6 @@ export default function Bookings() {
                 {getWalkInStatus(booking) === "completed" && (
                   <p className="w-full text-xs text-green-700">Walk-in payment has been confirmed.</p>
                 )}
-                <button type="button" onClick={() => setReportBooking(booking)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"><Flag size={18} strokeWidth={2} aria-hidden="true" />Report renter</button>
                 {extensionInfo.status === "approved" && (
                   <p className="w-full text-xs text-violet-700">
                     Extension approved. Updated return schedule is now {formatDateTime(booking.returnAt)}.
@@ -645,20 +725,6 @@ export default function Bookings() {
                     {cancellationInfo.reviewNote ? ` Note: ${cancellationInfo.reviewNote}` : ""}
                   </p>
                 )}
-              </div>
-
-              <div className="flex items-center gap-2 md:justify-end">
-                <label className="text-sm font-medium text-slate-600">Payment</label>
-                <select
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-[#017FE6]"
-                  value={booking.paymentStatus}
-                  disabled={Boolean(bookingActions[booking._id])}
-                  onChange={(e) => updatePaymentStatus(booking._id, e.target.value)}
-                >
-                  <option value="unpaid">Unpaid</option>
-                  <option value="partial">Partial</option>
-                  <option value="refunded">Refunded</option>
-                </select>
               </div>
             </div>
           </article>

@@ -13,7 +13,7 @@ const res = () => ({ statusCode: 200, status(code) { this.statusCode = code; ret
 test("concurrent approval and rejection of the same pending booking apply only one decision", async (t) => {
   let storedStatus = "pending", notifications = 0;
   const snapshot = { _id: "booking", owner: { _id: "owner" }, renter: { _id: "renter" }, vehicle: { _id: "vehicle" }, status: "pending", updatedAt: new Date(), pickupAt: new Date(Date.now() + 86400000), returnAt: new Date(Date.now() + 172800000) };
-  t.mock.method(Booking, "findOne", () => ({ populate: async () => ({ ...snapshot }), select: async () => null }));
+  t.mock.method(Booking, "findOne", () => ({ populate: async () => ({ ...snapshot }), select: () => ({ maxTimeMS: async () => null, then: (resolve) => resolve(null) }) }));
   t.mock.method(Booking, "updateOne", async (filter, update) => {
     assert.equal(filter.owner, "owner");
     assert.equal(filter.updatedAt, snapshot.updatedAt);

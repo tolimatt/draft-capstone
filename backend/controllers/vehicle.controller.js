@@ -1,13 +1,13 @@
 // Vehicle controller
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
+import { normalizeLocationSearch, validateLocationSearch, buildVehicleLocationQuery } from "../utils/locationSearch.js";
 import { serializeVehicleForRenter } from "./ownerVehicle.controller.js";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 12;
 const MAX_LIMIT = 24;
 const MAX_SEARCH_LENGTH = 100;
-const MAX_LOCATION_LENGTH = 180;
 const REVIEW_PREVIEW_LIMIT = 20;
 const ALLOWED_SEARCH_PATTERN = /^[\p{L}\p{N} -]*$/u;
 const ALLOWED_VEHICLE_TYPES = new Set(["car", "motorcycle", "van", "truck"]);
@@ -74,25 +74,6 @@ const normalizeVehicleType = (value = "") => {
   if (!normalized) return "";
   if (normalized === "motor") return "motorcycle";
   return normalized;
-};
-
-const buildVehicleLocationQuery = (location) => {
-  const normalized = String(location || "").trim();
-  if (!normalized) return null;
-
-  const tokens = normalized
-    .split(/[,\s]+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .slice(0, 8);
-
-  if (!tokens.length) return null;
-
-  return {
-    $and: tokens.map((token) => ({
-      location: new RegExp(`\\b${escapeRegex(token)}\\b`, "i"),
-    })),
-  };
 };
 
 const buildVehicleTypeQuery = (vehicleType) => {
@@ -236,11 +217,51 @@ const applyVehicleReviewInsights = (vehicle, reviewInsightsByVehicle) => {
   };
 };
 
+export const getVehicleLocationSuggestions = async (req, res, next) => {
+  try {
+    const raw = req.query.search || "";
+    const search = normalizeLocationSearch(raw);
+    const vehicleType = normalizeVehicleType(req.query.vehicleType || "");
+    const error = validateLocationSearch(raw, { minLetters: 1 });
+    if (error || (vehicleType && !ALLOWED_VEHICLE_TYPES.has(vehicleType))) {
+      return res.status(400).json({ success: false, message: error || "Vehicle type filter is invalid." });
+    }
+    res.setHeader("Cache-Control", DYNAMIC_VEHICLE_CACHE_CONTROL);
+    if (!search) return res.json({ success: true, locations: [] });
+    const tokens = search.match(/[\p{L}\p{M}\p{N}]+/gu) || [];
+    const locations = await Vehicle.aggregate([
+      { $match: {
+        availabilityStatus: "available",
+        ...(vehicleType ? buildVehicleTypeQuery(vehicleType) : {}),
+        $and: tokens.map((token) => ({ location: { $regex: `(?:^|[^\\p{L}\\p{M}\\p{N}])${token}`, $options: "i" } })),
+      } },
+      { $lookup: {
+        from: Booking.collection.name,
+        let: { vehicleId: "$_id" },
+        pipeline: [
+          { $match: { $expr: { $eq: ["$vehicle", "$$vehicleId"] }, status: { $in: ["pending", "confirmed", "extended"] }, actualReturnAt: null } },
+          { $limit: 1 },
+          { $project: { _id: 1 } },
+        ],
+        as: "blockingBookings",
+      } },
+      { $match: { "blockingBookings.0": { $exists: false } } },
+      { $group: { _id: { $toLower: { $trim: { input: "$location" } } }, location: { $first: { $trim: { input: "$location" } } }, vehicleCount: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+      { $limit: 6 },
+      { $project: { _id: 0, location: 1, vehicleCount: 1 } },
+    ]);
+    return res.json({ success: true, locations });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getVehicles = async (req, res, next) => {
   try {
     const rawSearch = String(req.query.search || "");
     const search = rawSearch.trim();
-    const location = String(req.query.location || "").trim();
+    const location = normalizeLocationSearch(req.query.location || "");
     const vehicleType = normalizeVehicleType(req.query.vehicleType || "");
     const searchValidationError = validateVehicleSearch(rawSearch);
 
@@ -250,10 +271,11 @@ export const getVehicles = async (req, res, next) => {
         message: searchValidationError,
       });
     }
-    if (location.length > MAX_LOCATION_LENGTH) {
+    const locationValidationError = validateLocationSearch(req.query.location || "");
+    if (locationValidationError) {
       return res.status(400).json({
         success: false,
-        message: `Location must be ${MAX_LOCATION_LENGTH} characters or fewer.`,
+        message: locationValidationError,
       });
     }
     if (vehicleType && !ALLOWED_VEHICLE_TYPES.has(vehicleType)) {

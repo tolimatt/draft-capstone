@@ -24,6 +24,16 @@ const writeSessionToken = (key, token) => {
   }
 };
 
+export const clearPreKycSessionToken = (email, role = "user") => {
+  const key = sessionKey(email, role);
+  memorySessions.delete(key);
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // The in-memory token was still cleared for this registration attempt.
+  }
+};
+
 const tokenNeedsRenewal = (token) => {
   try {
     const payloadPart = String(token || "").split(".")[1] || "";
@@ -86,19 +96,29 @@ async function postPreKyc(path, email, role, body) {
 
 export async function getPreKycStatus(email, role = "user") {
   const normalizedRole = normalizeRole(role);
-  const token = await getPreKycSessionToken(email, normalizedRole);
-  const res = await fetch(`${API_BASE_URL}/kyc/pre/status`, {
-    method: "GET",
-    headers: { "x-pre-kyc-token": token },
-    credentials: "include",
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const error = new Error(data.message || `Request failed (${res.status})`);
-    error.status = res.status;
-    throw error;
+  const readStatus = async (token) => {
+    const res = await fetch(`${API_BASE_URL}/kyc/pre/status`, {
+      method: "GET",
+      headers: { "x-pre-kyc-token": token },
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const error = new Error(data.message || `Request failed (${res.status})`);
+      error.status = res.status;
+      throw error;
+    }
+    return data;
+  };
+
+  let token = await getPreKycSessionToken(email, normalizedRole);
+  try {
+    return await readStatus(token);
+  } catch (error) {
+    if (error?.status !== 401) throw error;
+    token = await getPreKycSessionToken(email, normalizedRole, { refresh: true });
+    return readStatus(token);
   }
-  return data;
 }
 
 // Step 1: save the ID face

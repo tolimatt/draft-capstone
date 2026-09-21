@@ -24,6 +24,8 @@ export default function FormInput({
   inputMode,
   pattern,
   maxLength,
+  min,
+  max,
   inputRef,
   iconPosition = "right",
   prefixText = "",
@@ -167,6 +169,8 @@ export default function FormInput({
           inputMode={inputMode}
           pattern={pattern}
           maxLength={maxLength}
+          min={min}
+          max={max}
           autoComplete={type === "email" ? "email" : "off"}
           aria-invalid={Boolean(error)}
           className={`w-full rounded-xl border bg-white px-4 py-3 text-[15px] text-slate-900 shadow-sm transition-all duration-200 placeholder:text-slate-400 focus:outline-none ${

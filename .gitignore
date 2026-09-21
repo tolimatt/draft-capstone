@@ -74,3 +74,10 @@ tmp/
 
 # QA artifacts
 qa/
+
+# Local agent guidance, skills, and configuration
+RULES.md
+DESIGN.md
+.agents/
+.codex/
+.impeccable/

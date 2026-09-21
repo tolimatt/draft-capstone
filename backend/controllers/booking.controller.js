@@ -1,5 +1,15 @@
+import {
+  getBookingLatePenaltyFee,
+  getEffectiveTransactionFee,
+  getBookingPayableAmount,
+  getBookingPaidAmount,
+  getBookingRemainingAmount,
+} from "../utils/bookingPayment.js";
 import Booking from "../models/Booking.js";
+import { getBookingHorizonEnd, BOOKING_HORIZON_MESSAGE } from "../utils/bookingDatePolicy.js";
 import Vehicle from "../models/Vehicle.js";
+import { findRenterScheduleConflict, getRenterBookingEligibility } from "../services/bookingEligibility.service.js";
+import { acquireBookingMutationLock, BookingPolicyError } from "../utils/bookingMutationLock.js";
 import eventBus from "../events/eventBus.js";
 import { NOTIFICATION_EVENTS } from "../events/notification.events.js";
 import { emitToUser } from "../socket/index.js";
@@ -39,6 +49,21 @@ import {
 const toDate = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const parseBookingDateTime = (value) => {
+  if (typeof value !== "string") return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?$/);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1).map((part) => Number(part || 0));
+  const calendarDate = new Date(0);
+  calendarDate.setUTCFullYear(year, month - 1, day);
+  if (
+    year < 1 || calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 || calendarDate.getUTCDate() !== day ||
+    hour > 23 || minute > 59 || second > 59
+  ) return null;
+  return toDate(value);
 };
 
 const boolFromValue = (value) => {
@@ -154,89 +179,6 @@ const logPayMongoError = (context, error) => {
     statusCode: error?.statusCode,
     stack: error?.stack,
   });
-};
-
-const shouldApplyConfiguredFeeFallback = (booking) => {
-  const paymentStatus = String(booking?.paymentStatus || "unpaid").toLowerCase();
-  return paymentStatus === "unpaid" || paymentStatus === "partial";
-};
-
-const getBookingLatePenaltyFee = (booking) => {
-  const persisted = Number(booking?.lateReturnPenaltyFee || 0);
-  if (Number.isFinite(persisted) && persisted > 0) return roundCurrency(persisted);
-  return 0;
-};
-
-const getBookingRentalAmountForPayment = (booking) => {
-  const directTotal = Number(booking?.totalAmount);
-  if (Number.isFinite(directTotal) && directTotal > 0) {
-    return roundCurrency(directTotal + getBookingLatePenaltyFee(booking));
-  }
-
-  const baseAmount = Number(booking?.baseAmount);
-  const driverAmount = Number(booking?.driverAmount);
-  if (Number.isFinite(baseAmount) && Number.isFinite(driverAmount) && baseAmount + driverAmount > 0) {
-    return roundCurrency(baseAmount + driverAmount + getBookingLatePenaltyFee(booking));
-  }
-
-  const durationHours = getBookingDurationHours(booking);
-  const vehicleHourlyRate = getBookingVehicleHourlyRate(booking);
-  if (Number.isFinite(vehicleHourlyRate) && vehicleHourlyRate > 0 && Number.isFinite(durationHours) && durationHours > 0) {
-    const driverHourlyRate = getBookingDriverHourlyRate(booking);
-    const driverSelected = Boolean(booking?.driverSelected);
-    const driverAmountFromRate =
-      driverSelected && Number.isFinite(driverHourlyRate) && driverHourlyRate > 0
-        ? driverHourlyRate * durationHours
-        : 0;
-    return roundCurrency(vehicleHourlyRate * durationHours + driverAmountFromRate + getBookingLatePenaltyFee(booking));
-  }
-
-  return roundCurrency(getBookingLatePenaltyFee(booking));
-};
-
-const getEffectiveTransactionFee = (booking) => {
-  const configured = getTransactionFee();
-  const persisted = Number(booking?.transactionFee);
-  let effective = Number.isFinite(persisted) && persisted > 0 ? roundCurrency(persisted) : 0;
-
-  // Preserve historical payment totals when older records do not have the
-  // generic transactionFee field yet.
-  if (effective <= 0) {
-    const paid = Number(booking?.paymentAmountPaid || 0);
-    const due = Number(booking?.paymentAmountDue || 0);
-    const trackedTotal = paid + due;
-    const inferred = trackedTotal - getBookingRentalAmountForPayment(booking);
-    if (Number.isFinite(inferred) && inferred > 0) effective = roundCurrency(inferred);
-  }
-
-  if (!shouldApplyConfiguredFeeFallback(booking)) return effective;
-  return roundCurrency(Math.max(effective, configured));
-};
-
-const getBookingPayableAmount = (booking) => {
-  const rentalAmount = getBookingRentalAmountForPayment(booking);
-  const transactionFee = getEffectiveTransactionFee(booking);
-  const safeRentalAmount = Number.isFinite(rentalAmount) && rentalAmount > 0 ? rentalAmount : 0;
-  const safeTransactionFee = Number.isFinite(transactionFee) && transactionFee >= 0 ? transactionFee : 0;
-  return roundCurrency(safeRentalAmount + safeTransactionFee);
-};
-
-const getBookingPaidAmount = (booking) => {
-  const totalPayable = getBookingPayableAmount(booking);
-  const persistedPaid = Number(booking?.paymentAmountPaid || 0);
-  if (Number.isFinite(persistedPaid) && persistedPaid > 0) {
-    return Math.min(roundCurrency(persistedPaid), totalPayable);
-  }
-  if (String(booking?.paymentStatus || "").toLowerCase() === "paid") {
-    return totalPayable;
-  }
-  return 0;
-};
-
-const getBookingRemainingAmount = (booking) => {
-  const totalPayable = getBookingPayableAmount(booking);
-  const paidAmount = getBookingPaidAmount(booking);
-  return roundCurrency(Math.max(totalPayable - paidAmount, 0));
 };
 
 const getBookingReturnBoundaryWithGrace = (booking, graceMinutes = 0) => {
@@ -679,6 +621,32 @@ const buildBookingListDefinition = ({ role, status, view }) => {
     return { filter: { status: { $in: LIST_ACTIVE_BOOKING_STATUSES } }, sortField: "pickupAt", direction: "asc" };
   }
 
+  if (role === "renter" && normalizedView === "unsettled") {
+    return {
+      filter: {
+        status: { $in: [...LIST_ACTIVE_BOOKING_STATUSES, "completed"] },
+        paymentStatus: { $ne: "refunded" },
+        $and: [
+          {
+            $or: [
+              { paymentStatus: { $in: ["unpaid", "partial"] } },
+              { paymentAmountDue: { $gt: 0 } },
+            ],
+          },
+          {
+            $or: [
+              { status: "completed" },
+              { status: { $in: LIST_ACTIVE_BOOKING_STATUSES }, returnAt: { $lt: new Date() } },
+              { walkInPaymentStatus: { $in: ["requested", "approved"] } },
+            ],
+          },
+        ],
+      },
+      sortField: "updatedAt",
+      direction: "desc",
+    };
+  }
+
   if (["past", "history"].includes(normalizedView)) {
     return { filter: { status: { $in: LIST_PAST_BOOKING_STATUSES } }, sortField: "updatedAt", direction: "desc" };
   }
@@ -742,6 +710,7 @@ const listBookingsForParty = async ({ req, partyField, role }) => {
 };
 
 export const createBooking = async (req, res) => {
+  let renterLock;
   let lockAcquired = false;
   let lockedVehicleId = null;
   const releaseVehicleLock = async () => {
@@ -765,13 +734,17 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    const pickupAt = toDate(pickupRaw);
-    const returnAt = toDate(returnRaw);
+    const pickupAt = parseBookingDateTime(pickupRaw);
+    const returnAt = parseBookingDateTime(returnRaw);
     if (!pickupAt || !returnAt) {
       return res.status(400).json({ success: false, message: "Invalid pickup or return date/time." });
     }
 
     const now = new Date();
+    const horizonEnd = getBookingHorizonEnd(now);
+    if (pickupAt > horizonEnd || returnAt > horizonEnd) {
+      return res.status(400).json({ success: false, message: BOOKING_HORIZON_MESSAGE });
+    }
     if (pickupAt < now || returnAt <= pickupAt) {
       return res.status(400).json({
         success: false,
@@ -787,6 +760,15 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "For same-day rentals, return must be at least 1 hour after pickup.",
+      });
+    }
+
+    renterLock = await acquireBookingMutationLock(req.user._id);
+    const eligibility = await getRenterBookingEligibility(req.user._id, { pickupAt, returnAt });
+    if (!eligibility.eligible) {
+      return res.status(409).json({
+        success: false, code: eligibility.reasons[0].code,
+        message: eligibility.reasons[0].message, eligibility,
       });
     }
 
@@ -870,6 +852,7 @@ export const createBooking = async (req, res) => {
     });
 
     let booking;
+    await renterLock.renew();
     booking = await Booking.create({
       vehicle: lockedVehicle._id,
       renter: req.user._id,
@@ -944,13 +927,39 @@ export const createBooking = async (req, res) => {
       message: "Booking created successfully.",
       booking: payload,
     });
-  } catch {
+  } catch (error) {
     try {
       await releaseVehicleLock();
     } catch {
       // Do not hide the original booking error.
     }
+    if (error instanceof BookingPolicyError) {
+      return res.status(409).json({ success: false, code: error.code, message: error.message });
+    }
     res.status(500).json({ success: false, message: "Failed to create booking." });
+  } finally {
+    await renterLock?.release();
+  }
+};
+
+export const getMyBookingEligibility = async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const { pickupAt, returnAt } = req.query;
+    const hasRange = pickupAt !== undefined || returnAt !== undefined;
+    const validRange = typeof pickupAt === "string" && typeof returnAt === "string" &&
+      pickupAt && returnAt && parseBookingDateTime(pickupAt) && parseBookingDateTime(returnAt) && toDate(returnAt) > toDate(pickupAt);
+    if (hasRange && !validRange) {
+      return res.status(400).json({ success: false, message: "Provide a valid pickup and return date range." });
+    }
+    const horizonEnd = getBookingHorizonEnd();
+    if (hasRange && (toDate(pickupAt) > horizonEnd || toDate(returnAt) > horizonEnd)) {
+      return res.status(400).json({ success: false, message: BOOKING_HORIZON_MESSAGE });
+    }
+    const eligibility = await getRenterBookingEligibility(req.user._id, { pickupAt, returnAt });
+    return res.json({ success: true, eligibility });
+  } catch {
+    return res.status(500).json({ success: false, message: "Unable to check booking eligibility. Please try again." });
   }
 };
 
@@ -1125,12 +1134,15 @@ export const requestBookingExtension = async (req, res) => {
       });
     }
 
-    const requestedReturnAt = toDate(req.body?.newReturnAt);
+    const requestedReturnAt = parseBookingDateTime(req.body?.newReturnAt);
     if (!requestedReturnAt) {
       return res.status(400).json({
         success: false,
         message: "Please provide a valid new return date and time.",
       });
+    }
+    if (requestedReturnAt > getBookingHorizonEnd()) {
+      return res.status(400).json({ success: false, message: BOOKING_HORIZON_MESSAGE });
     }
 
     const currentReturnAt = toDate(booking.returnAt);
@@ -1154,6 +1166,13 @@ export const requestBookingExtension = async (req, res) => {
       return res.status(409).json({
         success: false,
         message: "Cannot request extension because the selected schedule overlaps another booking.",
+      });
+    }
+
+    if (await findRenterScheduleConflict(booking, requestedReturnAt)) {
+      return res.status(409).json({
+        success: false, code: "RENTER_SCHEDULE_CONFLICT",
+        message: "This extension overlaps another one of your bookings. Choose an earlier return time or resolve the conflicting booking first.",
       });
     }
 

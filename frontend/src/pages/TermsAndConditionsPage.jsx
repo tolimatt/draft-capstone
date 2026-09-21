@@ -176,8 +176,8 @@ export default function TermsAndConditionsPage({
           <Section title="13. Contact">
             <p>
               For questions about these Terms, contact us at{" "}
-              <a href="mailto:message@rentifypro.com" className="text-[#0B75E7] hover:underline">
-                message@rentifypro.com
+              <a href="mailto:rentifypro.official@gmail.com" className="text-[#0B75E7] hover:underline">
+                rentifypro.official@gmail.com
               </a>
               .
             </p>

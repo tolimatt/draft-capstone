@@ -1,7 +1,7 @@
 // KYC stepper after login
 // Uses the authenticated /api/kyc/* routes
 
-import { useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Check, CircleCheck, CircleX, IdCard } from "lucide-react";
 import API from "../utils/api";
 import { ID_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
@@ -66,6 +66,10 @@ export default function VerificationStepper({ onVerificationComplete }) {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setCameraActive(false);
+  }, []);
+
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
   // Step 1: upload ID

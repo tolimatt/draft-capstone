@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { BadgeCheck, Camera, ShieldCheck } from "lucide-react";
+import { BadgeCheck, Camera, CheckCircle2, CircleAlert, RefreshCw, ShieldCheck } from "lucide-react";
 import InfoModal from "../../components/InfoModal";
 import API from "../../utils/api";
 import { validateAvatarImageFile } from "../../utils/fileValidation";
+import VerificationStepper from "../../verification/VerificationStepper";
 import {
   getOwnerProfileFromStorage,
   getStoredUser,
@@ -78,6 +79,60 @@ const DEFAULT_PROFILE = {
   businessName: "",
   permitNumber: "",
   licenseNumber: "",
+  kycStatus: "not_started",
+};
+
+const KYC_STATUS_DETAILS = {
+  not_started: {
+    label: "Verification not started",
+    tone: "slate",
+    idStatus: "Not submitted",
+    selfieStatus: "Not started",
+    access: "Locked until identity verification is approved.",
+  },
+  id_uploaded: {
+    label: "Continue verification",
+    tone: "amber",
+    idStatus: "Submitted",
+    selfieStatus: "Pending",
+    access: "Locked until identity verification is approved.",
+  },
+  challenge_passed: {
+    label: "Document review pending",
+    tone: "amber",
+    idStatus: "Awaiting approval",
+    selfieStatus: "Verified",
+    access: "Locked until your government ID is approved.",
+  },
+  approved: {
+    label: "Identity verified",
+    tone: "green",
+    idStatus: "Approved",
+    selfieStatus: "Verified",
+    access: "You can add and manage vehicle listings.",
+  },
+  rejected: {
+    label: "Verification needs attention",
+    tone: "red",
+    idStatus: "Needs resubmission",
+    selfieStatus: "Review required",
+    access: "Locked until a corrected identity document is approved.",
+  },
+};
+
+const KYC_TONE_CLASSES = {
+  slate: "border-slate-200 bg-slate-50 text-slate-700",
+  amber: "border-amber-200 bg-amber-50 text-amber-800",
+  green: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  red: "border-red-200 bg-red-50 text-red-800",
+};
+
+const formatLastChecked = (value) => {
+  if (!value) return "Not checked yet";
+  return new Intl.DateTimeFormat("en-PH", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(value);
 };
 
 const buildAddressFromSelections = (profile, lists) => {
@@ -122,6 +177,12 @@ export default function Profile() {
     const user = getStoredUser();
     return { ...DEFAULT_PROFILE, ...stored, email: stored.email || user.email || "" };
   });
+  const [kycStatus, setKycStatus] = useState(() => String(getStoredUser().kycStatus || "not_started"));
+  const [kycRemarks, setKycRemarks] = useState("");
+  const [kycError, setKycError] = useState("");
+  const [kycLoading, setKycLoading] = useState(false);
+  const [kycLastChecked, setKycLastChecked] = useState(null);
+  const [showKycStepper, setShowKycStepper] = useState(false);
 
   const [regions, setRegions] = useState([]);
   const [provinces, setProvinces] = useState([]);
@@ -133,6 +194,8 @@ export default function Profile() {
     `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || profile.name || "Owner";
   const initials =
     `${profile.firstName?.[0] || ""}${profile.lastName?.[0] || ""}`.toUpperCase() || "O";
+  const verification = KYC_STATUS_DETAILS[kycStatus] || KYC_STATUS_DETAILS.not_started;
+  const canStartVerification = !["approved", "challenge_passed"].includes(kycStatus);
 
   useEffect(() => {
     let mounted = true;
@@ -143,9 +206,20 @@ export default function Profile() {
         const normalized = normalizeOwnerProfile(response.user, response.user);
         const persisted = persistOwnerProfile(normalized);
         setProfile((prev) => ({ ...prev, ...persisted, email: persisted.email || prev.email }));
+        setKycStatus(persisted.kycStatus || "not_started");
         window.dispatchEvent(new Event("owner-profile-updated"));
       } catch {
         // Keep local profile data if the API sync fails.
+      }
+
+      try {
+        const response = await API.kycGetStatus();
+        if (!mounted) return;
+        setKycStatus(String(response?.status || "not_started"));
+        setKycRemarks(String(response?.remarks || ""));
+        setKycLastChecked(new Date());
+      } catch {
+        // The saved account status remains visible if the detailed KYC check is unavailable.
       }
     };
     syncFromApi();
@@ -307,6 +381,30 @@ export default function Profile() {
     reader.readAsDataURL(file);
   };
 
+  const refreshKycStatus = async () => {
+    setKycLoading(true);
+    setKycError("");
+    try {
+      const response = await API.kycGetStatus();
+      const nextStatus = String(response?.status || "not_started");
+      setKycStatus(nextStatus);
+      setKycRemarks(String(response?.remarks || ""));
+      setKycLastChecked(new Date());
+
+      const profileResponse = await API.getProfile();
+      if (profileResponse?.user) {
+        const normalized = normalizeOwnerProfile(profileResponse.user, profileResponse.user);
+        const persisted = persistOwnerProfile(normalized);
+        setProfile((prev) => ({ ...prev, ...persisted, email: persisted.email || prev.email }));
+        window.dispatchEvent(new Event("owner-profile-updated"));
+      }
+    } catch (error) {
+      setKycError(error.message || "Could not refresh verification status. Please try again.");
+    } finally {
+      setKycLoading(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8 pb-12">
       <OwnerPageHeader
@@ -385,7 +483,9 @@ export default function Profile() {
             <BadgeCheck size={18} className="text-[#017FE6]" />
           </h2>
           <p className="text-gray-500">{profile.email || "No email found"}</p>
-          <span className="text-sm font-medium text-[#017FE6]">Verified Owner</span>
+          <span className={`text-sm font-medium ${kycStatus === "approved" ? "text-[#017FE6]" : "text-amber-700"}`}>
+            {kycStatus === "approved" ? "Verified Owner" : "Owner verification in progress"}
+          </span>
         </div>
       </div>
 
@@ -416,12 +516,57 @@ export default function Profile() {
       )}
 
       <div className="rp-settings-card p-6">
-        <h3 className="mb-4 font-semibold">Verification Status</h3>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Status label="Government ID" status="Submitted" />
-          {profile.ownerType === "business" && <Status label="Business Permit" status="Submitted" />}
-          <Status label="Selfie Verification" status="Verified" />
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="font-semibold">Verification Status</h3>
+            <p className="mt-1 text-sm text-slate-500">Identity approval is required before you can add vehicles.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {canStartVerification && (
+              <button
+                type="button"
+                onClick={() => setShowKycStepper((current) => !current)}
+                className="inline-flex w-fit items-center gap-2 rounded-lg bg-[#017FE6] px-3 py-2 text-sm font-semibold text-white hover:bg-[#0165B8]"
+              >
+                <ShieldCheck size={16} />
+                {showKycStepper ? "Hide verification" : kycStatus === "rejected" ? "Resubmit verification" : "Verify now"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={refreshKycStatus}
+              disabled={kycLoading}
+              className="inline-flex w-fit items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw size={16} className={kycLoading ? "animate-spin" : ""} />
+              {kycLoading ? "Checking..." : "Refresh status"}
+            </button>
+          </div>
         </div>
+
+        <div className={`mb-4 flex items-start gap-3 rounded-xl border p-4 ${KYC_TONE_CLASSES[verification.tone]}`}>
+          {kycStatus === "approved" ? <CheckCircle2 size={20} className="mt-0.5 shrink-0" /> : <CircleAlert size={20} className="mt-0.5 shrink-0" />}
+          <div>
+            <p className="font-semibold">{verification.label}</p>
+            <p className="mt-1 text-sm">{verification.access}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Status label="Government ID" status={verification.idStatus} />
+          {profile.ownerType === "business" && <Status label="Business Permit" status="Submitted" />}
+          <Status label="Selfie Verification" status={verification.selfieStatus} />
+          <Status label="Listing access" status={kycStatus === "approved" ? "Unlocked" : "Locked"} />
+        </div>
+
+        {kycRemarks && <p className="mt-4 text-sm text-slate-600">{kycRemarks}</p>}
+        {kycError && <p role="alert" className="mt-4 text-sm text-red-700">{kycError}</p>}
+        <p className="mt-4 text-xs text-slate-500">Last checked: {formatLastChecked(kycLastChecked)}</p>
+        {showKycStepper && (
+          <div className="mt-6 border-t border-slate-200 pt-6">
+            <VerificationStepper onVerificationComplete={refreshKycStatus} />
+          </div>
+        )}
       </div>
 
       <InfoModal isOpen={showPhotoConfirmation} title="Profile Photo Updated" message="Your new profile photo has been uploaded successfully." confirmLabel="Done" onClose={() => setShowPhotoConfirmation(false)} />
@@ -430,7 +575,13 @@ export default function Profile() {
 }
 
 const Status = ({ label, status = "Submitted" }) => {
-  const color = status === "Approved" || status === "Verified" ? "text-green-600" : status === "Rejected" ? "text-red-600" : "text-yellow-600";
+  const color = ["Approved", "Verified", "Unlocked"].includes(status)
+    ? "text-green-600"
+    : ["Rejected", "Needs resubmission"].includes(status)
+      ? "text-red-600"
+      : status === "Locked"
+        ? "text-slate-600"
+        : "text-yellow-600";
   return (
     <div className={`flex items-center gap-2 text-sm ${color}`}>
       <ShieldCheck size={16} />

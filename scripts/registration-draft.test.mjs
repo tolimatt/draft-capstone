@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  clearRegistrationDraft, DRAFT_IDLE_MS, draftStorageKey,
+  clearAllRegistrationDrafts, clearRegistrationDraft, DRAFT_IDLE_MS, draftStorageKey,
   readRegistrationDraft, selectDraftFields, writeRegistrationDraft,
 } from "../frontend/src/utils/registrationDraft.js";
 
@@ -46,6 +46,19 @@ test("renter and owner drafts remain separate and clearing removes only the sele
   assert.equal(store.getItem("unrelated"), "keep");
 });
 
+test("successful authentication cleanup removes every registration draft and nothing else", () => {
+  const store = storage();
+  writeRegistrationDraft(store, "user", { firstName: "Renter" }, now + DRAFT_IDLE_MS);
+  writeRegistrationDraft(store, "owner", { firstName: "Owner" }, now + DRAFT_IDLE_MS);
+  store.setItem("unrelated", "keep");
+
+  clearAllRegistrationDrafts(store);
+
+  assert.equal(store.getItem(draftStorageKey("user")), null);
+  assert.equal(store.getItem(draftStorageKey("owner")), null);
+  assert.equal(store.getItem("unrelated"), "keep");
+});
+
 test("malformed, outdated, future-dated and tampered drafts cannot restore unsafe fields", () => {
   const store = storage();
   for (const raw of ["{broken", "null", JSON.stringify({ version: 2, fields: {}, expiresAt: now + 1 }),
@@ -62,6 +75,7 @@ test("blocked storage never prevents registration and blank forms are not saved"
   assert.equal(readRegistrationDraft(blocked, "user", now).status, "unavailable");
   assert.equal(writeRegistrationDraft(blocked, "user", { firstName: "Alice" }, now + DRAFT_IDLE_MS), false);
   assert.doesNotThrow(() => clearRegistrationDraft(blocked, "user"));
+  assert.doesNotThrow(() => clearAllRegistrationDrafts(blocked));
   const store = storage();
   writeRegistrationDraft(store, "owner", { ownerType: "individual", password: "secret" }, now + DRAFT_IDLE_MS);
   assert.equal(store.getItem(draftStorageKey("owner")), null);

@@ -1,4 +1,5 @@
 import VehicleThumbnail from "../../components/VehicleThumbnail";
+import VehiclePhotoReviews from "../../components/VehiclePhotoReviews";
 import { CarFront, Eye, SlidersHorizontal, Tags, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 import { EmptyState, FilterSelect, SearchField, StatCard, StatusBadge, TableFooter } from "../components/AdminUI";
@@ -27,6 +28,7 @@ export default function VehiclesView({ vehicles, onView }) {
 
   return (
     <div className="space-y-5">
+      <VehiclePhotoReviews admin />
       <section aria-label="Vehicle statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total Vehicles" value={vehicles.length} description="All registered vehicles" icon={CarFront} />
         <StatCard label="Available" value={available} description="Ready for booking" icon={CarFront} tone="green" />

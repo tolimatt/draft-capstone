@@ -413,6 +413,10 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    manualPaymentUpdatedAt: { type: Date, default: null },
+    manualPaymentUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    manualPaymentStatus: { type: String, enum: ["unpaid", "partial", "paid", "refunded", null], default: null },
+    manualPaymentRevision: { type: Number, default: 0 },
     paidAt: {
       type: Date,
       default: null,
@@ -433,6 +437,22 @@ const bookingSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// A checkout/return loaded before an owner's manual correction must not save
+// its old payment snapshot over the correction after an asynchronous operation.
+bookingSchema.post("init", function (booking) {
+  booking.$locals.manualPaymentRevisionOnRead = Number(booking.manualPaymentRevision || 0);
+});
+bookingSchema.pre("save", function () {
+  if (this.isNew) return;
+  const paymentFields = [
+    "paymentStatus", "paymentAmountPaid", "paymentAmountDue", "paymentCheckoutAmount",
+    "paymentMethod", "balancePaymentMethod", "walkInPaymentStatus", "totalAmount", "lateReturnPenaltyFee",
+  ];
+  if (!paymentFields.some((field) => this.isModified(field))) return;
+  const revision = this.$locals.manualPaymentRevisionOnRead ?? Number(this.manualPaymentRevision || 0);
+  this.$where = { ...this.$where, manualPaymentRevision: revision === 0 ? { $in: [0, null] } : revision };
+});
 
 bookingSchema.index({ vehicle: 1, pickupAt: 1, returnAt: 1 });
 bookingSchema.index({ owner: 1, status: 1, createdAt: -1 });
