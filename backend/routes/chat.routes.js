@@ -15,6 +15,8 @@ import {
 import { protect } from "../middleware/auth.middleware.js";
 import { authorize } from "../middleware/rbac.middleware.js";
 import { requireModerationCapability } from "../middleware/moderation.middleware.js";
+import { auditLog } from "../middleware/auditLogger.middleware.js";
+import { chatbotConcurrencyGuard, chatbotLimiter } from "../middleware/security.middleware.js";
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
 import { ensureChatbotServiceReady } from "../utils/chatbotServiceManager.js";
@@ -23,9 +25,7 @@ import {
   applyChatbotGuardrails,
   buildRejectedChatbotResponse,
   buildChatbotPayload,
-  buildRetryPayload,
   normalizeChatbotResponse,
-  shouldRetryChatbotResponse,
   validateChatbotInput,
 } from "../utils/chatbotPayload.js";
 
@@ -33,8 +33,14 @@ const router = express.Router();
 const isProduction = process.env.NODE_ENV === "production";
 const DEFAULT_CHATBOT_URL = isProduction ? "" : "http://localhost:8001";
 const ACTIVE_BOOKING_STATUSES = ["pending", "confirmed", "extended"];
+const LIVE_VEHICLE_INTENTS = new Set([
+  "available_vehicles",
+  "available_transmission",
+  "passenger_capacity",
+  "vehicle_brand_search",
+]);
 
-router.post("/", async (req, res, next) => {
+router.post("/", chatbotLimiter, chatbotConcurrencyGuard, async (req, res, next) => {
   try {
     const rawMessage = String(req.body?.message || "");
     const language = String(req.body?.language || "auto").trim().toLowerCase();
@@ -59,62 +65,64 @@ router.post("/", async (req, res, next) => {
     }
     await ensureChatbotServiceReady();
 
-    const vehicles = await Vehicle.find({ availabilityStatus: "available" })
-      .select(
-        "name description location availabilityStatus imageUrl images dailyRentalRate pricingUnit specs driverOptionEnabled driverDailyRate"
-      )
-      .lean();
+    let payload = buildChatbotPayload(message, language);
 
-    let realtimeAvailableVehicles = vehicles;
-    if (vehicles.length > 0) {
-      const vehicleIds = vehicles.map((vehicle) => vehicle._id);
-      const lockedVehicleIds = await Booking.distinct("vehicle", {
-        vehicle: { $in: vehicleIds },
-        status: { $in: ACTIVE_BOOKING_STATUSES },
-        returnAt: { $gt: new Date() },
-      });
-      const lockedVehicleIdSet = new Set(lockedVehicleIds.map((id) => String(id)));
-      realtimeAvailableVehicles = vehicles.filter(
-        (vehicle) => !lockedVehicleIdSet.has(String(vehicle?._id || ""))
-      );
-    }
-
-    const payload = buildChatbotPayload(message, language, realtimeAvailableVehicles);
-    if (payload.preflightRejectReason) {
-      return res.json(buildRejectedChatbotResponse(payload.selectedLanguage, payload.preflightRejectReason));
-    }
-
-    const { data: firstResponse } = await axios.post(
+    const { data: classifierResponse } = await axios.post(
       `${chatbotBaseUrl}/chat`,
       {
-        message: payload.filteredMessage,
+        message: payload.originalMessage,
         language: payload.selectedLanguage,
-        vehicles: payload.vehicles,
       },
       { timeout: 15000 }
     );
 
-    let chatbotResponse = normalizeChatbotResponse(firstResponse);
+    const chatbotResponse = normalizeChatbotResponse(classifierResponse, payload.selectedLanguage);
+    const needsLiveVehicleData = chatbotResponse.valid && (
+      LIVE_VEHICLE_INTENTS.has(chatbotResponse.intent) ||
+      (chatbotResponse.intent === "rental_rate" && chatbotResponse.entities?.brand)
+    );
+    if (needsLiveVehicleData) {
+      const vehicles = await Vehicle.find({ availabilityStatus: "available" })
+        .select(
+          "name brand model description location availabilityStatus imageUrl images dailyRentalRate pricingUnit specs driverOptionEnabled driverDailyRate"
+        )
+        .lean();
 
-    if (shouldRetryChatbotResponse(chatbotResponse, payload)) {
-      const retryMessage = buildRetryPayload(payload);
-      const { data: retryResponse } = await axios.post(
-        `${chatbotBaseUrl}/chat`,
-        {
-          message: retryMessage,
-          language: payload.selectedLanguage,
-          vehicles: payload.vehicles,
-        },
-        { timeout: 15000 }
-      );
-
-      const normalizedRetry = normalizeChatbotResponse(retryResponse);
-      if (normalizedRetry.score >= chatbotResponse.score) {
-        chatbotResponse = normalizedRetry;
+      let realtimeAvailableVehicles = vehicles;
+      if (vehicles.length > 0) {
+        const vehicleIds = vehicles.map((vehicle) => vehicle._id);
+        const lockedVehicleIds = await Booking.distinct("vehicle", {
+          vehicle: { $in: vehicleIds },
+          status: { $in: ACTIVE_BOOKING_STATUSES },
+          actualReturnAt: null,
+        });
+        const lockedVehicleIdSet = new Set(lockedVehicleIds.map((id) => String(id)));
+        realtimeAvailableVehicles = vehicles.filter(
+          (vehicle) => !lockedVehicleIdSet.has(String(vehicle?._id || ""))
+        );
       }
+      payload = buildChatbotPayload(
+        message,
+        language,
+        realtimeAvailableVehicles,
+        chatbotResponse.entities
+      );
     }
 
-    return res.json(applyChatbotGuardrails(chatbotResponse, payload));
+    const finalResponse = applyChatbotGuardrails(chatbotResponse, payload);
+
+    if (!isProduction) {
+      auditLog.info("CHATBOT", "RentifyAI routing", {
+        inputLength: message.length,
+        classifierIntent: chatbotResponse.intent,
+        confidence: chatbotResponse.confidence,
+        alternative: chatbotResponse.alternatives?.[0] || null,
+        requiresLiveData: Boolean(finalResponse.requires_live_data),
+        clarification: Boolean(finalResponse.requires_clarification),
+      });
+    }
+
+    return res.json(finalResponse);
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response) {

@@ -27,7 +27,7 @@ test("owner upgrade marks a verified owner as approved for vehicle listing", asy
 
   t.mock.method(User, "findById", async () => user);
   t.mock.method(PreKycDocument, "find", (query) => ({
-    select: async () => (query.status === "verified" ? [{ docType: "supporting" }] : []),
+    select: async () => (query.status === "verified" ? [{ docType: "supporting", status: "verified" }] : []),
   }));
   t.mock.method(KycVerification, "findOneAndUpdate", async (...args) => {
     kycWrites.push(args);

@@ -13,6 +13,7 @@ import { normalizeOwnerProfile, persistOwnerProfile } from "../owner/utils/owner
 const SUBMIT_COOLDOWN_MS = 2000;
 const RATE_LIMIT_FALLBACK_SECONDS = 5 * 60;
 const SIGN_IN_RATE_LIMIT_STORAGE_KEY = "rentifypro.signinRateLimitUntil";
+const INCORRECT_PASSWORD_MESSAGE = "The password you entered is incorrect. Please try again.";
 
 const formatCountdown = (seconds) => {
   const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -300,7 +301,12 @@ export default function SignInPage({
       } else if (error?.details?.errors && typeof error.details.errors === "object") {
         const fieldErrors = {};
         if (error.details.errors.email) fieldErrors.email = error.details.errors.email;
-        if (error.details.errors.password) fieldErrors.password = error.details.errors.password;
+        if (error.details.errors.password) {
+          fieldErrors.password =
+            error.details.code === "INVALID_PASSWORD"
+              ? INCORRECT_PASSWORD_MESSAGE
+              : error.details.errors.password;
+        }
         if (error.details.errors.captchaAnswer || error.details.errors.captcha) {
           fieldErrors.captchaAnswer =
             error.details.errors.captchaAnswer || error.details.errors.captcha;
@@ -314,12 +320,12 @@ export default function SignInPage({
         setFormError("");
         focusFirstInvalidField(fieldErrors);
       } else if (error?.details?.code === "INVALID_PASSWORD") {
-        const fieldErrors = { password: "Invalid password." };
+        const fieldErrors = { password: INCORRECT_PASSWORD_MESSAGE };
         setErrors(fieldErrors);
         setFormError("");
         focusFirstInvalidField(fieldErrors);
       } else if (/invalid email or password/i.test(msg)) {
-        const fieldErrors = { password: "Invalid password." };
+        const fieldErrors = { password: INCORRECT_PASSWORD_MESSAGE };
         setErrors(fieldErrors);
         setFormError("");
         focusFirstInvalidField(fieldErrors);

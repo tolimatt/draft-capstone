@@ -12,6 +12,9 @@ import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { ensureFaceServiceReady, isFaceServiceConnectionError } from "../utils/faceServiceManager.js";
 import { issuePreKycSession, renewPreKycSession } from "../utils/preKycSession.js";
 import { reconcileUserKyc, reviewKycDocument } from "../services/kycReview.service.js";
+import { resolveSupportedDocumentType } from "../services/documentValidation.service.js";
+import { triggerKycDocumentProcessing } from "../jobs/kycDocumentProcessing.job.js";
+import { isIdentityReadyForSelfie } from "../utils/preKycDocs.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 const getFaceServiceUrl = () => {
@@ -25,6 +28,17 @@ const PRE_KYC_FACE_TTL_HOURS = Number(process.env.PREKYC_FACE_TTL_HOURS || PRE_K
 const MAX_KYC_IMAGE_BYTES = Number(process.env.KYC_IMAGE_MAX_BYTES || 4 * 1024 * 1024);
 const KYC_UPLOAD_DIR = process.env.KYC_UPLOAD_DIR || path.resolve("private_uploads", "kyc");
 const DEFAULT_KYC_ERROR_MESSAGE = "We couldn't complete verification right now. Please try again.";
+
+const identitySelfieGateMessage = (document) => {
+  if (!document) return "Upload your government ID and wait for its details to be checked before taking a selfie.";
+  if (["reupload_required", "rejected"].includes(document.status)) {
+    return "Your ID needs a correction before selfie verification. Upload an ID that matches your registration details.";
+  }
+  if (["queued", "processing", "retry_wait"].includes(document.status)) {
+    return "Your ID details are still being checked. Selfie verification will unlock automatically after they match.";
+  }
+  return "We could not confirm that this ID matches your registration details yet. Check the document status before continuing.";
+};
 
 const toErrorDetail = (err) => String(err?.stack || err?.message || err || "Unknown error");
 
@@ -143,11 +157,19 @@ const queuePreKycDocument = async ({
         processingError: "",
         country: "",
         docCategory: "",
-        detailsMatched: true,
+        detailsMatched: false,
         mismatchFields: [],
         suspectedTampering: false,
         confidence: 0,
-        reason: "Document is queued for automated screening and Super Admin review.",
+        classificationConfidence: 0,
+        documentSurface: "",
+        reason: "Your document was uploaded securely and is waiting for automated checks.",
+        reasonCode: "QUEUED",
+        decisionSource: "",
+        validationChecks: {},
+        extractedData: {},
+        qualityIssues: [],
+        documentNumberFingerprint: "",
         verifiedAt: null,
         reviewedAt: null,
         reviewedBy: null,
@@ -322,9 +344,11 @@ export const faceDetect = async (req, res) => {
 export const registerIdFace = async (req, res) => {
   try {
     const { id_image_base64, id_image_mime, id_type, user_profile } = req.body;
-    if (!id_image_base64) return res.status(400).json({ message: "id_image_base64 is required" });
+    if (!id_image_base64) return res.status(400).json({ message: "Please choose an ID image before continuing." });
     validateKycImage(id_image_base64);
     if (!id_type) return res.status(400).json({ message: "Please select the ID type before verifying." });
+    const selectedIdType = resolveSupportedDocumentType(id_type, "id");
+    if (!selectedIdType) return res.status(400).json({ message: "That ID type is not supported. Please select one from the list." });
 
     const sessionId = `user:${req.user._id.toString()}`;
     const imageBuffer = decodeKycBase64(id_image_base64);
@@ -335,13 +359,9 @@ export const registerIdFace = async (req, res) => {
       full_name: req.user?.name || user_profile?.full_name,
       first_name: req.user?.firstName || user_profile?.first_name || fallbackName.first_name,
       last_name: req.user?.lastName || user_profile?.last_name || fallbackName.last_name,
-      email: req.user?.email || user_profile?.email,
       date_of_birth: req.user?.dateOfBirth || user_profile?.date_of_birth,
-      gender: req.user?.gender || user_profile?.gender,
-      owner_type: req.user?.ownerType || user_profile?.owner_type,
       business_name: req.user?.businessName || user_profile?.business_name,
       permit_number: req.user?.permitNumber || user_profile?.permit_number,
-      address: req.user?.address || user_profile?.address,
     };
 
     const fileMeta = await saveKycBase64File({
@@ -354,10 +374,11 @@ export const registerIdFace = async (req, res) => {
       role: req.user.role,
       sessionId,
       docType: "id",
-      selectedDocCategory: id_type,
+      selectedDocCategory: selectedIdType,
       profileSnapshot: profileContext,
       fileMeta: { ...fileMeta, fileHash: imageHash },
     });
+    triggerKycDocumentProcessing();
 
     const payload = {
       user_id: req.user._id.toString(),
@@ -389,7 +410,7 @@ export const registerIdFace = async (req, res) => {
       verificationQueued: true,
       reviewRequired: true,
       message: result.success
-        ? "ID face registered. Document screening and Super Admin review are pending."
+        ? "ID uploaded securely. Document screening has started; this is not an approval yet."
         : result.message,
     });
   } catch (err) {
@@ -510,11 +531,15 @@ export const preRegisterIdFace = async (req, res) => {
     const { email, role, sessionId } = req.preKyc;
 
     if (!email || !id_image_base64) {
-      return res.status(400).json({ success: false, message: "email and id_image_base64 are required" });
+      return res.status(400).json({ success: false, message: "Please enter your email and choose an ID image before continuing." });
     }
     validateKycImage(id_image_base64);
     if (!id_type) {
       return res.status(400).json({ success: false, message: "Please select the ID type before verifying." });
+    }
+    const selectedIdType = resolveSupportedDocumentType(id_type, "id");
+    if (!selectedIdType) {
+      return res.status(400).json({ success: false, message: "That ID type is not supported. Please select one from the list." });
     }
 
     const fallbackName = splitFirstLastName(full_name || user_profile?.full_name);
@@ -522,13 +547,9 @@ export const preRegisterIdFace = async (req, res) => {
       full_name: full_name || user_profile?.full_name,
       first_name: user_profile?.first_name || fallbackName.first_name,
       last_name: user_profile?.last_name || fallbackName.last_name,
-      email,
       date_of_birth: user_profile?.date_of_birth,
-      gender: user_profile?.gender,
-      owner_type: user_profile?.owner_type || role,
       business_name: user_profile?.business_name,
       permit_number: user_profile?.permit_number,
-      address: user_profile?.address,
     };
 
     const payload = {
@@ -556,10 +577,11 @@ export const preRegisterIdFace = async (req, res) => {
       role,
       sessionId,
       docType: "id",
-      selectedDocCategory: id_type,
+      selectedDocCategory: selectedIdType,
       profileSnapshot: profileContext,
       fileMeta,
     });
+    triggerKycDocumentProcessing();
     auditLog.info("KYC", "Pre-registration ID register requested");
     const result = await proxyToFaceService("/api/kyc/id/register", payload);
     res.json({
@@ -567,7 +589,7 @@ export const preRegisterIdFace = async (req, res) => {
       verificationQueued: true,
       reviewRequired: true,
       message: result?.success
-        ? "ID face registered. Document screening is queued; you may continue with the selfie step."
+        ? "ID uploaded securely. We are checking its personal details before the selfie step unlocks."
         : result?.message,
     });
   } catch (err) {
@@ -588,6 +610,17 @@ export const preSelfieVerify = async (req, res) => {
       return res.status(400).json({ success: false, message: "email and selfie_image_base64 are required" });
     }
     validateKycImage(selfie_image_base64);
+
+    const idDocument = await PreKycDocument.findOne({ email, sessionId, docType: "id" })
+      .select("docType status detailsMatched")
+      .lean();
+    if (!isIdentityReadyForSelfie(idDocument)) {
+      return res.status(409).json({
+        success: false,
+        code: "ID_DETAILS_NOT_MATCHED",
+        message: identitySelfieGateMessage(idDocument),
+      });
+    }
 
     const payload = {
       user_id: `pre:${sessionId}`,
@@ -615,7 +648,7 @@ export const preVerifySupportingDocument = async (req, res) => {
     if (!email || !doc_image_base64) {
       return res.status(400).json({
         success: false,
-        message: "email and doc_image_base64 are required",
+        message: "Please enter your email and choose a supporting document before continuing.",
       });
     }
     validateKycDocument(doc_image_base64, doc_image_mime || "");
@@ -625,17 +658,21 @@ export const preVerifySupportingDocument = async (req, res) => {
         message: "Please select the supporting document type before verifying.",
       });
     }
+    const selectedSupportingType = resolveSupportedDocumentType(supporting_doc_type, "supporting");
+    if (!selectedSupportingType) {
+      return res.status(400).json({
+        success: false,
+        message: "That supporting document type is not supported. Please select one from the list.",
+      });
+    }
 
     const fallbackName = splitFirstLastName(user_profile?.full_name);
     const profileContext = {
       full_name: user_profile?.full_name,
       first_name: user_profile?.first_name || fallbackName.first_name,
       last_name: user_profile?.last_name || fallbackName.last_name,
-      email,
-      owner_type: user_profile?.owner_type || role,
       business_name: user_profile?.business_name,
       permit_number: user_profile?.permit_number,
-      address: user_profile?.address,
     };
 
     const fileMeta = await saveKycBase64File({
@@ -648,16 +685,17 @@ export const preVerifySupportingDocument = async (req, res) => {
       role,
       sessionId,
       docType: "supporting",
-      selectedDocCategory: supporting_doc_type,
+      selectedDocCategory: selectedSupportingType,
       profileSnapshot: profileContext,
       fileMeta,
     });
+    triggerKycDocumentProcessing();
     return res.json({
       success: true,
       verificationQueued: true,
       reviewRequired: true,
-      message: "Supporting document uploaded securely and queued for screening and Super Admin review.",
-      selectedDocType: supporting_doc_type,
+      message: "Supporting document uploaded securely. Automated checks have started.",
+      selectedDocType: selectedSupportingType,
     });
   } catch (err) {
     return sendKycError(res, err, {
@@ -671,10 +709,16 @@ export const getPreKycStatus = async (req, res) => {
   try {
     const { email, sessionId } = req.preKyc;
     const documents = await PreKycDocument.find({ email, sessionId })
-      .select("docType status selectedDocCategory confidence reason mismatchFields suspectedTampering processingAttempts createdAt updatedAt")
+      .select("docType status docCategory selectedDocCategory detailsMatched reason reasonCode processingAttempts createdAt updatedAt")
       .sort({ createdAt: 1 })
       .lean();
-    return res.json({ success: true, documents });
+    return res.json({
+      success: true,
+      documents: documents.map((document) => ({
+        ...document,
+        identityReadyForSelfie: isIdentityReadyForSelfie(document),
+      })),
+    });
   } catch (error) {
     return sendKycError(res, error, {
       logMessage: "Get pre-registration KYC status failed",
@@ -686,7 +730,7 @@ export const getPreKycStatus = async (req, res) => {
 export const listPendingKycReviews = async (_req, res) => {
   try {
     const reviews = await PreKycDocument.find({ status: { $in: ["queued", "processing", "retry_wait", "pending_review"] } })
-      .select("email role sessionId docType status docCategory selectedDocCategory detailsMatched mismatchFields suspectedTampering confidence reason processingAttempts nextAttemptAt fileName mimeType fileSize fileHash createdAt expiresAt")
+      .select("email role sessionId docType status docCategory selectedDocCategory detailsMatched mismatchFields suspectedTampering reason reasonCode documentSurface validationChecks extractedData qualityIssues decisionSource processingAttempts nextAttemptAt fileName mimeType fileSize fileHash createdAt expiresAt")
       .sort({ createdAt: 1 })
       .limit(200)
       .lean();

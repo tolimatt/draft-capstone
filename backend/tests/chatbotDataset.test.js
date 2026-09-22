@@ -8,6 +8,8 @@ import {
   applyChatbotGuardrails,
   buildChatbotPayload,
   getChatbotDatasetInfo,
+  normalizeChatbotResponse,
+  validateChatbotInput,
 } from "../utils/chatbotPayload.js";
 
 test("uses chatbot dataset v6 by default", () => {
@@ -40,19 +42,42 @@ test("v6 contains unique intents with complete multilingual responses", () => {
   assert.equal(datasetV6.schema_version, "v6_intent_multilingual_conversational");
 
   const intentIds = new Set();
-  const hasAnswers = (value) =>
-    (typeof value === "string" && value.trim().length > 0) ||
-    (Array.isArray(value) && value.some((answer) => typeof answer === "string" && answer.trim()));
+  const normalizedExamples = new Map();
+  const normalizeExample = (value) => String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}%#'\-\s]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 
   for (const item of datasetV6.items) {
     assert.ok(item.id, "every v6 intent must have an id");
     assert.equal(intentIds.has(item.id), false, `duplicate v6 intent id: ${item.id}`);
+    assert.equal(typeof item.description, "string", `${item.id} must have a description`);
+    assert.ok(Array.isArray(item.aliases), `${item.id} aliases must be an array`);
     assert.ok(Array.isArray(item.examples) && item.examples.length > 0, `${item.id} must have examples`);
-    assert.ok(hasAnswers(item.responses?.en), `${item.id} must have an English response`);
-    assert.ok(hasAnswers(item.responses?.fil), `${item.id} must have a Filipino response`);
-    assert.ok(hasAnswers(item.responses?.taglish), `${item.id} must have a Taglish response`);
+    assert.ok(Array.isArray(item.hard_negatives), `${item.id} hard negatives must be an array`);
+    assert.equal(typeof item.requires_live_data, "boolean", `${item.id} must declare live-data use`);
+    assert.equal(typeof item.live_source, "string", `${item.id} must declare a live source or an empty value`);
+    assert.equal(typeof item.policy_source, "string", `${item.id} must declare a policy source or an empty value`);
+    assert.equal(typeof item.reviewed_at, "string", `${item.id} must have a review date`);
+    for (const language of ["en", "fil", "taglish"]) {
+      assert.ok(Array.isArray(item.responses?.[language]), `${item.id}.${language} responses must be an array`);
+      assert.ok(item.responses[language].every((answer) => typeof answer === "string" && answer.trim()), `${item.id}.${language} responses must be complete`);
+    }
+    for (const example of item.examples) {
+      const normalized = normalizeExample(example);
+      assert.equal(normalizedExamples.has(normalized), false, `duplicate example '${example}' in ${item.id} and ${normalizedExamples.get(normalized)}`);
+      normalizedExamples.set(normalized, item.id);
+    }
     intentIds.add(item.id);
   }
+
+  for (const requiredIntent of ["booking_limits", "schedule_conflict", "late_return_policy", "unpaid_balance", "vehicle_brand_search"]) {
+    assert.equal(intentIds.has(requiredIntent), true, `${requiredIntent} must be supported`);
+  }
+  assert.equal(intentIds.has("chat_capabilities"), false, "chat capabilities should be merged into help_request");
+  assert.equal(intentIds.has("online_payment"), false, "online payment should be merged into payment_methods");
 });
 
 test("keeps v6 response variants as separate chatbot replies", () => {
@@ -64,4 +89,264 @@ test("keeps v6 response variants as separate chatbot replies", () => {
   );
 
   assert.ok(greeting.responses.en.includes(result.reply));
+});
+
+test("preserves meaningful Unicode, amounts, percentages, apostrophes, and hyphens", () => {
+  for (const message of [
+    "Can I pay 30%?",
+    "How much is ₱1,000?",
+    "What is the owner's late-return fee?",
+    "Can I extend for 2 days?",
+    "你好，pwede mag-book?",
+  ]) {
+    const result = validateChatbotInput(message);
+    assert.equal(result.isValid, true, message);
+    assert.equal(result.message, message.normalize("NFKC"), message);
+  }
+
+  const amountPayload = buildChatbotPayload("Show vehicles under ₱1,000", "english");
+  assert.equal(amountPayload.slots.budget, 1000);
+});
+
+test("does not classify or override intents in the Node payload layer", () => {
+  const payload = buildChatbotPayload("How can I pay my 30% using GCash?", "english");
+  assert.equal(Object.hasOwn(payload, "hintIntentId"), false);
+  assert.equal(Object.hasOwn(payload, "preflightRejectReason"), false);
+
+  const result = applyChatbotGuardrails(
+    {
+      intent: "payment_downpayment",
+      confidence: 0.94,
+      language: "en",
+      reply: "classifier wording is validated against the canonical policy response",
+      alternatives: [{ intent: "payment_methods", confidence: 0.12 }],
+    },
+    payload
+  );
+  assert.equal(result.intent, "payment_downpayment");
+  assert.equal(result.reply, datasetV6.items.find((item) => item.id === "payment_downpayment").responses.en[0]);
+});
+
+test("uses safe fallback for malformed classifier results", () => {
+  const normalized = normalizeChatbotResponse({
+    intent: "invented_intent",
+    confidence: 4,
+    language: "unsupported",
+    alternatives: [{ intent: "also_invented", confidence: 2 }],
+  });
+  assert.equal(normalized.valid, false);
+
+  const result = applyChatbotGuardrails(normalized, buildChatbotPayload("question", "english"));
+  assert.equal(result.intent, "REJECT");
+  assert.equal(result.reason_code, "malformed_classifier");
+});
+
+test("preserves candidate-specific clarification metadata", () => {
+  const result = applyChatbotGuardrails(
+    {
+      intent: "REJECT",
+      confidence: 0.52,
+      language: "en",
+      reply: "Are you asking about available payment methods, the 30% down payment, or paying the remaining balance?",
+      alternatives: [
+        { intent: "payment_methods", confidence: 0.52 },
+        { intent: "payment_downpayment", confidence: 0.5 },
+      ],
+      requires_clarification: true,
+      reason_code: "ambiguous_intent",
+    },
+    buildChatbotPayload("payment", "english")
+  );
+  assert.equal(result.intent, "REJECT");
+  assert.equal(result.requires_clarification, true);
+  assert.equal(result.alternatives.length, 2);
+  assert.match(result.reply, /payment methods/i);
+});
+
+test("sorts unchanged live vehicle results deterministically", () => {
+  const vehicles = [
+    { _id: "b", name: "Beta", hourlyRate: 100, availabilityStatus: "available", specs: { type: "Sedan", seats: 5, transmission: "Automatic" } },
+    { _id: "c", name: "Charlie", hourlyRate: 80, availabilityStatus: "available", specs: { type: "Sedan", seats: 5, transmission: "Automatic" } },
+    { _id: "a", name: "Alpha", hourlyRate: 100, availabilityStatus: "available", specs: { type: "Sedan", seats: 5, transmission: "Automatic" } },
+  ];
+  const payload = buildChatbotPayload("What vehicles are available?", "english", vehicles);
+  const response = {
+    intent: "available_vehicles",
+    confidence: 0.95,
+    language: "en",
+    reply: "",
+    alternatives: [],
+  };
+  const first = applyChatbotGuardrails(response, payload);
+  const second = applyChatbotGuardrails(response, payload);
+  assert.deepEqual(first.recommendations.map((vehicle) => vehicle._id), ["c", "a", "b"]);
+  assert.deepEqual(second.recommendations, first.recommendations);
+  assert.doesNotMatch(first.reply, /random/i);
+});
+
+test("validates and canonicalizes the vehicle brand entity contract", () => {
+  const normalized = normalizeChatbotResponse({
+    intent: "vehicle_brand_search",
+    confidence: 0.99,
+    language: "en",
+    reply: "",
+    alternatives: [],
+    entities: { brand: "tOyOtA", model: "Vios" },
+  });
+  assert.equal(normalized.valid, true);
+  assert.deepEqual(normalized.entities, { brand: "Toyota", model: "Vios" });
+
+  const unknown = normalizeChatbotResponse({
+    intent: "vehicle_brand_search",
+    confidence: 0.99,
+    language: "en",
+    alternatives: [],
+    entities: { brand: "ABC Motors", model: null },
+  });
+  assert.equal(unknown.valid, false);
+
+  const inventedField = normalizeChatbotResponse({
+    intent: "vehicle_brand_search",
+    confidence: 0.99,
+    language: "en",
+    alternatives: [],
+    entities: { brand: "Toyota", color: "red" },
+  });
+  assert.equal(inventedField.valid, false);
+});
+
+test("filters brand and model searches against live vehicle fixtures without fabricating matches", () => {
+  const vehicles = [
+    { _id: "vios", name: "Toyota Vios", hourlyRate: 120, availabilityStatus: "available", specs: { type: "car", seats: 5, transmission: "Automatic" } },
+    { _id: "innova", name: "Toyota Innova", hourlyRate: 100, availabilityStatus: "available", specs: { type: "van", seats: 8, transmission: "Automatic" } },
+    { _id: "city", name: "Honda City", hourlyRate: 80, availabilityStatus: "available", specs: { type: "car", seats: 5, transmission: "Automatic" } },
+    { _id: "unavailable", name: "Toyota Wigo", hourlyRate: 50, availabilityStatus: "unavailable", specs: { type: "car", seats: 5, transmission: "Automatic" } },
+  ];
+  const classifier = {
+    intent: "vehicle_brand_search",
+    confidence: 0.99,
+    language: "en",
+    reply: "",
+    alternatives: [],
+    entities: { brand: "Toyota", model: null },
+  };
+  const payload = buildChatbotPayload("Toyota", "english", vehicles, classifier.entities);
+  const first = applyChatbotGuardrails(classifier, payload);
+  const second = applyChatbotGuardrails(classifier, payload);
+
+  assert.deepEqual(first.recommendations.map((vehicle) => vehicle._id), ["innova", "vios"]);
+  assert.deepEqual(second.recommendations, first.recommendations);
+  assert.match(first.reply, /current RentifyPro Toyota listings/i);
+  assert.match(first.reply, /confirm availability/i);
+  assert.doesNotMatch(first.reply, /Toyota is available/i);
+
+  const modelPayload = buildChatbotPayload("Toyota Vios", "english", vehicles, { brand: "Toyota", model: "Vios" });
+  const modelResult = applyChatbotGuardrails(
+    { ...classifier, entities: { brand: "Toyota", model: "Vios" } },
+    modelPayload
+  );
+  assert.deepEqual(modelResult.recommendations.map((vehicle) => vehicle._id), ["vios"]);
+
+  const emptyPayload = buildChatbotPayload("Nissan", "english", vehicles, { brand: "Nissan", model: null });
+  const emptyResult = applyChatbotGuardrails(
+    { ...classifier, entities: { brand: "Nissan", model: null } },
+    emptyPayload
+  );
+  assert.deepEqual(emptyResult.recommendations, []);
+  assert.match(emptyResult.reply, /currently listed Nissan vehicles/i);
+  assert.doesNotMatch(emptyResult.reply, /never supports/i);
+});
+
+test("returns Filipino live brand-search replies for Tagalog brand questions", () => {
+  const vehicles = [
+    { _id: "ranger", name: "Ford Ranger", hourlyRate: 140, availabilityStatus: "available", specs: { type: "pickup", seats: 5, transmission: "Automatic" } },
+    { _id: "everest", name: "Ford Everest", hourlyRate: 160, availabilityStatus: "available", specs: { type: "suv", seats: 7, transmission: "Automatic" } },
+    { _id: "vios", name: "Toyota Vios", hourlyRate: 100, availabilityStatus: "available", specs: { type: "car", seats: 5, transmission: "Automatic" } },
+  ];
+  const classifier = {
+    intent: "vehicle_brand_search",
+    confidence: 0.99,
+    language: "fil",
+    reply: "",
+    alternatives: [],
+    entities: { brand: "Ford", model: null },
+  };
+  const payload = buildChatbotPayload("Ford meron?", "auto", vehicles, classifier.entities);
+  const result = applyChatbotGuardrails(classifier, payload);
+
+  assert.equal(payload.selectedLanguage, "filipino");
+  assert.equal(result.language, "fil");
+  assert.deepEqual(result.recommendations.map((vehicle) => vehicle._id), ["ranger", "everest"]);
+  assert.match(result.reply, /May nakita akong 2 kasalukuyang listahan ng Ford sa RentifyPro/i);
+  assert.match(result.reply, /petsa at oras ng pagkuha at pagbabalik/i);
+  assert.doesNotMatch(result.reply, /current|listing matches|provide your/i);
+
+  const mayQuestion = buildChatbotPayload("may Toyota ba?", "auto", vehicles, { brand: "Toyota", model: null });
+  assert.equal(mayQuestion.selectedLanguage, "filipino");
+});
+
+test("resolves only unique one-edit vehicle model typos against live listings", () => {
+  const vehicles = [
+    { _id: "raptor", name: "Ford Ranger Raptor", hourlyRate: 175, availabilityStatus: "available", specs: { type: "pickup", seats: 5, transmission: "Automatic" } },
+    { _id: "everest", name: "Ford Everest", hourlyRate: 160, availabilityStatus: "available", specs: { type: "suv", seats: 7, transmission: "Automatic" } },
+  ];
+  const typoMessage = "is thre a ford rptor availble?";
+  const classifier = {
+    intent: "vehicle_brand_search",
+    confidence: 0.995,
+    language: "en",
+    reply: "",
+    alternatives: [],
+    entities: { brand: "Ford", model: "Rptor" },
+  };
+  const payload = buildChatbotPayload(typoMessage, "auto", vehicles, classifier.entities);
+  const result = applyChatbotGuardrails(classifier, payload);
+
+  assert.equal(payload.originalMessage, typoMessage);
+  assert.equal(payload.slots.model, "Raptor");
+  assert.deepEqual(result.recommendations.map((vehicle) => vehicle._id), ["raptor"]);
+  assert.deepEqual(result.entities, { brand: "Ford", model: "Raptor" });
+  assert.match(result.reply, /Ford Raptor/i);
+
+  const ambiguousVehicles = [
+    { _id: "civic", name: "Honda Civic", model: "Civic", hourlyRate: 100, availabilityStatus: "available", specs: { type: "car", seats: 5 } },
+    { _id: "civix", name: "Honda Civix", model: "Civix", hourlyRate: 105, availabilityStatus: "available", specs: { type: "car", seats: 5 } },
+  ];
+  const ambiguous = buildChatbotPayload(
+    "Honda Civi",
+    "auto",
+    ambiguousVehicles,
+    { brand: "Honda", model: "Civi" }
+  );
+  assert.equal(ambiguous.slots.model, "Civi");
+  assert.deepEqual(ambiguous.vehicles, []);
+});
+
+test("keeps brand plus rate as rental_rate while using matching live listing prices", () => {
+  const vehicles = [
+    { _id: "vios", name: "Toyota Vios", hourlyRate: 125.5, availabilityStatus: "available", specs: { type: "car", seats: 5, transmission: "Automatic" } },
+    { _id: "city", name: "Honda City", hourlyRate: 80, availabilityStatus: "available", specs: { type: "car", seats: 5, transmission: "Automatic" } },
+  ];
+  const response = {
+    intent: "rental_rate",
+    confidence: 0.995,
+    language: "en",
+    reply: "",
+    alternatives: [],
+    entities: { brand: "Toyota", model: "Vios" },
+  };
+  const payload = buildChatbotPayload("how much is the Toyota Vios?", "english", vehicles, response.entities);
+  const result = applyChatbotGuardrails(response, payload);
+
+  assert.equal(result.intent, "rental_rate");
+  assert.deepEqual(result.entities, { brand: "Toyota", model: "Vios" });
+  assert.deepEqual(result.recommendations.map((vehicle) => vehicle._id), ["vios"]);
+  assert.match(result.reply, /PHP 125\.5 per hour/i);
+});
+
+test("does not present unsupported insurance or fixed-deposit claims as guarantees", () => {
+  const insurance = datasetV6.items.find((item) => item.id === "insurance_included");
+  const deposit = datasetV6.items.find((item) => item.id === "security_deposit");
+  assert.doesNotMatch(insurance.responses.en[0], /included in all|every rental is insured/i);
+  assert.doesNotMatch(deposit.responses.en[0], /(?:PHP|₱)\s*1,?000/i);
 });

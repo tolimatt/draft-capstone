@@ -19,6 +19,7 @@ import {
 import {
   kycLimiter,
   preKycLimiter,
+  preKycStatusLimiter,
 } from "../middleware/security.middleware.js";
 import { requirePreKycSession } from "../middleware/preKycSession.middleware.js";
 import { authorize } from "../middleware/rbac.middleware.js";
@@ -43,7 +44,7 @@ router.post("/pre/session", preKycLimiter, createPreKycSession);
 router.post("/pre/id-register", preKycLimiter, requirePreKycSession, preRegisterIdFace);
 router.post("/pre/selfie/verify", preKycLimiter, requirePreKycSession, preSelfieVerify);
 router.post("/pre/supporting-doc/verify", preKycLimiter, requirePreKycSession, preVerifySupportingDocument);
-router.get("/pre/status", preKycLimiter, requirePreKycSession, getPreKycStatus);
+router.get("/pre/status", preKycStatusLimiter, requirePreKycSession, getPreKycStatus);
 
 // Internal callback from the Python service
 router.patch("/internal/update-status", internalUpdateStatus);

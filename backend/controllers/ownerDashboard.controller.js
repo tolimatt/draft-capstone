@@ -21,6 +21,10 @@ import {
   getDurationHoursFromMinutes,
   roundCurrency,
 } from "../utils/pricing.js";
+import {
+  buildVehicleBookingComparison,
+  resolveOwnerAnalyticsPeriod,
+} from "../utils/ownerAnalytics.js";
 
 const STATUSES = new Set(["pending", "confirmed", "extended", "completed", "cancelled", "rejected"]);
 const PAYMENT_STATUSES = new Set(["unpaid", "partial", "paid", "refunded"]);
@@ -1575,8 +1579,9 @@ export const getOwnerEarnings = async (req, res) => {
 export const getOwnerAnalytics = async (req, res) => {
   try {
     const ownerId = req.user._id;
+    const analyticsPeriod = resolveOwnerAnalyticsPeriod(req.query?.period);
 
-    const monthlyEarningsTrend = await Booking.aggregate([
+    const monthlyEarningsPromise = Booking.aggregate([
       { $match: { owner: ownerId, status: "completed" } },
       {
         $group: {
@@ -1605,7 +1610,7 @@ export const getOwnerAnalytics = async (req, res) => {
       { $sort: { "_id.year": 1, "_id.month": 1 } },
     ]);
 
-    const bookingTrend = await Booking.aggregate([
+    const bookingTrendPromise = Booking.aggregate([
       { $match: { owner: ownerId } },
       {
         $group: {
@@ -1633,7 +1638,7 @@ export const getOwnerAnalytics = async (req, res) => {
       { $sort: { "_id.year": 1, "_id.month": 1 } },
     ]);
 
-    const mostBookedVehicles = await Booking.aggregate([
+    const mostBookedVehiclesPromise = Booking.aggregate([
       { $match: { owner: ownerId } },
       {
         $group: {
@@ -1681,11 +1686,124 @@ export const getOwnerAnalytics = async (req, res) => {
       },
     ]);
 
+    const ownerVehiclesPromise = Vehicle.find({ owner: ownerId })
+      .select("name specs.type availabilityStatus createdAt")
+      .sort({ createdAt: 1, _id: 1 })
+      .lean();
+
+    const comparativeBookingActivityPromise = Booking.aggregate([
+      {
+        $match: {
+          owner: ownerId,
+          createdAt: { $gte: analyticsPeriod.previousStart, $lt: analyticsPeriod.end },
+        },
+      },
+      {
+        $group: {
+          _id: "$vehicle",
+          bookings: {
+            $sum: { $cond: [{ $gte: ["$createdAt", analyticsPeriod.start] }, 1, 0] },
+          },
+          previousBookings: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $gte: ["$createdAt", analyticsPeriod.previousStart] },
+                    { $lt: ["$createdAt", analyticsPeriod.start] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          pendingBookings: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $gte: ["$createdAt", analyticsPeriod.start] },
+                    { $eq: ["$status", "pending"] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          approvedBookings: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $gte: ["$createdAt", analyticsPeriod.start] },
+                    { $in: ["$status", ["confirmed", "extended", "completed"]] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          completedBookings: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $gte: ["$createdAt", analyticsPeriod.start] },
+                    { $eq: ["$status", "completed"] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          declinedBookings: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $gte: ["$createdAt", analyticsPeriod.start] },
+                    { $in: ["$status", ["cancelled", "rejected"]] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    const [
+      monthlyEarningsTrend,
+      bookingTrend,
+      mostBookedVehicles,
+      ownerVehicles,
+      comparativeBookingActivity,
+    ] = await Promise.all([
+      monthlyEarningsPromise,
+      bookingTrendPromise,
+      mostBookedVehiclesPromise,
+      ownerVehiclesPromise,
+      comparativeBookingActivityPromise,
+    ]);
+
+    const vehicleComparison = buildVehicleBookingComparison({
+      vehicles: ownerVehicles,
+      bookingActivity: comparativeBookingActivity,
+      period: analyticsPeriod,
+    });
+
     res.json({
       success: true,
       monthlyEarningsTrend,
       bookingTrend,
       mostBookedVehicles,
+      ...vehicleComparison,
     });
   } catch {
     res.status(500).json({ success: false, message: "Failed to fetch analytics." });

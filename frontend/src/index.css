@@ -287,6 +287,10 @@ input[type="password"]::-webkit-credentials-auto-fill-button {
   line-height: 1.1;
 }
 
+.rp-owner-page-header__copy > h1:first-child {
+  margin-top: 0;
+}
+
 .rp-owner-page-header__description {
   max-width: 46rem;
   margin: 0.55rem 0 0;

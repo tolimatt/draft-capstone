@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import PreKycDocument from "../models/PreKycDocument.js";
 import { verifyPhilippinesDocument } from "../services/geminiDocument.service.js";
+import { evaluateDocumentExtraction } from "../services/documentValidation.service.js";
+import { reconcileUserKyc } from "../services/kycReview.service.js";
 import { auditLog } from "../middleware/auditLogger.middleware.js";
 
 const positiveNumber = (value, fallback) => {
@@ -11,7 +13,22 @@ const positiveNumber = (value, fallback) => {
 };
 
 const workerEnabled = () => String(process.env.KYC_DOCUMENT_QUEUE_ENABLED || "true").toLowerCase() !== "false";
-const autoApprovalEnabled = () => String(process.env.KYC_ALLOW_GEMINI_AUTO_APPROVE || "false").toLowerCase() === "true";
+const automaticVerificationEnabled = () => {
+  const configured = String(process.env.KYC_ALLOW_RULE_BASED_AUTO_VERIFY || "").trim();
+  if (configured) return configured.toLowerCase() === "true";
+  const legacy = String(process.env.KYC_ALLOW_GEMINI_AUTO_APPROVE || "").trim();
+  if (legacy) return legacy.toLowerCase() === "true";
+  return false;
+};
+const automaticVerificationMinimum = () => positiveNumber(
+  process.env.KYC_DOCUMENT_AUTO_VERIFY_MIN_CONFIDENCE
+    || process.env.KYC_DOCUMENT_AUTO_APPROVE_MIN_CONFIDENCE,
+  85,
+);
+const classificationMinimum = () => positiveNumber(
+  process.env.KYC_DOCUMENT_CLASSIFICATION_MIN_CONFIDENCE,
+  90,
+);
 const uploadRoot = () => path.resolve(process.env.KYC_UPLOAD_DIR || path.resolve("private_uploads", "kyc"));
 const maxAttempts = () => Math.max(1, Math.floor(positiveNumber(process.env.KYC_GEMINI_MAX_ATTEMPTS, 3)));
 const requestsPerMinute = () => Math.max(1, Math.floor(positiveNumber(process.env.KYC_GEMINI_REQUESTS_PER_MINUTE, 4)));
@@ -72,27 +89,63 @@ const processClaimedDocument = async (document) => {
     mimeType: document.mimeType || "image/jpeg",
     docType: document.docType,
     selectedDocType: document.selectedDocCategory,
-    userProfile: document.profileSnapshot || {},
   });
 
-  const allowAutomaticApproval = autoApprovalEnabled() && result.passed && !result.review_required;
-  const status = allowAutomaticApproval ? "verified" : "pending_review";
+  const preliminary = evaluateDocumentExtraction({
+    extraction: result,
+    docType: document.docType,
+    selectedDocType: document.selectedDocCategory,
+    profile: document.profileSnapshot || {},
+    allowAutomaticVerification: automaticVerificationEnabled(),
+    minimumConfidence: automaticVerificationMinimum(),
+    minimumClassificationConfidence: classificationMinimum(),
+    requireBirthDate: document.docType === "id" && document.role === "user",
+  });
+  const duplicate = preliminary.documentNumberFingerprint
+    ? await PreKycDocument.exists({
+        _id: { $ne: document._id },
+        email: { $ne: document.email },
+        documentNumberFingerprint: preliminary.documentNumberFingerprint,
+        status: { $in: ["verified", "pending_review", "rejected"] },
+      })
+    : null;
+  const decision = duplicate
+    ? evaluateDocumentExtraction({
+        extraction: result,
+        docType: document.docType,
+        selectedDocType: document.selectedDocCategory,
+        profile: document.profileSnapshot || {},
+        duplicateDetected: true,
+        allowAutomaticVerification: automaticVerificationEnabled(),
+        minimumConfidence: automaticVerificationMinimum(),
+        minimumClassificationConfidence: classificationMinimum(),
+        requireBirthDate: document.docType === "id" && document.role === "user",
+      })
+    : preliminary;
+  const status = decision.status;
   const now = new Date();
-  await PreKycDocument.updateOne(
+  const updateResult = await PreKycDocument.updateOne(
     { _id: document._id, status: "processing", fileHash: document.fileHash, processingLockedAt: document.processingLockedAt },
     {
       $set: {
         status,
-        country: result.country || "",
-        docCategory: result.doc_type || "",
-        detailsMatched: typeof result.details_match === "boolean" ? result.details_match : true,
-        mismatchFields: Array.isArray(result.mismatch_fields) ? result.mismatch_fields.slice(0, 12) : [],
+        country: String(result.issuing_country || result.country || "").trim(),
+        docCategory: decision.extractedData.documentType,
+        detailsMatched: decision.checks.registrationDataCompared === true
+          && decision.mismatchFields.length === 0,
+        mismatchFields: decision.mismatchFields,
         suspectedTampering: Boolean(result.suspected_tampering),
-        confidence: Number(result.confidence || 0),
-        reason: allowAutomaticApproval
-          ? result.reason || "Document passed automated checks."
-          : result.reason || "Document is ready for Super Admin review.",
-        verifiedAt: allowAutomaticApproval ? now : null,
+        confidence: decision.confidence,
+        classificationConfidence: decision.classificationConfidence,
+        documentSurface: decision.documentSurface,
+        reason: decision.reviewReason,
+        reasonCode: decision.reasonCode,
+        decisionSource: "backend_rules",
+        validationChecks: decision.checks,
+        extractedData: decision.extractedData,
+        qualityIssues: result.warnings || result.quality_issues || [],
+        documentNumberFingerprint: decision.documentNumberFingerprint,
+        verifiedAt: status === "verified" ? now : null,
         lastProcessedAt: now,
         processingLockedAt: null,
         nextAttemptAt: null,
@@ -105,22 +158,33 @@ const processClaimedDocument = async (document) => {
     status,
     attempt: document.processingAttempts,
   });
+  const sessionId = String(document.sessionId || "");
+  if (updateResult.modifiedCount === 1 && status === "verified" && sessionId.startsWith("user:")) {
+    await reconcileUserKyc(sessionId.slice(5));
+  }
 };
 
 const handleProcessingFailure = async (document, error) => {
   const attempt = Number(document.processingAttempts || 1);
   const retryable = !error?.permanent && [429, 500, 502, 503, 504].includes(Number(error?.status || 503));
   const shouldRetry = retryable && attempt < maxAttempts();
-  const status = shouldRetry ? "retry_wait" : "pending_review";
+  const status = shouldRetry ? "retry_wait" : error?.permanent ? "reupload_required" : "pending_review";
   const safeMessage = shouldRetry
     ? "Automated screening is temporarily unavailable. The request will retry automatically."
-    : "Automated screening was unavailable. A Super Admin must review this document manually.";
+    : error?.permanent
+      ? "We could not securely read the uploaded file. Please upload the document again."
+      : "Automated screening was unavailable. A reviewer will check this document manually.";
   await PreKycDocument.updateOne(
     { _id: document._id, status: "processing", fileHash: document.fileHash, processingLockedAt: document.processingLockedAt },
     {
       $set: {
         status,
         reason: safeMessage,
+        reasonCode: shouldRetry
+          ? "SCREENING_RETRY_PENDING"
+          : error?.permanent
+            ? "IMAGE_UNREADABLE"
+            : "AUTOMATED_SCREENING_UNAVAILABLE",
         processingError: String(error?.message || "Processing failed").slice(0, 240),
         processingLockedAt: null,
         lastProcessedAt: new Date(),
@@ -153,11 +217,20 @@ export const processNextKycDocument = async () => {
   }
 };
 
+export const triggerKycDocumentProcessing = () => {
+  if (!workerEnabled()) return;
+  void processNextKycDocument().catch((error) => {
+    auditLog.error("KYC", "Document screening worker could not start", {
+      detail: String(error?.message || error || "Unknown worker error"),
+    });
+  });
+};
+
 export const startKycDocumentProcessingJob = () => {
   if (timer || !workerEnabled()) return;
   const intervalMs = positiveNumber(process.env.KYC_DOCUMENT_QUEUE_POLL_MS, 5_000);
-  void processNextKycDocument();
-  timer = setInterval(() => void processNextKycDocument(), intervalMs);
+  triggerKycDocumentProcessing();
+  timer = setInterval(triggerKycDocumentProcessing, intervalMs);
   timer.unref?.();
 };
 

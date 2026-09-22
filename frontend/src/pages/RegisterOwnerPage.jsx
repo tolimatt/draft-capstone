@@ -19,11 +19,8 @@ import {
 } from "lucide-react";
 
 import {
-  captureBase64FromStream,
   fileToBase64,
   getMimeFromDataUrl,
-  startCamera,
-  stopCamera,
   stripDataUrlPrefix,
   validateDocumentImageFile,
   validateSupportingDocumentFile,
@@ -38,6 +35,7 @@ import AuthShell from "../components/AuthShell";
 import LegalPolicyModal from "../components/LegalPolicyModal";
 import RegistrationDraftNotice from "../components/RegistrationDraftNotice";
 import RegistrationProgress from "../components/RegistrationProgress";
+import SelfieCapture from "../components/SelfieCapture";
 import useRegistrationDraft from "../hooks/useRegistrationDraft";
 import useRegistrationEmailCheck from "../hooks/useRegistrationEmailCheck";
 import API from "../utils/api";
@@ -96,6 +94,7 @@ const initialKyc = {
   idType: "",
   idCardFile: null,
   idRegistered: false,
+  idReadyForSelfie: false,
   selfieVerified: false,
   selfieDataUrl: "",
   selfieBase64Clean: "",
@@ -187,26 +186,41 @@ function RegisterOwnerForm({
   const [barangays, setBarangays] = useState([]);
   const [addressLoadError, setAddressLoadError] = useState("");
 
-  const [kycUi, setKycUi] = useState({ showCamera: false, statusText: "" });
+  const [kycUi, setKycUi] = useState({ statusText: "" });
   const idPreviewUrl = useMemo(
     () => (kyc.idCardFile ? URL.createObjectURL(kyc.idCardFile) : ""),
     [kyc.idCardFile]
   );
   const identityStage = !kyc.idRegistered
     ? "id"
-    : !kyc.selfieBase64Clean
-      ? "camera"
-      : !kyc.selfieVerified
-        ? "selfie"
-        : "complete";
+    : ["reupload_required", "rejected"].includes(documentStatuses.id)
+      ? "id_blocked"
+    : !kyc.idReadyForSelfie
+      ? "id_checking"
+      : !kyc.selfieBase64Clean
+        ? "camera"
+        : !kyc.selfieVerified
+          ? "selfie"
+          : "complete";
+  const handleIdStatus = useCallback((status, document) => {
+    const ready = document?.identityReadyForSelfie === true;
+    setKyc((previous) => {
+      if (previous.idReadyForSelfie === ready) return previous;
+      return {
+        ...previous,
+        idReadyForSelfie: ready,
+        ...(!ready ? { selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "" } : {}),
+      };
+    });
+    if (ready) {
+      setKycUi((previous) => ({ ...previous, statusText: "ID details matched. You can now take your selfie." }));
+    } else if (!["queued", "processing", "retry_wait"].includes(status)) {
+      setKycUi((previous) => ({ ...previous, statusText: "" }));
+    }
+    setDocumentStatuses((previous) => ({ ...previous, id: status }));
+  }, []);
   const areDocumentsApproved = documentStatuses.id === "verified" && documentStatuses.supporting === "verified";
-  const [cameraStream, setCameraStream] = useState(null);
-  const [devices, setDevices] = useState([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState("");
-  const [camError, setCamError] = useState("");
-  const [camInfo, setCamInfo] = useState("");
 
-  const videoRef = useRef(null);
   const idInputRef = useRef(null);
   const emailRef = useRef(null);
   const lastActionRef = useRef(0);
@@ -224,32 +238,6 @@ function RegisterOwnerForm({
     lastActionRef.current = now;
     return true;
   }, [isLoading]);
-
-  const closeCamera = useCallback(() => {
-    try {
-      stopCamera(videoRef.current || cameraStream);
-    } catch {
-      // Ignore cleanup errors here.
-    }
-    setCameraStream(null);
-    setKycUi((prev) => ({ ...prev, showCamera: false }));
-    setCamError("");
-    setCamInfo("");
-  }, [cameraStream]);
-
-  useEffect(() => {
-    return () => {
-      try {
-        stopCamera(cameraStream);
-      } catch {
-        // Ignore cleanup errors here.
-      }
-    };
-  }, [cameraStream]);
-
-  useEffect(() => {
-    if (step !== 5 && kycUi.showCamera) closeCamera();
-  }, [step, kycUi.showCamera, closeCamera]);
 
   useEffect(() => () => {
     if (idPreviewUrl) URL.revokeObjectURL(idPreviewUrl);
@@ -519,6 +507,7 @@ function RegisterOwnerForm({
         setKyc((prev) => ({
           ...prev,
           idRegistered: false,
+          idReadyForSelfie: false,
           selfieVerified: false,
           selfieDataUrl: "",
           selfieBase64Clean: "",
@@ -679,6 +668,7 @@ function RegisterOwnerForm({
       ...prev,
       idType: value,
       idRegistered: false,
+      idReadyForSelfie: false,
       selfieVerified: false,
       selfieDataUrl: "",
       selfieBase64Clean: "",
@@ -690,10 +680,7 @@ function RegisterOwnerForm({
       selfieVerified: "",
     }));
     setKycUi((prev) => ({ ...prev, statusText: "" }));
-    setCamError("");
-    setCamInfo("");
-    closeCamera();
-  }, [closeCamera]);
+  }, []);
 
   const validateFields = useCallback((fields) => {
     const next = {};
@@ -779,10 +766,8 @@ function RegisterOwnerForm({
           full_name: fullName,
           first_name: form.firstName.trim(),
           last_name: form.lastName.trim(),
-          owner_type: form.ownerType,
           business_name: form.businessName,
           permit_number: form.permitNumber,
-          email: form.businessEmail,
         },
       });
       if (!result.success) throw new Error(result.message || "Supporting document verification failed.");
@@ -791,7 +776,7 @@ function RegisterOwnerForm({
         submitted: true,
         message:
           result.message ||
-          "Supporting document queued for automated screening and Super Admin review.",
+          "Supporting document uploaded securely. Automated checks have started.",
       });
       setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "" }));
       return true;
@@ -811,8 +796,9 @@ function RegisterOwnerForm({
     const next = {};
     if (!kyc.idType) next.idType = "Please select your ID type.";
     if (!kyc.idCardFile) next.idCardFile = "Please upload your government ID.";
-    if (!kyc.idRegistered) next.idRegistered = "Please register your ID first.";
-    if (!kyc.selfieVerified) next.selfieVerified = "Please verify your selfie matches the ID.";
+    if (!kyc.idRegistered) next.idRegistered = "Please upload your ID first.";
+    else if (!kyc.idReadyForSelfie) next.idRegistered = "Wait for your ID details to match before taking your selfie.";
+    else if (!kyc.selfieVerified) next.selfieVerified = "Please verify your selfie matches the ID.";
     setStepErrors(next);
     return Object.keys(next).length === 0;
   }, [kyc]);
@@ -872,7 +858,7 @@ function RegisterOwnerForm({
     }
 
     setIsLoading(true);
-    setKycUi((prev) => ({ ...prev, statusText: "Registering ID face..." }));
+    setKycUi((prev) => ({ ...prev, statusText: "Uploading ID securely..." }));
 
     try {
       await validateDocumentImageFile(kyc.idCardFile);
@@ -885,10 +871,6 @@ function RegisterOwnerForm({
           full_name: fullName,
           first_name: form.firstName.trim(),
           last_name: form.lastName.trim(),
-          email: form.businessEmail,
-          owner_type: form.ownerType,
-          business_name: form.businessName,
-          permit_number: form.permitNumber,
         },
       });
       if (!result.success) throw new Error(result.message || "Failed to register ID.");
@@ -896,12 +878,13 @@ function RegisterOwnerForm({
       setKyc((prev) => ({
         ...prev,
         idRegistered: true,
+        idReadyForSelfie: false,
         selfieVerified: false,
         selfieDataUrl: "",
         selfieBase64Clean: "",
       }));
       setStepErrors((prev) => ({ ...prev, idType: "", idRegistered: "" }));
-      setKycUi((prev) => ({ ...prev, statusText: "ID registered. Open camera to capture your selfie." }));
+      setKycUi((prev) => ({ ...prev, statusText: "ID uploaded. We are checking that its personal details match your registration." }));
     } catch (error) {
       setStepErrors((prev) => ({ ...prev, idRegistered: friendlyError(error.message) }));
       setKycUi((prev) => ({ ...prev, statusText: "" }));
@@ -910,97 +893,26 @@ function RegisterOwnerForm({
     }
   };
 
-  const openCamera = async () => {
-    if (!canAct()) return;
-    setIsLoading(true);
-    setCamError("");
-    setCamInfo("");
-    setKycUi((prev) => ({ ...prev, showCamera: true, statusText: "Initializing camera..." }));
-
-    try {
-      const all = await navigator.mediaDevices.enumerateDevices();
-      const cams = all.filter((d) => d.kind === "videoinput");
-      setDevices(cams);
-
-      let deviceId = selectedDeviceId;
-      if (!deviceId || !cams.find((d) => d.deviceId === deviceId)) {
-        deviceId = cams[0]?.deviceId || "";
-        setSelectedDeviceId(deviceId);
-      }
-
-      const stream = await startCamera(videoRef.current, {
-        audio: false,
-        video: deviceId ? { deviceId: { exact: deviceId }, facingMode: "user" } : { facingMode: "user" },
-      });
-
-      setCameraStream(stream);
-      const track = stream.getVideoTracks()[0];
-      const settings = track?.getSettings?.() || {};
-      const label = cams.find((d) => d.deviceId === deviceId)?.label || "Camera";
-      setCamInfo(`${label} | ${settings.width || "?"}x${settings.height || "?"}`);
-      setKycUi((prev) => ({ ...prev, statusText: "Camera ready. Capture your selfie." }));
-    } catch (error) {
-      const name = error?.name || "";
-      let message = "Something went wrong with the camera.";
-      if (name === "NotAllowedError") message = "Camera permission denied. Please allow access.";
-      if (name === "NotReadableError") message = "Your camera is being used by another app.";
-      if (name === "NotFoundError") message = "No camera found on this device.";
-      closeCamera();
-      setCamError(message);
-    } finally {
-      setIsLoading(false);
-    }
+  const handleSelfieCapture = ({ dataUrl, base64 }) => {
+    setKyc((previous) => ({
+      ...previous,
+      selfieVerified: false,
+      selfieDataUrl: dataUrl,
+      selfieBase64Clean: base64,
+    }));
+    setStepErrors((previous) => ({ ...previous, selfieVerified: "" }));
+    setKycUi((previous) => ({ ...previous, statusText: "" }));
   };
 
-  const switchCamera = async (deviceId) => {
-    setIsLoading(true);
-    setSelectedDeviceId(deviceId);
-    setCamError("");
-    setCamInfo("");
-    try {
-      stopCamera(videoRef.current || cameraStream);
-      setCameraStream(null);
-      const stream = await startCamera(videoRef.current, {
-        audio: false,
-        video: { deviceId: { exact: deviceId }, facingMode: "user" },
-      });
-      setCameraStream(stream);
-      const track = stream.getVideoTracks()[0];
-      const settings = track?.getSettings?.() || {};
-      const label = devices.find((d) => d.deviceId === deviceId)?.label || "Camera";
-      setCamInfo(`${label} | ${settings.width || "?"}x${settings.height || "?"}`);
-    } catch {
-      setCamError("Failed to switch camera. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const captureSelfie = async () => {
-    if (!canAct()) return;
-    if (!cameraStream) {
-      setStepErrors((prev) => ({ ...prev, selfieVerified: "Open camera first." }));
-      return;
-    }
-
-    setIsLoading(true);
-    setKycUi((prev) => ({ ...prev, statusText: "Capturing selfie..." }));
-
-    try {
-      const dataUrl = await captureBase64FromStream(cameraStream);
-      if (!dataUrl) throw new Error("Failed to capture selfie.");
-      const clean = stripDataUrlPrefix(dataUrl);
-
-      setKyc((prev) => ({ ...prev, selfieDataUrl: dataUrl, selfieBase64Clean: clean }));
-      setStepErrors((prev) => ({ ...prev, selfieVerified: "" }));
-      setKycUi((prev) => ({ ...prev, statusText: "Selfie captured. Click Verify to match with your ID." }));
-    } catch (error) {
-      setKyc((prev) => ({ ...prev, selfieDataUrl: "", selfieBase64Clean: "" }));
-      setStepErrors((prev) => ({ ...prev, selfieVerified: friendlyError(error.message) }));
-      setKycUi((prev) => ({ ...prev, statusText: "" }));
-    } finally {
-      setIsLoading(false);
-    }
+  const retakeSelfie = () => {
+    setKyc((previous) => ({
+      ...previous,
+      selfieVerified: false,
+      selfieDataUrl: "",
+      selfieBase64Clean: "",
+    }));
+    setStepErrors((previous) => ({ ...previous, selfieVerified: "" }));
+    setKycUi((previous) => ({ ...previous, statusText: "" }));
   };
 
   const verifySelfie = async () => {
@@ -1018,8 +930,7 @@ function RegisterOwnerForm({
       if (!result.verified) throw new Error(result.message || "Face does not match ID.");
       setKyc((prev) => ({ ...prev, selfieVerified: true }));
       setStepErrors((prev) => ({ ...prev, selfieVerified: "" }));
-      setKycUi((prev) => ({ ...prev, statusText: "Face verified successfully." }));
-      closeCamera();
+      setKycUi((prev) => ({ ...prev, statusText: "" }));
     } catch (error) {
       setKyc((prev) => ({ ...prev, selfieVerified: false }));
       setStepErrors((prev) => ({ ...prev, selfieVerified: friendlyError(error.message) }));
@@ -1054,7 +965,10 @@ function RegisterOwnerForm({
     }
     if (!validateReviewStep()) return;
     if (!areDocumentsApproved) {
-      setFormError("Your ID and supporting document must be approved before you can finish registration.");
+      const needsNewUpload = Object.values(documentStatuses).some((status) => ["reupload_required", "rejected"].includes(status));
+      setFormError(needsNewUpload
+        ? "One of your documents needs a new upload. Follow the correction shown under Document review, then try again."
+        : "Your ID and supporting document are still being checked. Refresh their status and submit after both are approved.");
       return;
     }
 
@@ -1512,12 +1426,9 @@ function RegisterOwnerForm({
                         e.target.value = "";
                         return;
                       }
-                      setKyc((prev) => ({ ...prev, idCardFile: file, idRegistered: false, selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "" }));
+                      setKyc((prev) => ({ ...prev, idCardFile: file, idRegistered: false, idReadyForSelfie: false, selfieVerified: false, selfieDataUrl: "", selfieBase64Clean: "" }));
                       setKycUi((prev) => ({ ...prev, statusText: "" }));
                       setStepErrors({});
-                      setCamError("");
-                      setCamInfo("");
-                      closeCamera();
                     }}
                   />
 
@@ -1534,9 +1445,8 @@ function RegisterOwnerForm({
                         type="button"
                         onClick={() => {
                           setKyc(initialKyc);
-                          setKycUi({ showCamera: false, statusText: "" });
+                          setKycUi({ statusText: "" });
                           setStepErrors({});
-                          closeCamera();
                         }}
                         disabled={isLoading}
                         className="px-4 py-2 rounded-xl border border-gray-200 text-gray-800 font-semibold hover:bg-gray-50 transition disabled:opacity-60"
@@ -1551,58 +1461,40 @@ function RegisterOwnerForm({
 
               {identityStage === "id" && (
                 <button type="button" disabled={isLoading || !kyc.idType || !kyc.idCardFile} onClick={registerId} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:opacity-50">
-                  {isLoading ? <><Loader size={16} className="animate-spin" aria-hidden="true" /> Checking ID...</> : "Use this ID photo"}
+                  {isLoading ? <><Loader size={16} className="animate-spin" aria-hidden="true" /> Uploading ID...</> : "Upload and check ID"}
                 </button>
               )}
               </>}
 
-              {(identityStage === "camera" || identityStage === "selfie") && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="font-semibold text-slate-900">Take a live selfie</p>
-                  <p className="mt-1 text-sm text-slate-600">Face the camera in even lighting and make sure only you are visible.</p>
-                </div>
-              )}
-
-              {identityStage === "camera" && !kycUi.showCamera && (
-                <button type="button" disabled={isLoading} onClick={openCamera} className="rp-btn-primary flex w-full items-center justify-center py-3 disabled:opacity-50">Open camera</button>
-              )}
-
-              {identityStage === "camera" && kycUi.showCamera && (
-                <div className="rounded-2xl border border-gray-200 p-4 bg-gray-50 space-y-3">
-                  <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-xl bg-black aspect-video object-cover" style={{ transform: "scaleX(-1)" }} />
-                  {devices.length > 0 && (
-                    <div>
-                      <label className="text-xs text-gray-600 font-medium block mb-1">Camera device</label>
-                      <select value={selectedDeviceId} onChange={(e) => switchCamera(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm">
-                        {devices.map((d, idx) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${idx + 1}`}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {camError && <p className="text-sm text-red-600 p-2 bg-red-50 rounded-lg">{camError}</p>}
-                  {camInfo && <p className="text-xs text-gray-600 p-2 bg-gray-100 rounded-lg break-words">{camInfo}</p>}
-                  <button type="button" disabled={isLoading || !cameraStream} onClick={captureSelfie} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:opacity-50">{isLoading ? "Capturing..." : "Take photo"}</button>
-                </div>
-              )}
-
-              {identityStage === "selfie" && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <img src={kyc.selfieDataUrl} alt="Captured selfie preview" className="w-full rounded-xl border border-slate-200" style={{ transform: "scaleX(-1)" }} />
-                  <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row">
-                    <button type="button" disabled={isLoading} onClick={() => setKyc((previous) => ({ ...previous, selfieDataUrl: "", selfieBase64Clean: "", selfieVerified: false }))} className="rp-btn-secondary flex w-full items-center justify-center py-3">Retake</button>
-                    <button type="button" disabled={isLoading} onClick={verifySelfie} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3">{isLoading ? "Matching..." : "Use selfie and continue"}</button>
+              {identityStage === "id_checking" && (
+                <div role="status" aria-live="polite" className="rounded-2xl bg-blue-50 p-4 text-blue-950">
+                  <div className="flex items-center gap-3 font-semibold">
+                    <Loader size={20} className="shrink-0 animate-spin text-blue-700" aria-hidden="true" />
+                    Checking your ID details
                   </div>
+                  <p className="mt-2 text-sm leading-6 text-blue-900">We are comparing the name on your ID with your registration. The selfie step will unlock automatically after it matches.</p>
                 </div>
               )}
 
-              {identityStage === "complete" && (
-                <div role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
-                  <div className="flex items-center gap-2 font-semibold"><CircleCheck size={20} aria-hidden="true" /> Selfie matched</div>
-                  <p className="mt-1 text-sm">Your face match is complete. Both documents still require approval.</p>
-                </div>
+              {identityStage === "id_blocked" && (
+                <p role="alert" className="rounded-2xl bg-rose-50 p-4 text-sm font-medium leading-6 text-rose-800">Selfie verification is unavailable because this ID needs a correction. Review the reason below, then upload a matching ID.</p>
+              )}
+
+              {(["camera", "selfie", "complete"].includes(identityStage)) && (
+                <SelfieCapture
+                  previewUrl={kyc.selfieDataUrl}
+                  matched={identityStage === "complete"}
+                  matchedDescription="Your selfie matched your ID photo. Your ID and business document still require final approval."
+                  disabled={isLoading}
+                  submitting={isLoading && identityStage === "selfie"}
+                  error={stepErrors.selfieVerified}
+                  onCapture={handleSelfieCapture}
+                  onRetake={retakeSelfie}
+                  onSubmit={verifySelfie}
+                />
               )}
               {kycUi.statusText && <p role="status" className="text-sm font-medium text-slate-600">{kycUi.statusText}</p>}
               {stepErrors.idRegistered && <p className="text-red-500 text-sm font-medium">{stepErrors.idRegistered}</p>}
-              {stepErrors.selfieVerified && <p className="text-red-500 text-sm font-medium">{stepErrors.selfieVerified}</p>}
             </>
           )}
 
@@ -1612,11 +1504,20 @@ function RegisterOwnerForm({
               role="owner"
               enabled={kyc.idRegistered || supportingDocStatus.submitted}
               onDocumentsChange={handleDocumentsChange}
+              onIdStatus={handleIdStatus}
               onResubmit={(type) => {
                 if (type === "supporting") {
                   setSupportingDocStatus({ submitted: false, message: "" });
+                  setFiles((current) => ({ ...current, supportingDocument: null }));
+                  setDocumentStatuses((current) => ({ ...current, supporting: "not_uploaded" }));
                   setStep(4);
-                } else setStep(5);
+                } else {
+                  setKyc(initialKyc);
+                  setKycUi({ statusText: "" });
+                  setDocumentStatuses((current) => ({ ...current, id: "not_uploaded" }));
+                  setStepErrors({});
+                  setStep(5);
+                }
               }}
             />
           )}

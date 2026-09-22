@@ -8,9 +8,9 @@ This catalog describes document types currently offered by RentifyPro registrati
 
 | Flow | Identity document | Supporting business document | Other verification |
 | --- | --- | --- | --- |
-| New renter/user registration | One of the 10 ID types below | Not required | Selfie must match the ID; required documents must have `verified` status in the same pre-registration session |
-| New individual owner registration | One of the 10 ID types below | One of the 7 supporting types below | Same selfie and document-approval requirements |
-| New business owner registration | One of the 10 ID types below | One of the 7 supporting types below | Same selfie and document-approval requirements |
+| New renter/user registration | One of the 10 ID types below | Not required | ID name and birth date must match before selfie verification; required documents must have `verified` status in the same pre-registration session |
+| New individual owner registration | One of the 10 ID types below | One of the 7 supporting types below | ID name must match before selfie verification; same document-approval requirements |
+| New business owner registration | One of the 10 ID types below | One of the 7 supporting types below | ID name must match before selfie verification; same document-approval requirements |
 | Existing user upgrading to owner | Upgrade endpoint does not request a new ID | One of the 7 supporting types below | Verified email and a verified supporting document in the owner pre-registration session |
 | Logged-in identity verification | One of the 10 ID types below | Not part of this flow | ID upload and selfie verification |
 
@@ -79,16 +79,16 @@ RentifyPro already calls Gemini through `verifyPhilippinesDocument()` in [gemini
 
 The service currently:
 
-- Classifies the upload against the selected category's allowlist and compares the detected type with the selected type.
-- Asks the model to identify suspected editing, synthetic content, or tampering. These are screening signals; the implementation does not confirm authenticity with a government issuer.
-- Requires a visible face photograph for identity IDs.
-- Cross-checks identity names, date of birth, and gender when provided. It excludes email and unrelated registration data from the external model's profile-comparison text.
-- Cross-checks supporting documents against names, owner type, business name, permit/registration number, and address when provided.
-- Normalizes name comparisons to tolerate middle-name/initial, suffix, punctuation, spacing, and order differences. It also uses approximate token matching.
-- Explicitly checks `country === "PH"` for supporting documents. The ID result branch has no equivalent explicit country check.
-- Returns screening fields such as `passed`, `confidence`, `country`, `doc_type`, `selected_doc_type`, `details_match`, `mismatch_fields`, `suspected_tampering`, `review_required`, and `reason`. ID results also include `has_face` and `face_count`.
+- Asks the model to recognize and classify the upload independently without receiving the applicant's selected document type.
+- Allows an explicit `UNKNOWN` result and treats plain paper, typed or handwritten personal information, screenshots, unrelated images, unsupported documents, and ambiguous layouts as unrecognized.
+- Applies backend hard gates for readability, supported Philippine origin, exact type match, and document-specific structural features before extracting and comparing registration data.
+- Requires passport MRZ/layout regions, LTO license-card regions, ID portrait/number/birth-date regions, or official business-registration features as appropriate.
+- Routes uncertain authenticity, low classification certainty, and duplicate documents to manual review. These are screening signals; the implementation does not confirm authenticity with a government issuer.
+- Requires complete first-name and surname token matches for IDs instead of substring matching. Renter IDs also require an exact birth-date match; conflicting identity data requires correction or a matching replacement ID and cannot use ordinary administrator approval.
+- Allows administrator decisions only after processing reaches manual review. Queued, processing, retrying, and unresolved-identity records cannot be approved.
+- Stores only a masked document number and a keyed fingerprint after hard gates pass. Ordinary applicant status responses do not expose confidence calculations or raw extracted identity numbers.
 
-The queue worker defaults `KYC_ALLOW_GEMINI_AUTO_APPROVE` to `false`. In that configuration, both passing and failing AI screenings move to `pending_review`. Enabling automatic approval additionally requires a passing result without `review_required`; the service's confidence threshold defaults to 70/100. This score is a model output, not an established probability of authenticity.
+The queue worker defaults `KYC_ALLOW_RULE_BASED_AUTO_VERIFY` to `false`. In that configuration, documents that pass every hard gate move to `pending_review` for a Super Admin decision. `KYC_ALLOW_GEMINI_AUTO_APPROVE` remains a compatibility fallback. If rule-based auto-verification is explicitly enabled, the classification threshold defaults to 90/100 and the extraction threshold to 85/100; neither score is proof of authenticity.
 
 Temporary provider failures retry and eventually move to manual review. They do not automatically reject the applicant. Registration checks verified documents and a matching selfie separately.
 
@@ -143,4 +143,4 @@ NBI clearances, police clearances, birth certificates, TIN IDs, utility bills, s
 
 Private document bytes and database metadata are separate: the code writes evidence to private file storage and keeps keys, hashes, and screening metadata in MongoDB. Records have expiry support. Do not assume registration uploads form a permanent training corpus.
 
-Validation for this compilation: inspected the current form consumers, frontend/backend allowlists, upload validators, registration gates, queue worker, and document model. No live provider, government service, database, or real-document acceptance tests were run. Application behavior was not changed.
+Validation for this compilation: inspected the current form consumers, frontend/backend allowlists, upload validators, registration gates, queue worker, and document model. No live provider, government service, database, or real-document acceptance tests were run.

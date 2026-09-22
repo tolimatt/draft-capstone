@@ -7,7 +7,8 @@ export const bookingStatusLabel = (status) => BOOKING_STATUS_LABELS[String(statu
 
 export const DOCUMENT_STATUS_LABELS = {
   queued: "Queued", processing: "Screening", retry_wait: "Retrying",
-  pending_review: "Pending Review", verified: "Approved", rejected: "Rejected",
+  pending_review: "Pending Review", verified: "Approved",
+  reupload_required: "Needs a New Upload", rejected: "Not Approved",
 };
 
 export const documentStatusLabel = (status) => DOCUMENT_STATUS_LABELS[status] || "Not uploaded";

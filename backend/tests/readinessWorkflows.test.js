@@ -33,15 +33,18 @@ test("concurrent approval and rejection of the same pending booking apply only o
 test("a delayed screening failure cannot overwrite a manual document decision", async (t) => {
   const lockedAt = new Date();
   let storedStatus = "verified";
+  let attemptedStatus = "";
   t.mock.method(PreKycDocument, "findOneAndUpdate", () => ({ select: async () => ({ _id: "document", status: "processing", fileHash: "reviewed-file", fileKey: "../invalid", processingLockedAt: lockedAt }) }));
   t.mock.method(PreKycDocument, "updateOne", async (filter, update) => {
     assert.equal(filter.status, "processing");
     assert.equal(filter.fileHash, "reviewed-file");
     assert.equal(filter.processingLockedAt, lockedAt);
+    attemptedStatus = update.$set.status;
     if (filter.status === storedStatus) storedStatus = update.$set.status;
     return { modifiedCount: 0 };
   });
   await processNextKycDocument();
+  assert.equal(attemptedStatus, "reupload_required");
   assert.equal(storedStatus, "verified");
 });
 

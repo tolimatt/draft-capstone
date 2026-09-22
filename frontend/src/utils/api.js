@@ -265,7 +265,7 @@ const API = {
 
   getOwnerReviews: () => request("/owner/reviews"),
   getOwnerEarnings: () => request("/owner/earnings"),
-  getOwnerAnalytics: () => request("/owner/analytics"),
+  getOwnerAnalytics: (params = {}) => request(`/owner/analytics${buildQueryString(params)}`),
 
   getAdminTransactions: (params = {}) => request(`/admin/transactions${buildQueryString(params)}`),
 

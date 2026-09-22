@@ -7,7 +7,6 @@ import { formatVehicleType } from "../utils/vehicleText";
 const CHAT_WIDGET_STORAGE_KEY_PREFIX = "rentifypro.chatWidget.v2";
 const LEGACY_CHAT_WIDGET_STORAGE_KEY = "rentifypro.chatWidget.v1";
 const CHAT_INPUT_MAX_LENGTH = 500;
-const DISALLOWED_CHAT_INPUT_REGEX = /[^A-Za-z?,. ]+/g;
 const MAX_STORED_MESSAGES = 40;
 const CONVERSATION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const MIN_THINKING_DISPLAY_MS = 800;
@@ -125,10 +124,11 @@ const maskBadWord = (word = "") => {
   return `${characters[0]}${"*".repeat(characters.length - 2)}${characters.at(-1)}`;
 };
 
-const sanitizeDraftInput = (value = "") =>
-  String(value || "")
-    .replace(DISALLOWED_CHAT_INPUT_REGEX, "")
-    .slice(0, CHAT_INPUT_MAX_LENGTH);
+// React renders message text safely. Preserve the user's wording (including
+// amounts, percentages, apostrophes, hyphens, and Unicode) and enforce only
+// the same bounded length that the server validates.
+const limitDraftInput = (value = "") =>
+  String(value || "").slice(0, CHAT_INPUT_MAX_LENGTH);
 
 const censorBadWords = (value = "") =>
   String(value || "").replace(BLOCKED_WORD_GLOBAL_PATTERN, (word) => maskBadWord(word));
@@ -266,8 +266,8 @@ const readStoredChatState = (scope, date = new Date()) => {
         filipino: ensureConversation(parsed?.conversations?.filipino, "filipino", date),
       },
       drafts: {
-        english: sanitizeDraftInput(parsed?.drafts?.english || ""),
-        filipino: sanitizeDraftInput(parsed?.drafts?.filipino || ""),
+        english: limitDraftInput(parsed?.drafts?.english || ""),
+        filipino: limitDraftInput(parsed?.drafts?.filipino || ""),
       },
     };
   } catch {
@@ -426,11 +426,11 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
     const rawDraft = hasMessageOverride
       ? messageOverride
       : String(draftByLanguage[activeLanguage] || "");
-    const sanitizedDraft = sanitizeDraftInput(rawDraft);
-    const message = sanitizedDraft.trim();
+    const limitedDraft = limitDraftInput(rawDraft);
+    const message = limitedDraft.trim();
 
-    if (!hasMessageOverride && sanitizedDraft !== rawDraft) {
-      updateDraftForLanguage(activeLanguage, sanitizedDraft);
+    if (!hasMessageOverride && limitedDraft !== rawDraft) {
+      updateDraftForLanguage(activeLanguage, limitedDraft);
     }
 
     if (!message || isSending) return;
@@ -486,7 +486,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
               ? response.recommendations
               : [],
             showViewAvailableVehicles:
-              response.intent === "available_vehicles" &&
+              ["available_vehicles", "vehicle_brand_search"].includes(response.intent) &&
               Array.isArray(response.recommendations) &&
               response.recommendations.length > 0,
           },
@@ -678,7 +678,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
           <input
             value={draft}
             onChange={(event) =>
-              updateDraftForLanguage(language, sanitizeDraftInput(event.target.value))
+              updateDraftForLanguage(language, limitDraftInput(event.target.value))
             }
             onKeyDown={(event) => {
               if (event.key === "Enter") {

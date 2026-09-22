@@ -54,7 +54,11 @@ const mapCustomerStatus = (user) => {
 const mapDocumentStatus = (status) => {
   if (status === "verified") return "Approved";
   if (status === "rejected") return "Rejected";
-  return "Pending";
+  if (status === "reupload_required") return "Needs Re-upload";
+  if (status === "queued") return "Queued";
+  if (status === "processing") return "Screening";
+  if (status === "retry_wait") return "Retrying";
+  return "Pending Review";
 };
 
 const mapUser = (user) => ({
@@ -101,6 +105,8 @@ const mapDocument = (document, usersByEmail) => {
   const email = asText(document.email).toLowerCase();
   const matchedUser = usersByEmail.get(email);
   const fallbackType = document.docType === "supporting" ? "Supporting Document" : "Government ID";
+  const reviewReady = document.status === "pending_review";
+  const identityComparisonPassed = document.docType !== "id" || document.detailsMatched === true;
 
   return {
     id: document._id.toString(),
@@ -108,15 +114,28 @@ const mapDocument = (document, usersByEmail) => {
     email,
     role: mapRole(matchedUser?.role || document.role),
     document: titleCase(document.selectedDocCategory || document.docCategory, fallbackType),
+    expectedDocument: titleCase(document.selectedDocCategory, fallbackType),
+    detectedDocument: titleCase(document.docCategory, "Unknown"),
     fileName: asText(document.fileName, fallbackType),
     submitted: asDate(document.createdAt),
     submittedAt: asTimestamp(document.createdAt),
     approval: mapDocumentStatus(document.status),
     reviewStatus: document.status,
+    canReview: reviewReady,
+    canApprove: reviewReady && identityComparisonPassed,
+    approvalBlockedReason: reviewReady && !identityComparisonPassed
+      ? "Identity details have not passed comparison. Ask the applicant to correct their registration details or upload the matching ID."
+      : "",
     reviewVersion: document.fileHash,
     mimeType: asText(document.mimeType, "application/octet-stream"),
     reason: asText(document.reason),
-    confidence: Number.isFinite(Number(document.confidence)) ? Number(document.confidence) : null,
+    reasonCode: asText(document.reasonCode),
+    documentSurface: asText(document.documentSurface),
+    validationChecks: document.validationChecks || {},
+    extractedData: document.extractedData || {},
+    mismatchFields: Array.isArray(document.mismatchFields) ? document.mismatchFields : [],
+    qualityIssues: Array.isArray(document.qualityIssues) ? document.qualityIssues : [],
+    decisionSource: asText(document.decisionSource),
     previewUrl: document.fileKey ? `/api/admin/documents/${document._id.toString()}/file` : "",
   };
 };
@@ -215,7 +234,7 @@ router.get("/data", async (_request, response, next) => {
           projection: { owner: 1, name: 1, coverDisplayMode: 1, dailyRentalRate: 1, pricingUnit: 1, location: 1, availabilityStatus: 1, images: 1, imageUrl: 1, driverOptionEnabled: 1, specs: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("prekycdocuments").find({}, {
-          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, fileHash: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },
+          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, detailsMatched: 1, reason: 1, reasonCode: 1, documentSurface: 1, validationChecks: 1, extractedData: 1, mismatchFields: 1, qualityIssues: 1, decisionSource: 1, fileHash: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("bookings").find({}, {
           projection: { vehicle: 1, renter: 1, owner: 1, pickupAt: 1, returnAt: 1, status: 1, driverSelected: 1, reviewRating: 1, reviewComment: 1, reviewCreatedAt: 1, createdAt: 1 },

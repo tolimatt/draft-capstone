@@ -11,6 +11,7 @@ test("document queue supports legacy decisions and the new processing states", (
     "processing",
     "retry_wait",
     "pending_review",
+    "reupload_required",
     "verified",
     "rejected",
   ]) {

@@ -129,7 +129,7 @@ try {
       await wait("[...document.querySelectorAll('button')].some(el => el.textContent.includes('Session Fixture'))");
       await evaluate("[...document.querySelectorAll('button')].find(el => el.textContent.includes('Session Fixture')).click()");
     }
-    await clickText(owner ? "Log out" : "Sign Out");
+    await clickText("Sign Out");
     await wait("document.querySelector('.rp-modal-layer')");
   };
   const confirm = async () => {

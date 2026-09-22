@@ -8,7 +8,7 @@ export default function OwnerPageHeader({
   return (
     <header className={`rp-owner-page-header ${className}`.trim()}>
       <div className="rp-owner-page-header__copy">
-        <p className="rp-owner-page-header__eyebrow">{eyebrow}</p>
+        {eyebrow && <p className="rp-owner-page-header__eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
         {description && <p className="rp-owner-page-header__description">{description}</p>}
       </div>

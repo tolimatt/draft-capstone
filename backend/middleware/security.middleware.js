@@ -8,6 +8,20 @@ const isProduction = process.env.NODE_ENV === "production";
 const rateLimitingEnabled =
   isProduction || String(process.env.ENABLE_RATE_LIMIT || "").trim().toLowerCase() === "true";
 const keyByUserOrIp = (req) => (req.user?._id ? `user:${req.user._id}` : `ip:${ipKeyGenerator(req.ip)}`);
+const getVerifiedSessionUserId = (req) => {
+  const token = String(req.cookies?.token || "").trim();
+  if (!token) return "";
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    return String(decoded?.id || "").trim();
+  } catch {
+    return "";
+  }
+};
+const keyByVerifiedSessionOrIp = (req) => {
+  const userId = getVerifiedSessionUserId(req);
+  return userId ? `user:${userId}` : `ip:${ipKeyGenerator(req.ip)}`;
+};
 const keyByEmailOrIp = (req) => {
   const email =
     String(req.body?.email || "").trim().toLowerCase() ||
@@ -16,17 +30,11 @@ const keyByEmailOrIp = (req) => {
   return `ip:${ipKeyGenerator(req.ip)}`;
 };
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const CHATBOT_RATE_LIMIT_MAX = 20;
+const CHATBOT_IN_FLIGHT_TTL_MS = 30 * 1000;
+const activeChatbotRequests = new Map();
 
-const hasValidSessionToken = (req) => {
-  const token = String(req.cookies?.token || "").trim();
-  if (!token) return false;
-  try {
-    jwt.verify(token, process.env.JWT_SECRET);
-    return true;
-  } catch {
-    return false;
-  }
-};
+const hasValidSessionToken = (req) => Boolean(getVerifiedSessionUserId(req));
 
 const skipForSignedIn = (req) => hasValidSessionToken(req);
 
@@ -64,6 +72,7 @@ const buildRateLimitHandler = (messagePrefix) => (req, res, _next, options) => {
   const countdown = formatCountdown(retryAfterSeconds);
 
   res.setHeader("Retry-After", String(retryAfterSeconds));
+  res.setHeader("Cache-Control", "no-store");
   return res.status(429).json({
     success: false,
     message: `${messagePrefix} Try again in ${countdown}.`,
@@ -78,12 +87,13 @@ const buildRateLimitHandler = (messagePrefix) => (req, res, _next, options) => {
 const createLimiter = ({
   max,
   messagePrefix,
+  windowMs = RATE_LIMIT_WINDOW_MS,
   skipSuccessfulRequests = false,
   keyGenerator,
   skipCondition,
 } = {}) =>
   rateLimit({
-    windowMs: RATE_LIMIT_WINDOW_MS,
+    windowMs,
     max,
     standardHeaders: true,
     legacyHeaders: false,
@@ -107,6 +117,51 @@ export const generalLimiter = createLimiter({
   messagePrefix: "Too many requests.",
   skipCondition: skipForSignedIn,
 });
+
+// Chatbot requests are computationally expensive and may also query live vehicle data.
+// Count every request, including successful requests, for both guests and signed-in users.
+export const chatbotLimiter = createLimiter({
+  max: CHATBOT_RATE_LIMIT_MAX,
+  messagePrefix: "Too many chatbot requests.",
+  keyGenerator: keyByVerifiedSessionOrIp,
+});
+
+export const chatbotConcurrencyGuard = (req, res, next) => {
+  if (!rateLimitingEnabled) return next();
+
+  const key = keyByVerifiedSessionOrIp(req);
+  if (activeChatbotRequests.has(key)) {
+    const retryAfterSeconds = 2;
+    const retryAfterMs = retryAfterSeconds * 1000;
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+    res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate, max-age=0");
+    return res.status(429).json({
+      success: false,
+      message: "A chatbot request is already processing. Please wait for it to finish before sending another.",
+      reason: "chatbot_request_in_progress",
+      retryAfterSeconds,
+      retryAfterMs,
+      retryAfterAt: new Date(Date.now() + retryAfterMs).toISOString(),
+      countdown: "00:02",
+      serverTime: new Date().toISOString(),
+    });
+  }
+
+  const requestToken = Symbol(key);
+  activeChatbotRequests.set(key, requestToken);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    if (activeChatbotRequests.get(key) === requestToken) activeChatbotRequests.delete(key);
+    clearTimeout(safetyTimer);
+  };
+  const safetyTimer = setTimeout(release, CHATBOT_IN_FLIGHT_TTL_MS);
+  safetyTimer.unref?.();
+  res.once("finish", release);
+  res.once("close", release);
+  return next();
+};
 
 // Auth limit
 export const authLimiter = createLimiter({
@@ -167,6 +222,13 @@ export const kycLimiter = createLimiter({
 export const preKycLimiter = createLimiter({
   max: 15,
   messagePrefix: "Too many verification attempts.",
+  skipCondition: skipForSignedIn,
+});
+
+// Status reads are lightweight and poll only while a signed pre-KYC session is active.
+export const preKycStatusLimiter = createLimiter({
+  max: 120,
+  messagePrefix: "Too many verification status checks.",
   skipCondition: skipForSignedIn,
 });
 

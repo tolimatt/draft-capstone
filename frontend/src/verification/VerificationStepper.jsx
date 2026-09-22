@@ -1,11 +1,12 @@
 // KYC stepper after login
 // Uses the authenticated /api/kyc/* routes
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useState } from "react";
 import { Check, CircleCheck, CircleX, IdCard } from "lucide-react";
 import API from "../utils/api";
 import { ID_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
-import { validateDocumentImageFile } from "../utils/cameraKyc";
+import { fileToBase64, validateDocumentImageFile } from "../utils/cameraKyc";
+import SelfieCapture from "../components/SelfieCapture";
 
 const STEPS = [
   { id: 1, label: "Upload ID" },
@@ -13,19 +14,21 @@ const STEPS = [
   { id: 3, label: "Result" },
 ];
 
-// Convert a file to base64
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// Capture a JPEG frame from a canvas
-function canvasToBase64(canvas) {
-  return canvas.toDataURL("image/jpeg", 0.85);
+function verificationErrorMessage(error) {
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("face") && message.includes("match")) {
+    return "We couldn't match this selfie to your ID photo. Try again in even lighting and face the camera directly.";
+  }
+  if (message.includes("no face") || message.includes("face detection")) {
+    return "We couldn't find a clear face. Keep your full face visible and make sure only you are in the frame.";
+  }
+  if (message.includes("network") || message.includes("fetch") || message.includes("econn")) {
+    return "We couldn't connect to the verification service. Check your connection and try again.";
+  }
+  if (message.includes("timeout") || message.includes("timed out")) {
+    return "Verification took too long. Please try again with a new selfie.";
+  }
+  return "We couldn't complete verification right now. Please try again.";
 }
 
 export default function VerificationStepper({ onVerificationComplete }) {
@@ -42,35 +45,6 @@ export default function VerificationStepper({ onVerificationComplete }) {
   const [selfieBase64, setSelfieBase64] = useState("");
   const [selfiePreview, setSelfiePreview] = useState(null);
   const [result, setResult] = useState(null);
-  const [cameraActive, setCameraActive] = useState(false);
-
-  // Camera refs
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-
-  // Start the camera
-  const openCamera = async () => {
-    try {
-      setError("");
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      setCameraActive(true);
-    } catch {
-      setError("Camera access denied. Please allow camera and try again.");
-    }
-  };
-
-  // Stop the camera
-  const closeCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setCameraActive(false);
-  }, []);
-
-  useEffect(() => () => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-  }, []);
 
   // Step 1: upload ID
   const handleIdUpload = async (e) => {
@@ -110,21 +84,17 @@ export default function VerificationStepper({ onVerificationComplete }) {
     }
   };
 
-  // Step 2: capture one selfie
-  const takeSelfie = () => {
-    const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) {
-      setError("Open the camera and wait for the preview before capturing your selfie.");
-      return;
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-    const b64 = canvasToBase64(canvas);
-    setSelfieBase64(b64);
-    setSelfiePreview(b64);
-    closeCamera();
+  // Step 2: the shared capture component owns the camera lifecycle.
+  const handleSelfieCapture = ({ dataUrl }) => {
+    setSelfieBase64(dataUrl);
+    setSelfiePreview(dataUrl);
+    setError("");
+  };
+
+  const retakeSelfie = () => {
+    setSelfieBase64("");
+    setSelfiePreview(null);
+    setError("");
   };
 
   const submitSelfie = async () => {
@@ -141,22 +111,16 @@ export default function VerificationStepper({ onVerificationComplete }) {
         await onVerificationComplete?.(data);
       }
     } catch (err) {
-      setError(err.message || "Verification failed.");
+      setError(verificationErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
-  // Reset the whole flow
-  const restart = () => {
-    setStep(1);
-    setIdBase64("");
-    setIdPreview(null);
-    setIdType("");
-    setSelfieBase64("");
-    setSelfiePreview(null);
+  const retrySelfie = () => {
+    retakeSelfie();
     setResult(null);
-    setError("");
+    setStep(2);
   };
 
   return (
@@ -195,7 +159,7 @@ export default function VerificationStepper({ onVerificationComplete }) {
       </div>
 
       {/* error */}
-      {error && (
+      {error && step !== 2 && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-2xl text-red-600 text-sm">
           {error}
         </div>
@@ -239,43 +203,22 @@ export default function VerificationStepper({ onVerificationComplete }) {
             disabled={!idType || !idBase64 || loading}
             className="mt-4 w-full py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-[#017FE6] to-[#0165B8] hover:opacity-95 transition disabled:opacity-50"
           >
-            {loading ? "Registering..." : "Register ID & Continue"}
+            {loading ? "Uploading securely..." : "Upload ID & Continue"}
           </button>
         </div>
       )}
 
       {/* step 2 */}
       {step === 2 && (
-        <div>
-          <h2 className="text-xl font-bold text-gray-900 mb-1">Take Your Selfie</h2>
-          <p className="text-gray-500 text-sm mb-4">Look at the camera with good lighting.</p>
-          <div className="bg-black rounded-2xl overflow-hidden aspect-video mb-4">
-            {selfiePreview ? (
-              <img src={selfiePreview} alt="Selfie" className="w-full h-full object-cover" />
-            ) : (
-              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-            )}
-          </div>
-          <div className="flex gap-3">
-            {!selfiePreview && !cameraActive && (
-              <button onClick={openCamera} className="flex-1 py-3 rounded-xl font-semibold border border-gray-200 text-gray-900 hover:bg-gray-50">
-                Open Camera
-              </button>
-            )}
-            <button
-              onClick={selfiePreview ? () => { setSelfiePreview(null); setSelfieBase64(""); openCamera(); } : takeSelfie}
-              disabled={!selfiePreview && !cameraActive}
-              className="flex-1 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-[#017FE6] to-[#0165B8] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {selfiePreview ? "Retake" : "Capture"}
-            </button>
-          </div>
-          {selfiePreview && (
-            <button onClick={submitSelfie} disabled={loading} className="mt-3 w-full py-3 rounded-xl font-semibold text-white bg-green-600 hover:opacity-95 disabled:opacity-50">
-              {loading ? "Verifying..." : "Verify My Identity"}
-            </button>
-          )}
-        </div>
+        <SelfieCapture
+          previewUrl={selfiePreview || ""}
+          disabled={loading}
+          submitting={loading}
+          error={error}
+          onCapture={handleSelfieCapture}
+          onRetake={retakeSelfie}
+          onSubmit={submitSelfie}
+        />
       )}
 
       {/* step 3 */}
@@ -285,22 +228,20 @@ export default function VerificationStepper({ onVerificationComplete }) {
             {result.verified ? <CircleCheck size={48} strokeWidth={2} className="mx-auto" aria-hidden="true" /> : <CircleX size={48} strokeWidth={2} className="mx-auto" aria-hidden="true" />}
           </div>
           <h2 className={`text-2xl font-bold mb-2 ${result.verified ? "text-green-700" : "text-red-700"}`}>
-            {result.verified ? result.kycStatus === "approved" ? "Identity Approved" : "Selfie Verified — Document Review Pending" : "Verification Failed"}
+            {result.verified ? result.kycStatus === "approved" ? "Identity verified" : "Selfie matched" : "Selfie didn't match"}
           </h2>
-          <p className="text-gray-500 text-sm mb-4">{result.message}</p>
-          {result.verified && result.kycStatus !== "approved" && <p role="status" className="mb-4 text-sm text-amber-700">Your selfie matched. Use Refresh Status in your account settings to check document approval before booking.</p>}
-
-          {result.verified && (
-            <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-left mb-4 space-y-1">
-              <p className="text-sm text-green-700"><strong>Name:</strong> {result.full_name}</p>
-              <p className="text-sm text-green-700"><strong>Role:</strong> {result.role}</p>
-              <p className="text-sm text-green-700"><strong>Confidence:</strong> {result.confidence}%</p>
-            </div>
-          )}
+          <p className="mb-4 text-sm leading-6 text-gray-600">
+            {result.verified
+              ? result.kycStatus === "approved"
+                ? "Your selfie matched your ID photo and your identity verification is complete."
+                : "Your selfie matched your ID photo. Your document is still being reviewed."
+              : "We couldn't match this selfie to your ID photo. Try again in even lighting, face the camera directly, and remove anything covering your face."}
+          </p>
+          {result.verified && result.kycStatus !== "approved" && <p role="status" className="mb-4 text-sm leading-6 text-amber-800">Use Refresh status in your account settings to check document approval before booking.</p>}
 
           {!result.verified && (
-            <button onClick={restart} className="w-full py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-[#017FE6] to-[#0165B8] hover:opacity-95">
-              Restart KYC
+            <button onClick={retrySelfie} className="rp-btn-primary w-full px-4 py-3">
+              Try another selfie
             </button>
           )}
         </div>

@@ -4,7 +4,7 @@ import KycVerification from "../models/KycVerification.js";
 import User from "../models/User.js";
 import { auditLog } from "../middleware/auditLogger.middleware.js";
 
-export const REVIEWABLE_DOCUMENT_STATUSES = ["queued", "processing", "retry_wait", "pending_review"];
+export const REVIEWABLE_DOCUMENT_STATUSES = ["pending_review"];
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 // Re-running this after an interrupted decision repairs the user summary from
@@ -20,7 +20,13 @@ export async function reconcileUserKyc(userId) {
   if (sameDocument && document.status === "rejected" && current.status !== "approved") {
     status = "rejected";
     remarks = `${document.reason} Upload a corrected ID and complete verification again.`;
-  } else if (sameDocument && document.status === "verified" && current.challengePassedAt && current.status === "challenge_passed") {
+  } else if (
+    sameDocument
+    && document.status === "verified"
+    && document.detailsMatched === true
+    && current.challengePassedAt
+    && current.status === "challenge_passed"
+  ) {
     status = "approved";
     remarks = "Your ID and selfie are approved. You can now continue to booking.";
   }
@@ -51,10 +57,26 @@ export async function reviewKycDocument({ id, action, remarks = "", reviewerId, 
   }
   const status = action === "approve" ? "verified" : "rejected";
   const now = new Date();
-  const updated = await PreKycDocument.findOneAndUpdate(
+  const current = await PreKycDocument.findById(id);
+  if (!current) throw fail(404, "This document is no longer available. Refresh the document list.");
+  if (reviewVersion && current.fileHash !== reviewVersion) {
+    throw fail(409, "The applicant uploaded a replacement document. Refresh and review the new file before deciding.");
+  }
+  if (current.status !== status && !REVIEWABLE_DOCUMENT_STATUSES.includes(current.status)) {
+    const processing = ["queued", "processing", "retry_wait"].includes(current.status);
+    throw fail(409, processing
+      ? "Automated screening is not finished. Wait for the document to reach manual review before deciding."
+      : "This document already has another decision. Refresh the document list before reviewing it.");
+  }
+  if (current.status !== status && action === "approve" && current.docType === "id" && current.detailsMatched !== true) {
+    throw fail(409, "This ID cannot be approved because its identity details did not pass comparison. Ask the applicant to correct their registration details or upload the matching ID.");
+  }
+
+  const updated = current.status === status ? null : await PreKycDocument.findOneAndUpdate(
     { _id: id, status: { $in: REVIEWABLE_DOCUMENT_STATUSES }, ...(reviewVersion ? { fileHash: reviewVersion } : {}) },
     { $set: {
       status, reason: reason || "Approved by a RentifyPro administrator.",
+      decisionSource: "admin_review",
       reviewedAt: now, reviewedBy: reviewerId, verifiedAt: action === "approve" ? now : null,
       processingLockedAt: null, nextAttemptAt: null,
     } },

@@ -12,8 +12,8 @@ const docId = "507f1f77bcf86cd799439012";
 const adminId = "507f1f77bcf86cd799439013";
 const response = () => ({ statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
 
-function fixture(t, { facePassed = true, documentStatus = "pending_review", sessionId = `user:${userId}`, caseStatus, syncPending = false } = {}) {
-  const document = { _id: docId, sessionId, docType: "id", role: "user", email: "applicant@example.test", fileHash: "current-id", status: documentStatus };
+function fixture(t, { facePassed = true, documentStatus = "pending_review", sessionId = `user:${userId}`, caseStatus, syncPending = false, detailsMatched = true, reasonCode = "REVIEW_REQUIRED" } = {}) {
+  const document = { _id: docId, sessionId, docType: "id", role: "user", email: "applicant@example.test", fileHash: "current-id", status: documentStatus, detailsMatched, reasonCode };
   const kyc = { _id: "case", user: userId, status: caseStatus || (facePassed ? "challenge_passed" : "id_uploaded"), idDocumentHash: "current-id", challengePassedAt: facePassed ? new Date() : null, updatedAt: new Date(), summarySyncPending: syncPending };
   const writes = [];
   t.mock.method(PreKycDocument, "findOneAndUpdate", async (filter, update) => {
@@ -62,6 +62,31 @@ test("rejection requires correction instructions and is visible to the applicant
   assert.match(kyc.remarks, /Upload a clearer photo/);
 });
 
+test("documents cannot be approved before automated screening reaches manual review", async (t) => {
+  const { document } = fixture(t, { documentStatus: "processing" });
+  await assert.rejects(
+    reviewKycDocument({ id: docId, action: "approve", reviewerId: adminId }),
+    (error) => error?.status === 409 && /not finished/i.test(error.message),
+  );
+  assert.equal(document.status, "processing");
+});
+
+test("an unresolved identity mismatch cannot be manually approved", async (t) => {
+  const { document } = fixture(t, { detailsMatched: false, reasonCode: "IDENTITY_DATA_MISMATCH" });
+  await assert.rejects(
+    reviewKycDocument({ id: docId, action: "approve", reviewerId: adminId }),
+    (error) => error?.status === 409 && /cannot be approved/i.test(error.message),
+  );
+  assert.equal(document.status, "pending_review");
+  await reviewKycDocument({
+    id: docId,
+    action: "reject",
+    reviewerId: adminId,
+    remarks: "The ID details do not match the registration. Upload the matching ID.",
+  });
+  assert.equal(document.status, "rejected");
+});
+
 test("a saved decision can recover from a failed user update without changing the decision", async (t) => {
   const { document, kyc } = fixture(t);
   let attempts = 0;
@@ -94,5 +119,12 @@ test("a failed face match cannot be promoted by an approved document", async (t)
   const { kyc, writes } = fixture(t, { facePassed: false, caseStatus: "rejected", documentStatus: "verified" });
   await reconcileUserKyc(userId);
   assert.equal(kyc.status, "rejected");
+  assert.equal(writes.length, 0);
+});
+
+test("a verified status without a passed identity comparison cannot approve an account", async (t) => {
+  const { kyc, writes } = fixture(t, { documentStatus: "verified", detailsMatched: false });
+  await reconcileUserKyc(userId);
+  assert.equal(kyc.status, "challenge_passed");
   assert.equal(writes.length, 0);
 });

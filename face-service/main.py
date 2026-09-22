@@ -676,7 +676,7 @@ async def post_kyc_id_register(req: KycIdRegisterRequest):
         logger.info(f"ID registered: user_id={req.user_id} (faces: {best['face_count']}) in {elapsed:.1f}s")
         return KycIdRegisterResponse(
             success=True,
-            message="Your ID has been registered successfully! You can now take your selfie.",
+            message="Your ID image was uploaded successfully. You can now take your selfie while document review continues.",
             user_id=req.user_id,
             stored_at=now.isoformat(),
         )

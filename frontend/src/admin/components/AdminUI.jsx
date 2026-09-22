@@ -15,11 +15,11 @@ export function StatusBadge({ value }) {
   const tone =
     ["active", "available", "approved", "verified"].includes(status)
       ? "bg-emerald-50 text-emerald-700 ring-emerald-600/15"
-      : ["on rent", "rented", "confirmed", "paid"].includes(status)
+      : ["on rent", "rented", "confirmed", "paid", "screening"].includes(status)
         ? "bg-blue-50 text-blue-700 ring-blue-600/15"
-        : ["pending", "pending review", "pending verification", "inactive"].includes(status)
+        : ["pending", "pending review", "pending verification", "inactive", "queued", "retrying"].includes(status)
           ? "bg-amber-50 text-amber-700 ring-amber-600/15"
-          : ["maintenance", "under maintenance", "partial"].includes(status)
+          : ["maintenance", "under maintenance", "partial", "needs re-upload"].includes(status)
             ? "bg-orange-50 text-orange-700 ring-orange-600/15"
             : ["rejected", "suspended", "cancelled", "unavailable", "overdue"].includes(status)
               ? "bg-rose-50 text-rose-700 ring-rose-600/15"
@@ -175,13 +175,33 @@ export function DocumentReviewDialog({ document, onClose, onApprove, onReject })
         <div className="grid gap-5 p-5 sm:grid-cols-[220px_1fr] sm:p-6">
           <PreviewPane item={document} className="min-h-56" />
           <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4">
-            {[['Customer', document.customer], ['Role', document.role], ['Document type', document.document], ['Submitted', document.submitted], ['Current status', document.approval]].map(([label, value]) => (
+            {[['Customer', document.customer], ['Role', document.role], ['Expected document', document.expectedDocument || document.document], ['Detected document', document.detectedDocument || 'Unknown'], ['Submitted', document.submitted], ['Current status', document.approval]].map(([label, value]) => (
               <div key={label} className="grid grid-cols-[120px_1fr] gap-3 py-3.5"><dt className="text-xs font-semibold text-slate-500">{label}</dt><dd className="text-sm font-medium text-slate-900">{value}</dd></div>
             ))}
           </dl>
         </div>
         <div className="space-y-2 px-5 pb-5 sm:px-6">
+          {document.decisionSource === "backend_rules" && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-900">Automated checks</p>
+              <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                {Object.entries(document.validationChecks || {}).filter(([, value]) => typeof value === "boolean").map(([key, value]) => {
+                  if (key === "registrationDataCompared" && !value) {
+                    return <div key={key} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"><dt className="text-xs font-medium text-slate-600">{formatCheckLabel(key)}</dt><dd className="text-xs font-semibold text-slate-500">Not reached</dd></div>;
+                  }
+                  const passed = key === "duplicateDetected" || key === "suspectedTampering" ? !value : value;
+                  return <div key={key} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"><dt className="text-xs font-medium text-slate-600">{formatCheckLabel(key)}</dt><dd className={`text-xs font-semibold ${passed ? "text-emerald-700" : "text-amber-700"}`}>{passed ? "Passed" : "Review"}</dd></div>;
+                })}
+              </dl>
+              {document.extractedData?.documentNumberMasked && <p className="mt-3 text-xs text-slate-600">Document number: <span className="font-semibold text-slate-800">{document.extractedData.documentNumberMasked}</span></p>}
+              <p className="mt-2 text-xs leading-5 text-slate-500">These checks assist your review. Confirm the original file before making the final decision.</p>
+            </div>
+          )}
           {document.reason && <p className="text-sm text-slate-600">Review notes: {document.reason}</p>}
+          {document.canReview && !document.canApprove && <div role="alert" className="rounded-xl bg-amber-50 p-3 text-sm leading-5 text-amber-950">
+            <p className="font-semibold">Approval is unavailable</p>
+            <p className="mt-1 break-words">{document.approvalBlockedReason || "The required identity comparison has not passed. Ask the applicant to correct their details or upload the matching ID."}</p>
+          </div>}
           <label htmlFor="document-rejection-reason" className="block text-sm font-semibold text-slate-800">Reason and correction instructions (required to reject)</label>
           <textarea id="document-rejection-reason" value={rejectionReason} onChange={(event) => { setRejectionReason(event.target.value); setReasonError(""); }} maxLength={500} aria-invalid={Boolean(reasonError)} aria-describedby="document-rejection-help" className="min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="Explain the issue and what the applicant should upload or correct." />
           <p id="document-rejection-help" className="text-xs text-slate-500">Use 10 to 500 characters. This explanation will be shown to the applicant.</p>
@@ -192,11 +212,36 @@ export function DocumentReviewDialog({ document, onClose, onApprove, onReject })
             if (rejectionReason.trim().length < 10) { setReasonError("Explain what is wrong and how the applicant can correct it."); return; }
             onReject(rejectionReason.trim());
           }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 px-4 text-sm font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-100"><CircleX size={ICON_SIZE.control} strokeWidth={2} aria-hidden="true" />Reject</button>
-          <button type="button" onClick={onApprove} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><CircleCheck size={ICON_SIZE.control} strokeWidth={2} aria-hidden="true" />Approve Document</button>
+          {document.canApprove && <button type="button" onClick={onApprove} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><CircleCheck size={ICON_SIZE.control} strokeWidth={2} aria-hidden="true" />Approve Document</button>}
         </div>
       </div>
     </div>
   );
+}
+
+function formatCheckLabel(value) {
+  const labels = {
+    imageReadable: "Image readable",
+    recognizedDocument: "Government document recognized",
+    classificationConfident: "Document type confidently classified",
+    allowedDocumentSurface: "Original document format",
+    requiredFieldsPresent: "Required fields found",
+    supportedDocumentType: "Supported document",
+    documentTypeMatches: "Selected type matches",
+    officialMarkingsPresent: "Official markings found",
+    layoutConsistent: "Document layout consistent",
+    structuralFeaturesPresent: "Required document features found",
+    hasFace: "Portrait detected",
+    machineReadableZonePresent: "Passport MRZ found",
+    registrationDataCompared: "Registration details compared",
+    nameMatches: "Name matches",
+    birthDateMatches: "Birth date matches",
+    permitNumberMatches: "Permit number matches",
+    documentNotExpired: "Document is current",
+    duplicateDetected: "No duplicate found",
+    suspectedTampering: "No unusual editing",
+  };
+  return labels[value] || value.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
 function PreviewPane({ item, className = "" }) {

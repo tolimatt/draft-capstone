@@ -38,7 +38,7 @@ export default function DashboardView({ vehicles, customers, documents, bookings
   const unavailable = vehicles.length - available;
   const activeRentals = bookings.filter((booking) => booking.isActive).length;
   const overdueRentals = bookings.filter((booking) => booking.isOverdue).length;
-  const pendingDocuments = documents.filter((document) => document.approval === "Pending").length;
+  const pendingDocuments = documents.filter((document) => document.canReview === true).length;
   const periodBookings = bookings.filter((booking) => dateMonthKey(booking.pickupAt || booking.createdAt) === period);
 
   const bookingData = ["Pending", "Confirmed", "Completed", "Cancelled", "Rejected"].map((status) => ({

@@ -14,7 +14,9 @@ import { auditLog } from "../middleware/auditLogger.middleware.js";
 import {
   getMissingPreKycDocs,
   getPendingPreKycDocs,
+  getActionRequiredPreKycDocs,
   clearPreKycDocs,
+  preKycIdentityMatchesRegistration,
 } from "../utils/preKycDocs.js";
 import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
 import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
@@ -467,6 +469,19 @@ export const registerUser = async (req, res) => {
         pendingDocuments: pendingDocs,
       });
     }
+    const actionRequiredDocs = await getActionRequiredPreKycDocs(
+      normalizedEmail,
+      requiredDocs,
+      preKycSession.sessionId
+    );
+    if (actionRequiredDocs.length) {
+      return res.status(409).json({
+        success: false,
+        message: "One or more documents need your attention. Review the document status and upload a corrected file before registering.",
+        reuploadRequired: true,
+        documents: actionRequiredDocs,
+      });
+    }
     const missingDocs = await getMissingPreKycDocs(
       normalizedEmail,
       requiredDocs,
@@ -482,6 +497,20 @@ export const registerUser = async (req, res) => {
         message = "Please verify your supporting document before registering.";
       }
       return res.status(400).json({ success: false, message });
+    }
+
+    const registrationIdentityMatches = await preKycIdentityMatchesRegistration(
+      normalizedEmail,
+      preKycSession.sessionId,
+      { full_name: name, date_of_birth: dateOfBirth },
+      { requireBirthDate: requestedRole === "user" }
+    );
+    if (!registrationIdentityMatches) {
+      return res.status(409).json({
+        success: false,
+        message: "Your personal details changed after ID verification. Return to Identity and upload the matching ID again.",
+        identityDetailsChanged: true,
+      });
     }
 
     const faceVerified = await isPreKycFaceVerified(normalizedEmail, preKycSession.sessionId);
@@ -1192,6 +1221,20 @@ export const upgradeToOwner = async (req, res) => {
         success: false,
         message: "Your supporting document is awaiting manual review.",
         reviewRequired: true,
+      });
+    }
+
+    const actionRequiredDocs = await getActionRequiredPreKycDocs(
+      user.email,
+      ["supporting"],
+      preKycSession.sessionId
+    );
+    if (actionRequiredDocs.length) {
+      return res.status(409).json({
+        success: false,
+        message: "Your supporting document needs attention. Review its status and upload a corrected file before continuing.",
+        reuploadRequired: true,
+        documents: actionRequiredDocs,
       });
     }
 

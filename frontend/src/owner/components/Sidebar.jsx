@@ -260,7 +260,7 @@ function Sidebar({
             className="rp-owner-sidebar__logout"
           >
             <LogOut size={19} strokeWidth={1.8} aria-hidden="true" />
-            <span>Log out</span>
+            <span>Sign Out</span>
           </button>
         </div>
       </aside>

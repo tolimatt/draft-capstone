@@ -3,24 +3,45 @@ import { clearPreKycSessionToken, getPreKycStatus } from "../utils/kycApi";
 import { documentStatusLabel } from "../utils/workflowStatus";
 import RequestFeedback from "./RequestFeedback";
 
-const STATUS_POLL_INTERVAL_MS = 45_000;
+const ACTIVE_SCREENING_POLL_MS = 2_500;
+const RETRY_POLL_MS = 15_000;
+const MANUAL_REVIEW_POLL_MS = 45_000;
 const REVIEW_IN_PROGRESS = new Set(["queued", "processing", "retry_wait", "pending_review"]);
 
-const reviewGuidance = (status, label) => {
-  if (status === "queued") return `${label} was uploaded and is waiting to be screened.`;
-  if (status === "processing") return `${label} is being screened now.`;
+const nextPollDelay = (documents) => {
+  if (documents.length === 0) return ACTIVE_SCREENING_POLL_MS;
+  if (documents.some((document) => ["queued", "processing"].includes(document.status))) return ACTIVE_SCREENING_POLL_MS;
+  if (documents.some((document) => document.status === "retry_wait")) return RETRY_POLL_MS;
+  if (documents.some((document) => document.status === "pending_review")) return MANUAL_REVIEW_POLL_MS;
+  return 0;
+};
+
+const reviewGuidance = (status, label, document) => {
+  if (document?.docType === "id" && document?.identityReadyForSelfie) {
+    return "Your personal details match this ID. You can continue to the selfie while document review finishes.";
+  }
+  if (status === "queued") return `${label} was uploaded. Automated checks will start shortly.`;
+  if (status === "processing") return document?.docType === "id"
+    ? "We are comparing the name and personal details on your ID with your registration."
+    : `${label} is being screened now.`;
   if (status === "retry_wait") return "Screening is taking longer than expected. We will retry automatically.";
   if (status === "pending_review") return "A reviewer is checking this document. Refresh the status before submitting your registration.";
   if (status === "verified") return "Approved. Continue once all verification steps are complete.";
-  if (status === "rejected") return "This document needs to be uploaded again before you can continue.";
+  if (status === "reupload_required") return "We need a clearer or corrected document before you can continue.";
+  if (status === "rejected") return "A reviewer could not approve this document. You can upload a corrected document and try again.";
   return `Upload ${label.toLowerCase()} to start its review.`;
 };
 
 const statusTone = (status) => {
   if (status === "verified") return "bg-emerald-50 text-emerald-700";
-  if (status === "rejected") return "bg-rose-50 text-rose-700";
+  if (["reupload_required", "rejected"].includes(status)) return "bg-rose-50 text-rose-700";
   if (REVIEW_IN_PROGRESS.has(status)) return "bg-amber-50 text-amber-800";
   return "bg-slate-100 text-slate-600";
+};
+
+const documentTypeLabel = (value, fallback) => {
+  const label = String(value || "").trim();
+  return label && label.length <= 80 ? label : fallback;
 };
 
 const toReviewError = (failure) => {
@@ -66,7 +87,7 @@ export default function PreKycReviewNotice({ email, role = "user", enabled, onRe
       if (inFlight) return;
       inFlight = true;
       setLoading(true);
-      let continuePolling = false;
+      let pollDelay = 0;
       try {
         const result = await getPreKycStatus(email, role);
         if (!active) return;
@@ -75,16 +96,15 @@ export default function PreKycReviewNotice({ email, role = "user", enabled, onRe
         onDocumentsChange?.(nextDocuments);
         setError(null);
         const id = nextDocuments.find((document) => document.docType === "id");
-        if (id) onIdStatus?.(id.status);
-        continuePolling = nextDocuments.length === 0
-          || nextDocuments.some((document) => REVIEW_IN_PROGRESS.has(document.status));
+        if (id) onIdStatus?.(id.status, id);
+        pollDelay = nextPollDelay(nextDocuments);
       } catch (failure) {
         if (active) setError(toReviewError(failure));
       } finally {
         inFlight = false;
         if (active) {
           setLoading(false);
-          if (continuePolling) timer = window.setTimeout(read, STATUS_POLL_INTERVAL_MS);
+          if (pollDelay) timer = window.setTimeout(read, pollDelay);
         }
       }
     };
@@ -123,14 +143,28 @@ export default function PreKycReviewNotice({ email, role = "user", enabled, onRe
       {expectedDocuments.map(({ type, label }) => {
         const document = documentsByType.get(type);
         const status = document?.status || "not_uploaded";
+        const typeMismatch = status === "reupload_required"
+          && document?.reasonCode === "DOCUMENT_TYPE_MISMATCH";
+        const expectedType = documentTypeLabel(document?.selectedDocCategory, label);
+        const detectedType = documentTypeLabel(document?.docCategory, "Unknown");
         return <div key={type} className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="font-semibold text-slate-900">{label}</p>
             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone(status)}`}>{documentStatusLabel(status)}</span>
           </div>
-          <p className="mt-2 text-slate-600">{reviewGuidance(status, label)}</p>
-          {status === "rejected" && document?.reason && <p className="mt-1 text-rose-700">Reason: {document.reason}</p>}
-          {status === "rejected" && <button type="button" onClick={() => onResubmit?.(type)} className="mt-2 font-semibold text-blue-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Upload a new document</button>}
+          <p className="mt-2 text-slate-600">{reviewGuidance(status, label, document)}</p>
+          {typeMismatch && <dl className="mt-3 grid gap-2 rounded-lg bg-rose-50 p-3 sm:grid-cols-2">
+            <div className="min-w-0">
+              <dt className="text-xs font-semibold text-rose-700">Expected document</dt>
+              <dd className="mt-0.5 break-words font-semibold text-rose-950">{expectedType}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs font-semibold text-rose-700">Detected document</dt>
+              <dd className="mt-0.5 break-words font-semibold text-rose-950">{detectedType}</dd>
+            </div>
+          </dl>}
+          {["pending_review", "reupload_required", "rejected"].includes(status) && document?.reason && <p className={`mt-2 break-words ${status === "pending_review" ? "text-amber-900" : "text-rose-700"}`}><span className="font-semibold">Next step:</span> {document.reason}</p>}
+          {["reupload_required", "rejected"].includes(status) && <button type="button" onClick={() => onResubmit?.(type)} className="mt-2 font-semibold text-blue-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Upload a new document</button>}
         </div>;
       })}
     </div>}
