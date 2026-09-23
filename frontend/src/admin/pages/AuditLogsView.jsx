@@ -39,10 +39,10 @@ export default function AuditLogsView({ initialOutcome = "all" }) {
   return (
     <div className="space-y-5">
       <section aria-label="Audit activity statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Matching Events" value={Number(payload.summary?.total || 0)} description="For the selected action and search" icon={Activity} showArrow />
-        <StatCard label="Successful Actions" value={Number(payload.summary?.success || 0)} description="Completed administrative events" icon={CheckCircle2} tone="green" showArrow />
-        <StatCard label="Failed Checks" value={Number(payload.summary?.failure || 0)} description="Authentication or action failures" icon={XCircle} tone={payload.summary?.failure ? "red" : "slate"} showArrow />
-        <StatCard label="Last 24 Hours" value={Number(payload.summary?.recent24Hours || 0)} description="Recent security and admin activity" icon={Clock3} tone="slate" showArrow />
+        <StatCard label="Matching Events" value={Number(payload.summary?.total || 0)} description="For the selected action and search" icon={Activity} />
+        <StatCard label="Successful Actions" value={Number(payload.summary?.success || 0)} description="Completed administrative events" icon={CheckCircle2} tone="green" />
+        <StatCard label="Failed Checks" value={Number(payload.summary?.failure || 0)} description="Authentication or action failures" icon={XCircle} tone={payload.summary?.failure ? "red" : "slate"} />
+        <StatCard label="Last 24 Hours" value={Number(payload.summary?.recent24Hours || 0)} description="Recent security and admin activity" icon={Clock3} tone="slate" />
       </section>
       <section className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 text-sm leading-6 text-blue-900">
         <div className="flex gap-3"><ShieldAlert className="mt-0.5 shrink-0 text-blue-600" size={20} /><p>This immutable-style activity history records security events and Super Admin decisions. Passwords, MFA codes, and session tokens are never stored in log metadata.</p></div>

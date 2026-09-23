@@ -29,6 +29,14 @@ validated and stored only as a bcrypt hash. Once enabled, the secret passkey is 
 default verification step after the account password; email codes are generated and
 sent only when the admin chooses the email backup option.
 
+Changing `ADMIN_EMAIL`, `ADMIN_PASSWORD`, or `ADMIN_SECRET_KEY` after the first startup
+does not silently replace stored authentication secrets. Run `npm run admin:sync-credentials`
+from the repository root to validate those values, hash the secrets, update only the
+single system-admin account, and invalidate prior sessions. Use
+`npm run admin:sync-credentials -- --check` to compare the stored credential safely
+without printing any configured value. If `ADMIN_SECRET_KEY` is empty, the command
+preserves the passkey already configured through the Security page.
+
 Customer profile changes require a reason and password, record before/after values in
 the audit log, notify the user, and force email re-verification when the email changes.
 Direct renter-to-owner role changes are blocked until the required owner document is

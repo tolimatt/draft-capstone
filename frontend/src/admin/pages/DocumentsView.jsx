@@ -32,10 +32,10 @@ export default function DocumentsView({ documents, initialStatus = "All Statuses
   return (
     <div className="space-y-5">
       <section aria-label="Document statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Documents" value={documents.length} description="All verification files" icon={FileText} showArrow />
-        <StatCard label="Verified Documents" value={approved} description="Successfully approved" icon={FileText} tone="green" showArrow />
-        <StatCard label="Pending Review" value={pending} description="Awaiting admin review" icon={FileText} tone="amber" showArrow />
-        <StatCard label="Needs Attention" value={rejected} description="Rejected verification files" icon={FileText} tone="red" showArrow />
+        <StatCard label="Total Documents" value={documents.length} description="All verification files" icon={FileText} />
+        <StatCard label="Verified Documents" value={approved} description="Successfully approved" icon={FileText} tone="green" />
+        <StatCard label="Pending Review" value={pending} description="Awaiting admin review" icon={FileText} tone="amber" />
+        <StatCard label="Needs Attention" value={rejected} description="Rejected verification files" icon={FileText} tone="red" />
       </section>
 
       <section aria-label="Document review insights" className="grid gap-5 xl:grid-cols-[minmax(330px,.72fr)_minmax(0,1.28fr)]">
@@ -58,11 +58,11 @@ export default function DocumentsView({ documents, initialStatus = "All Statuses
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_6px_20px_rgba(33,33,33,0.035)]">
-        <div className="grid gap-4 border-b border-slate-200 p-4 lg:grid-cols-[minmax(280px,1.5fr)_220px_230px_auto] lg:items-end">
+        <div className="grid gap-4 border-b border-slate-200 p-4 md:grid-cols-2 xl:grid-cols-[minmax(280px,1.5fr)_220px_230px_auto] xl:items-end">
           <SearchField label="Search Documents" value={search} onChange={setSearch} placeholder="Search by customer, filename, or document type..." />
           <FilterSelect label="Approval Status" value={status} onChange={setStatus} options={["All Statuses", "Verified", "Pending Review", "Rejected"]} />
           <FilterSelect label="Document Type" value={type} onChange={setType} options={["All Document Types", ...documentTypes]} />
-          <button type="button" onClick={clearFilters} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><RotateCcw size={16} />Clear Filters</button>
+          <button type="button" onClick={clearFilters} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 md:col-span-2 xl:col-span-1"><RotateCcw size={16} />Clear Filters</button>
         </div>
 
         <div className="overflow-x-auto">

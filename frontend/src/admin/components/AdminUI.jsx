@@ -14,7 +14,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import VehicleImage from "./VehicleImage";
 import { presentVehicle } from "../vehiclePresentation";
 
@@ -137,6 +137,7 @@ export function ConfirmationDialog({ confirmation, loading, onCancel, onConfirm 
 }
 
 function ConfirmationForm({ confirmation, loading, onCancel, onConfirm }) {
+  const dialogRef = useDialogFocus();
   const danger = confirmation.tone === "danger";
   const [reason, setReason] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
@@ -144,17 +145,17 @@ function ConfirmationForm({ confirmation, loading, onCancel, onConfirm }) {
   const passwordValid = !confirmation.requirePassword || adminPassword.length > 0;
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 px-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && !loading && onCancel()}>
-      <div role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+      <div ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${danger ? "bg-rose-50 text-rose-600" : "bg-blue-50 text-blue-600"}`}>
           {danger ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}
         </div>
         <h3 id="confirmation-title" className="mt-5 text-xl font-bold text-slate-950">{confirmation.title}</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">{confirmation.description}</p>
-        {confirmation.requireReason ? <label className="mt-5 block"><span className="mb-1.5 block text-sm font-semibold text-slate-800">Reason</span><textarea autoFocus value={reason} onChange={(event) => setReason(event.target.value.slice(0, 500))} disabled={loading} rows={3} placeholder="Explain why this action is necessary (at least 10 characters)" className="w-full resize-none rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50" /><span className={`mt-1 block text-xs ${reason.length && !reasonValid ? "text-rose-600" : "text-slate-500"}`}>{reason.trim().length}/500 characters</span></label> : null}
+        {confirmation.requireReason ? <label className="mt-5 block"><span className="mb-1.5 block text-sm font-semibold text-slate-800">Reason</span><textarea data-dialog-initial value={reason} onChange={(event) => setReason(event.target.value.slice(0, 500))} disabled={loading} rows={3} placeholder="Explain why this action is necessary (at least 10 characters)" className="w-full resize-none rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50" /><span className={`mt-1 block text-xs ${reason.length && !reasonValid ? "text-rose-600" : "text-slate-500"}`}>{reason.trim().length}/500 characters</span></label> : null}
         {confirmation.requirePassword ? <label className="mt-4 block"><span className="mb-1.5 block text-sm font-semibold text-slate-800">Confirm Super Admin password</span><input type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} disabled={loading} placeholder="Enter your current password" className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50" /></label> : null}
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button type="button" disabled={loading} onClick={onCancel} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:opacity-50">Cancel</button>
-          <button type="button" autoFocus={!confirmation.requireReason} disabled={loading || !reasonValid || !passwordValid} onClick={() => onConfirm({ reason: reason.trim(), adminPassword })} className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-4 disabled:cursor-not-allowed disabled:opacity-60 ${danger ? "bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-100" : "bg-blue-600 hover:bg-blue-700 focus-visible:ring-blue-100"}`}>
+          <button type="button" data-dialog-initial={!confirmation.requireReason ? true : undefined} disabled={loading} onClick={onCancel} className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:opacity-50">Cancel</button>
+          <button type="button" disabled={loading || !reasonValid || !passwordValid} onClick={() => onConfirm({ reason: reason.trim(), adminPassword })} className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-4 disabled:cursor-not-allowed disabled:opacity-60 ${danger ? "bg-rose-600 hover:bg-rose-700 focus-visible:ring-rose-100" : "bg-blue-600 hover:bg-blue-700 focus-visible:ring-blue-100"}`}>
             {loading ? <LoaderCircle size={17} className="animate-spin" /> : null}
             {loading ? "Working..." : confirmation.confirmLabel}
           </button>
@@ -168,17 +169,21 @@ export function ViewerDialog({ item, onClose }) {
   if (!item) return null;
   if (item.type === "Customer profile") return <CustomerProfileDialog item={item} onClose={onClose} />;
   if (item.type === "Vehicle details") return <VehicleDetailsDialog key={item.vehicle?.id || item.title} item={item} onClose={onClose} />;
+  return <DefaultViewerDialog item={item} onClose={onClose} />;
+}
 
+function DefaultViewerDialog({ item, onClose }) {
+  const dialogRef = useDialogFocus();
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/50 px-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-labelledby="viewer-title" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="viewer-title" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">{item.type}</p>
             <h3 id="viewer-title" className="mt-2 text-xl font-bold text-slate-950">{item.title}</h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">{item.subtitle}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close preview" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
+          <button type="button" data-dialog-initial onClick={onClose} aria-label="Close preview" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
         </div>
         <PreviewPane item={item} className="mt-6 min-h-64" />
       </div>
@@ -187,13 +192,14 @@ export function ViewerDialog({ item, onClose }) {
 }
 
 function VehicleDetailsDialog({ item, onClose }) {
+  const dialogRef = useDialogFocus();
   const vehicle = presentVehicle(item.vehicle || {});
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm sm:p-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
-      <div role="dialog" aria-modal="true" aria-labelledby="vehicle-details-title" className="flex max-h-[min(720px,calc(100dvh-3rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="vehicle-details-title" className="flex max-h-[min(720px,calc(100dvh-3rem))] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Vehicle details</p><h3 id="vehicle-details-title" className="mt-1 break-words text-xl font-bold text-slate-950">{vehicle.name || item.title}</h3></div>
-          <button autoFocus type="button" onClick={onClose} aria-label="Close vehicle details" className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
+          <button data-dialog-initial type="button" onClick={onClose} aria-label="Close vehicle details" className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
         </div>
         <div className="min-h-0 overflow-y-auto overscroll-contain p-4">
           <VehicleImage vehicle={vehicle} />
@@ -213,6 +219,7 @@ function VehicleDetailsDialog({ item, onClose }) {
 }
 
 function CustomerProfileDialog({ item, onClose }) {
+  const dialogRef = useDialogFocus();
   const customer = item.customer || {};
   const documents = Array.isArray(item.documents) ? item.documents : [];
   const galleryRef = useRef(null);
@@ -232,14 +239,14 @@ function CustomerProfileDialog({ item, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center overflow-y-auto bg-slate-950/55 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-labelledby="viewer-title" className="flex max-h-[calc(100vh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="viewer-title" className="flex max-h-[calc(100vh-3rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 p-5 sm:p-6">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Customer profile</p>
             <h3 id="viewer-title" className="mt-1.5 truncate text-xl font-bold text-slate-950">{customer.name || item.title}</h3>
             <p className="mt-1 text-sm text-slate-500">Account details and submitted verification documents.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close customer profile" className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
+          <button type="button" data-dialog-initial onClick={onClose} aria-label="Close customer profile" className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
@@ -333,13 +340,14 @@ function CustomerDocumentCard({ document }) {
 }
 
 export function DocumentReviewDialog({ document, onClose, onApprove, onReject }) {
+  const dialogRef = useDialogFocus(Boolean(document));
   if (!document) return null;
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm sm:p-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-labelledby="review-title" className="flex max-h-[min(720px,calc(100dvh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="review-title" className="flex max-h-[min(720px,calc(100dvh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
           <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Document review</p><h3 id="review-title" title={document.fileName} className="mt-1 truncate text-base font-bold text-slate-950">{document.fileName}</h3><p className="mt-1 text-xs text-slate-500">Review the verification details before making a decision.</p></div>
-          <button type="button" aria-label="Close review" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
+          <button type="button" data-dialog-initial aria-label="Close review" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100"><X size={19} /></button>
         </div>
         <div className="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <div className="grid items-start gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
@@ -374,6 +382,44 @@ export function DocumentReviewDialog({ document, onClose, onApprove, onReject })
 
 function formatQueueStage(value) {
   return ({ queued: "Queued", processing: "Automated screening", retry_wait: "Waiting to retry", pending_review: "Ready for manual review", verified: "Approved", rejected: "Rejected" })[value] || "Pending review";
+}
+
+function useDialogFocus(active = true) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const previouslyFocused = document.activeElement;
+    const focusableSelector = '[data-dialog-initial]:not([disabled]), button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusFrame = window.requestAnimationFrame(() => {
+      dialogRef.current?.querySelector(focusableSelector)?.focus();
+    });
+    const keepFocusInside = (event) => {
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = [...dialogRef.current.querySelectorAll(focusableSelector)].filter((element) => element.getClientRects().length > 0);
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", keepFocusInside);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", keepFocusInside);
+      if (previouslyFocused instanceof HTMLElement && document.contains(previouslyFocused)) previouslyFocused.focus();
+    };
+  }, [active]);
+
+  return dialogRef;
 }
 
 function PreviewPane({ item, className = "", compact = false }) {

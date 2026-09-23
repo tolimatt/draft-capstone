@@ -80,6 +80,7 @@ export default function AdminAccountPage({ user, onLogout }) {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const feedbackTimerRef = useRef(null);
   const actionLockRef = useRef(false);
+  const mobileMenuButtonRef = useRef(null);
 
   const displayName = user?.name || "Admin";
   const displayEmail = user?.email || "admin@example.com";
@@ -101,6 +102,11 @@ export default function AdminAccountPage({ user, onLogout }) {
     window.clearTimeout(feedbackTimerRef.current);
     setFeedbackMessage(message);
     feedbackTimerRef.current = window.setTimeout(() => setFeedbackMessage(""), 3200);
+  }, []);
+
+  const closeMobileNav = useCallback(() => {
+    setMobileNavOpen(false);
+    window.requestAnimationFrame(() => mobileMenuButtonRef.current?.focus());
   }, []);
 
   const loadAdminData = useCallback(async ({ background = false } = {}) => {
@@ -140,11 +146,11 @@ export default function AdminAccountPage({ user, onLogout }) {
       if (confirmation && !actionLoading) setConfirmation(null);
       else if (reviewDocument) setReviewDocument(null);
       else if (viewerItem) setViewerItem(null);
-      else setMobileNavOpen(false);
+      else if (mobileNavOpen) closeMobileNav();
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [actionLoading, confirmation, reviewDocument, viewerItem]);
+  }, [actionLoading, closeMobileNav, confirmation, mobileNavOpen, reviewDocument, viewerItem]);
 
   useEffect(() => () => window.clearTimeout(feedbackTimerRef.current), []);
 
@@ -152,6 +158,7 @@ export default function AdminAccountPage({ user, onLogout }) {
     setActiveView(view);
     setViewContext(context);
     setMobileNavOpen(false);
+    if (mobileNavOpen) window.requestAnimationFrame(() => document.getElementById("admin-main-content")?.focus());
   };
 
   const requestConfirmation = (config) => {
@@ -271,23 +278,25 @@ export default function AdminAccountPage({ user, onLogout }) {
   };
 
   const headerActions = (
-    <div className="flex items-center gap-2">
-      {activeView === "dashboard" ? <DashboardPeriodSelect value={dashboardPeriod} options={dashboardPeriodOptions} onChange={setDashboardPeriod} /> : null}
+    <div className="flex items-center gap-3">
+      {activeView === "dashboard" && syncedAt ? <p className="hidden text-xs text-slate-500 xl:block">Updated {formatSyncTime(syncedAt)}</p> : null}
       <button
         type="button"
         onClick={() => activeView === "transactions" ? setTransactionRefreshSignal((current) => current + 1) : void loadAdminData({ background: loadState === "ready" })}
         disabled={activeView === "transactions" ? transactionRefreshing : refreshing || loadState === "loading"}
+        aria-label={activeView === "transactions" ? "Refresh transaction records" : "Refresh admin data"}
         title={activeView === "transactions" ? "Refresh transaction records" : syncedAt ? `Last synced ${new Date(syncedAt).toLocaleString()}` : "Refresh dashboard data"}
         className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-wait disabled:opacity-60"
       >
         <RefreshCw size={17} className={(activeView === "transactions" ? transactionRefreshing : refreshing) ? "animate-spin" : ""} />
-        <span className="hidden sm:inline">{(activeView === "transactions" ? transactionRefreshing : refreshing) ? "Refreshing..." : "Refresh"}</span>
+        <span className="hidden sm:inline">{(activeView === "transactions" ? transactionRefreshing : refreshing) ? "Refreshing…" : "Refresh"}</span>
       </button>
     </div>
   );
 
   return (
-    <div className="min-h-screen w-screen max-w-[100vw] overflow-x-hidden bg-canvas lg:w-auto">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-canvas">
+      <a href="#admin-main-content" className="fixed left-4 top-4 z-[10001] -translate-y-24 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-xl transition-transform focus:translate-y-0">Skip to main content</a>
       <Toast message={feedbackMessage} />
       <ConfirmationDialog confirmation={confirmation} loading={actionLoading} onCancel={() => setConfirmation(null)} onConfirm={confirmAction} />
       <ViewerDialog item={viewerItem} onClose={() => setViewerItem(null)} />
@@ -304,15 +313,16 @@ export default function AdminAccountPage({ user, onLogout }) {
           displayName={displayName}
           displayEmail={displayEmail}
           mobileOpen={mobileNavOpen}
-          onClose={() => setMobileNavOpen(false)}
+          onClose={closeMobileNav}
           onSelect={selectView}
           onLogout={onLogout}
         />
 
-        <main className="w-full min-w-0 max-w-full overflow-hidden">
+        <main id="admin-main-content" tabIndex={-1} className="w-full min-w-0 max-w-full overflow-hidden">
           <AdminPageHeader
             {...pageMeta[activeView]}
             onMenuOpen={() => setMobileNavOpen(true)}
+            menuButtonRef={mobileMenuButtonRef}
             actions={["reports", "audit", "security"].includes(activeView) ? null : headerActions}
           />
 
@@ -323,7 +333,7 @@ export default function AdminAccountPage({ user, onLogout }) {
             {activeView === "security" ? <SecurityView onCurrentSessionRevoked={onLogout} /> : null}
             {!["transactions", "reports", "audit", "security"].includes(activeView) && loadState === "loading" ? <DataLoadingState /> : null}
             {!["transactions", "reports", "audit", "security"].includes(activeView) && loadState === "error" ? <DataErrorState message={loadError} onRetry={() => void loadAdminData()} onLogout={onLogout} /> : null}
-            {loadState === "ready" && activeView === "dashboard" ? <DashboardView vehicles={vehicles} customers={customers} documents={documents} bookings={bookings} alerts={operationalAlerts} period={dashboardPeriod} onSelect={selectView} /> : null}
+            {loadState === "ready" && activeView === "dashboard" ? <DashboardView vehicles={vehicles} customers={customers} documents={documents} bookings={bookings} alerts={operationalAlerts} period={dashboardPeriod} periodControl={<DashboardPeriodSelect value={dashboardPeriod} options={dashboardPeriodOptions} onChange={setDashboardPeriod} />} onSelect={selectView} onViewBooking={viewBooking} /> : null}
             {loadState === "ready" && activeView === "bookings" ? <BookingsView key={`bookings-${viewContext.status || "all"}`} bookings={bookings} initialStatus={viewContext.status} onView={viewBooking} /> : null}
             {loadState === "ready" && activeView === "vehicles" ? <VehiclesView vehicles={vehicles} onView={viewVehicle} /> : null}
             {loadState === "ready" && activeView === "customers" ? <CustomersView key={`customers-${viewContext.role || "all"}-${viewContext.status || "all"}`} customers={customers} adminEmail={displayEmail} initialRole={viewContext.role} initialStatus={viewContext.status} onView={viewCustomer} onEdit={updateCustomer} onToggleDisabled={requestCustomerStatusChange} onDelete={requestCustomerDeletion} /> : null}
@@ -366,15 +376,21 @@ function DataErrorState({ message, onRetry, onLogout }) {
 
 function DashboardPeriodSelect({ value, options, onChange }) {
   return (
-    <label className="relative inline-flex h-11 items-center rounded-xl border border-slate-200 bg-white pl-10 pr-8 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 focus-within:ring-4 focus-within:ring-blue-100">
+    <label className="relative inline-flex h-11 items-center rounded-xl border border-slate-200 bg-white pl-10 pr-8 text-base font-semibold text-slate-700 shadow-sm transition-colors hover:border-slate-300 focus-within:ring-4 focus-within:ring-blue-100 sm:text-sm">
       <CalendarDays aria-hidden="true" size={18} className="pointer-events-none absolute left-3 text-slate-500" />
       <span className="sr-only">Dashboard reporting month and year</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="h-full appearance-none bg-transparent pr-2 text-sm font-semibold text-slate-700 outline-none">
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="h-full appearance-none bg-transparent pr-2 text-base font-semibold text-slate-700 outline-none sm:text-sm">
         {options.map((option) => <option key={option} value={option}>{periodLabel(option)}</option>)}
       </select>
       <ChevronDown aria-hidden="true" size={16} className="pointer-events-none absolute right-3 text-slate-500" />
     </label>
   );
+}
+
+function formatSyncTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "just now";
+  return new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(date);
 }
 
 function monthKey(value) {

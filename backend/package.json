@@ -5,6 +5,7 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
+    "admin:sync-credentials": "node scripts/syncAdminCredentials.js",
     "dev": "nodemon server.js",
     "start": "node server.js",
     "test": "node --test tests"

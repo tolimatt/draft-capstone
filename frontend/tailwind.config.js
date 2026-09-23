@@ -1,6 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./*.{js,ts,jsx,tsx}", "./src/**/*.{js,ts,jsx,tsx}"],
+  future: { hoverOnlyWhenSupported: true },
   theme: {
     extend: {
       colors: {

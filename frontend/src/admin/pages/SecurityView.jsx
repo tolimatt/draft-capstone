@@ -22,7 +22,7 @@ export default function SecurityView({ onCurrentSessionRevoked }) {
   const [sessions, setSessions] = useState([]);
   const [passkey, setPasskey] = useState({ enabled: false, enabledAt: null });
   const [passkeyForm, setPasskeyForm] = useState(emptyPasskeyForm);
-  const [visibleFields, setVisibleFields] = useState({ current: false, next: false, confirm: false });
+  const [visibleFields, setVisibleFields] = useState({ password: false, current: false, next: false, confirm: false });
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
@@ -103,7 +103,7 @@ export default function SecurityView({ onCurrentSessionRevoked }) {
       );
       setPasskey({ enabled: true, enabledAt: payload.enabledAt });
       setPasskeyForm(emptyPasskeyForm);
-      setVisibleFields({ current: false, next: false, confirm: false });
+      setVisibleFields({ password: false, current: false, next: false, confirm: false });
       setMessage(payload.message);
     } catch (requestError) {
       setError(requestError.message);
@@ -122,7 +122,7 @@ export default function SecurityView({ onCurrentSessionRevoked }) {
       const payload = await adminAuthApi.disablePasskey(passkeyForm.adminPassword, passkeyForm.currentPasskey);
       setPasskey({ enabled: false, enabledAt: null });
       setPasskeyForm(emptyPasskeyForm);
-      setVisibleFields({ current: false, next: false, confirm: false });
+      setVisibleFields({ password: false, current: false, next: false, confirm: false });
       setMessage(payload.message);
     } catch (requestError) {
       setError(requestError.message);
@@ -188,7 +188,7 @@ export default function SecurityView({ onCurrentSessionRevoked }) {
             </div>
             <form onSubmit={savePasskey} className="space-y-4 p-5 sm:p-6">
               <div className={`rounded-2xl border px-4 py-3.5 ${passkey.enabled ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex items-start gap-3"><span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${passkey.enabled ? "bg-emerald-500" : "bg-amber-500"}`} /><div><p className={`text-sm font-bold ${passkey.enabled ? "text-emerald-800" : "text-amber-800"}`}>{passkey.enabled ? "Passkey-first verification is active" : "Email verification is currently the default"}</p><p className={`mt-1 text-xs leading-5 ${passkey.enabled ? "text-emerald-700" : "text-amber-700"}`}>{passkey.enabledAt ? `Enabled ${formatTime(passkey.enabledAt)}` : "Create a passkey below to make it your primary method."}</p></div></div></div>
-              <Field label="Super Admin password"><input type="password" autoComplete="current-password" value={passkeyForm.adminPassword} onChange={(event) => updatePasskeyField("adminPassword", event.target.value)} placeholder="Confirm your account password" className={inputClass} /></Field>
+              <SecretField label="Super Admin password" visible={visibleFields.password} onVisibility={() => setVisibleFields((current) => ({ ...current, password: !current.password }))} value={passkeyForm.adminPassword} onChange={(value) => updatePasskeyField("adminPassword", value)} placeholder="Confirm your account password" autoComplete="current-password" />
               {passkey.enabled ? <SecretField label="Current secret passkey" visible={visibleFields.current} onVisibility={() => setVisibleFields((current) => ({ ...current, current: !current.current }))} value={passkeyForm.currentPasskey} onChange={(value) => updatePasskeyField("currentPasskey", value)} placeholder="Enter current passkey" /> : null}
               <SecretField label={passkey.enabled ? "New secret passkey" : "Create secret passkey"} visible={visibleFields.next} onVisibility={() => setVisibleFields((current) => ({ ...current, next: !current.next }))} value={passkeyForm.newPasskey} onChange={(value) => updatePasskeyField("newPasskey", value)} placeholder="At least 12 strong characters" autoComplete="new-password" />
               <SecretField label="Confirm new passkey" visible={visibleFields.confirm} onVisibility={() => setVisibleFields((current) => ({ ...current, confirm: !current.confirm }))} value={passkeyForm.confirmPasskey} onChange={(value) => updatePasskeyField("confirmPasskey", value)} placeholder="Enter the same passkey again" autoComplete="new-password" />
@@ -210,7 +210,7 @@ function Field({ label, children }) {
 function SecretField({ label, visible, onVisibility, value, onChange, placeholder, autoComplete = "off" }) {
   return (
     <Field label={label}>
-      <span className="relative block"><input type={visible ? "text" : "password"} autoComplete={autoComplete} maxLength={128} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`${inputClass} pr-11`} /><button type="button" onClick={onVisibility} aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-400 transition hover:text-slate-600">{visible ? <EyeOff size={17} /> : <Eye size={17} />}</button></span>
+      <span className="relative block"><input type={visible ? "text" : "password"} autoComplete={autoComplete} maxLength={128} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`${inputClass} pr-11`} /><button type="button" onClick={onVisibility} aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`} aria-pressed={visible} title={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-400 transition hover:bg-slate-50 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-100">{visible ? <EyeOff size={17} /> : <Eye size={17} />}</button></span>
     </Field>
   );
 }

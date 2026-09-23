@@ -7,6 +7,7 @@
     "backend"
   ],
   "scripts": {
+    "admin:sync-credentials": "node backend/scripts/syncAdminCredentials.js",
     "dev": "concurrently -n frontend,backend -c cyan,green \"npm run dev --workspace frontend\" \"npm run dev --workspace backend\"",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:backend": "npm run dev --workspace backend",

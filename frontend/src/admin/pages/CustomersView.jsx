@@ -110,10 +110,10 @@ export default function CustomersView({
       ) : null}
 
       <section aria-label="Customer statistics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Customers" value={visibleCustomers.length} description="All customer accounts" icon={Users} showArrow />
-        <StatCard label="Active Customers" value={active} description="Verified and active" icon={UserRound} tone="green" showArrow />
-        <StatCard label="Pending Verification" value={pending} description="Awaiting account review" icon={UserRound} tone="amber" showArrow />
-        <StatCard label="Inactive / Suspended" value={inactive} description="Restricted accounts" icon={UserRound} tone="red" showArrow />
+        <StatCard label="Total Customers" value={visibleCustomers.length} description="All customer accounts" icon={Users} />
+        <StatCard label="Active Customers" value={active} description="Verified and active" icon={UserRound} tone="green" />
+        <StatCard label="Pending Verification" value={pending} description="Awaiting account review" icon={UserRound} tone="amber" />
+        <StatCard label="Inactive / Suspended" value={inactive} description="Restricted accounts" icon={UserRound} tone="red" />
       </section>
 
       <section aria-label="Customer growth insights" className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,.75fr)]">

@@ -8,7 +8,6 @@ import {
   KeyRound,
   LoaderCircle,
   LockKeyhole,
-  LogIn,
   Mail,
   RefreshCw,
   ShieldCheck,
@@ -18,7 +17,8 @@ import AdminAuthShell from "../components/AdminAuthShell";
 import { validateAdminEmail, validateAdminPassword } from "../adminValidation";
 import AdminPasswordRecovery from "./AdminPasswordRecovery";
 
-const INVALID_CREDENTIALS_MESSAGE = "The email or password you entered is incorrect.";
+const INVALID_EMAIL_CREDENTIAL_MESSAGE = "Check that this is the authorized Super Admin email.";
+const INVALID_PASSWORD_CREDENTIAL_MESSAGE = "Check that this is the correct Super Admin password.";
 
 export default function AdminLoginPage({ onLogin }) {
   const [form, setForm] = useState({ email: "", password: "", rememberMe: true });
@@ -85,7 +85,10 @@ export default function AdminLoginPage({ onLogin }) {
         setError("");
         focusFirstInvalidLoginField(nextErrors);
       } else if (requestError.code === "INVALID_PASSWORD" || /invalid email or password/i.test(requestError.message || "")) {
-        const nextErrors = { email: "", password: INVALID_CREDENTIALS_MESSAGE };
+        const nextErrors = {
+          email: INVALID_EMAIL_CREDENTIAL_MESSAGE,
+          password: INVALID_PASSWORD_CREDENTIAL_MESSAGE,
+        };
         setFieldErrors(nextErrors);
         setError("");
         focusFirstInvalidLoginField(nextErrors);
@@ -212,7 +215,7 @@ export default function AdminLoginPage({ onLogin }) {
               disabled={loading}
               placeholder={usePasskey ? "Enter your secret passkey" : "000000"}
               inputClassName={usePasskey ? "font-sans tabular-nums" : "pr-12 text-center font-sans tabular-nums text-xl tracking-[0.35em]"}
-              trailing={usePasskey ? <button type="button" onClick={() => setShowMfaPasskey((current) => !current)} disabled={loading} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700" aria-label={showMfaPasskey ? "Hide secret passkey" : "Show secret passkey"}>{showMfaPasskey ? <EyeOff size={18} /> : <Eye size={18} />}</button> : null}
+              trailing={usePasskey ? <button type="button" onClick={() => setShowMfaPasskey((current) => !current)} disabled={loading} aria-label={showMfaPasskey ? "Hide secret passkey" : "Show secret passkey"} aria-pressed={showMfaPasskey} title={showMfaPasskey ? "Hide secret passkey" : "Show secret passkey"} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:opacity-50">{showMfaPasskey ? <EyeOff size={18} /> : <Eye size={18} />}</button> : null}
             />
 
             {error ? <ErrorMessage message={error} /> : null}
@@ -250,7 +253,7 @@ export default function AdminLoginPage({ onLogin }) {
             maxLength={254}
             error={fieldErrors.email}
             value={form.email}
-            onChange={(event) => { setForm((current) => ({ ...current, email: event.target.value.toLowerCase() })); setFieldErrors((current) => ({ email: "", password: current.password === INVALID_CREDENTIALS_MESSAGE ? "" : current.password })); setError(""); }}
+            onChange={(event) => { setForm((current) => ({ ...current, email: event.target.value.toLowerCase() })); setFieldErrors((current) => ({ email: "", password: current.password === INVALID_PASSWORD_CREDENTIAL_MESSAGE ? "" : current.password })); setError(""); }}
             onBlur={() => setFieldErrors((current) => ({ ...current, email: validateAdminEmail(form.email) }))}
             disabled={loading}
             placeholder="admin@gmail.com"
@@ -267,7 +270,7 @@ export default function AdminLoginPage({ onLogin }) {
             maxLength={128}
             error={fieldErrors.password}
             value={form.password}
-            onChange={(event) => { setForm((current) => ({ ...current, password: event.target.value })); setFieldErrors((current) => ({ ...current, password: "" })); setError(""); }}
+            onChange={(event) => { setForm((current) => ({ ...current, password: event.target.value })); setFieldErrors((current) => ({ email: current.email === INVALID_EMAIL_CREDENTIAL_MESSAGE ? "" : current.email, password: "" })); setError(""); }}
             onBlur={() => setFieldErrors((current) => ({ ...current, password: validateAdminPassword(form.password) }))}
             disabled={loading}
             placeholder="Enter your password"
@@ -279,7 +282,7 @@ export default function AdminLoginPage({ onLogin }) {
             <button type="button" onClick={() => setRecoveryOpen(true)} disabled={loading} className="text-sm font-medium text-slate-600 transition hover:text-blue-600 disabled:opacity-50">Forgot password?</button>
           </div>
 
-          <button type="submit" disabled={loading} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3.5 text-sm disabled:cursor-not-allowed disabled:opacity-70">{loading ? <><LoaderCircle size={18} className="animate-spin" />Signing In...</> : <><LogIn size={18} />Sign In</>}</button>
+          <button type="submit" disabled={loading} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3.5 text-sm disabled:cursor-not-allowed disabled:opacity-70">{loading ? <><LoaderCircle size={18} className="animate-spin" />Signing In...</> : "Sign In"}</button>
         </form>
 
         <p className="mt-5 flex items-center justify-center gap-2 border-t border-slate-100 pt-5 text-center text-xs text-slate-500"><ShieldCheck size={15} className="text-blue-600" />Authorized Super Admin access only</p>
