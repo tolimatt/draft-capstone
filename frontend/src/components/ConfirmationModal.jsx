@@ -53,10 +53,10 @@ export default function ConfirmationModal({ title, message, confirmLabel = "Conf
         <div className="flex min-h-full items-center justify-center p-4" onClick={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
           <div className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_25px_80px_rgba(15,23,42,0.25)]">
             <div className="border-b border-slate-200 bg-gradient-to-r from-[#0B75E7]/10 via-white to-white px-6 pb-4 pt-5 sm:px-7">
-              <button type="button" onClick={dismiss} disabled={busy} aria-label="Close confirmation" className="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 disabled:opacity-50">
+              <button type="button" onClick={dismiss} disabled={busy} aria-label="Close confirmation" className="absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 disabled:opacity-50">
                 <X size={16} aria-hidden="true" />
               </button>
-              <div className="flex items-center gap-3 pr-7">
+              <div className="flex items-center gap-3 pr-10">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-slate-200">
                   <Icon size={20} className="text-[#0B75E7]" aria-hidden="true" />
                 </div>

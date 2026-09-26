@@ -23,3 +23,9 @@ export const disconnectSocket = () => {
   socketInstance = null;
 };
 
+export const reconnectSocket = () => {
+  if (!socketInstance) return;
+  socketInstance.disconnect();
+  socketInstance.connect();
+};
+

@@ -36,6 +36,8 @@ const CONVERSATIONAL_INTENTS = new Set([
   "chat_greeting",
   "chat_wellbeing",
   "chat_identity",
+  "chat_gender_identity",
+  "chat_language_support",
   "chat_gratitude",
   "chat_acknowledgement",
   "chat_goodbye",
@@ -233,7 +235,7 @@ function normalizeVehicleEntities(value) {
   if (typeof value !== "object" || Array.isArray(value)) {
     return { valid: false, value: { brand: null, model: null } };
   }
-  const allowedKeys = new Set(["brand", "model"]);
+  const allowedKeys = new Set(["brand", "model", "category", "max_budget", "currency", "rate_unit", "transmission"]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
     return { valid: false, value: { brand: null, model: null } };
   }
@@ -242,8 +244,69 @@ function normalizeVehicleEntities(value) {
   const brand = rawBrand ? VEHICLE_BRAND_BY_NORMALIZED.get(normalizeText(rawBrand)) : null;
   const rawModel = cleanText(value.model);
   const model = rawModel && rawModel.length <= 80 ? rawModel : null;
-  const valid = (!rawBrand || Boolean(brand)) && (!rawModel || Boolean(model));
-  return { valid, value: { brand: brand || null, model } };
+  const category = value.category == null ? null : cleanText(value.category).toLowerCase();
+  const maxBudget = value.max_budget == null ? null : Number(value.max_budget);
+  const currency = value.currency == null ? null : cleanText(value.currency).toUpperCase();
+  const rateUnit = value.rate_unit == null ? null : cleanText(value.rate_unit).toLowerCase();
+  const transmission = value.transmission == null ? null : cleanText(value.transmission).toLowerCase();
+  const valid = (!rawBrand || Boolean(brand)) && (!rawModel || Boolean(model))
+    && (category === null || ["sedan", "suv", "van", "pickup", "motorcycle"].includes(category))
+    && (maxBudget === null || (Number.isFinite(maxBudget) && maxBudget > 0 && maxBudget <= 10000000))
+    && (currency === null || currency === "PHP")
+    && (rateUnit === null || ["day", "hour"].includes(rateUnit))
+    && (transmission === null || ["automatic", "manual"].includes(transmission))
+    && (maxBudget === null || currency === "PHP");
+  const normalized = { brand: brand || null, model };
+  if (category !== null) normalized.category = category;
+  if (maxBudget !== null) normalized.max_budget = maxBudget;
+  if (currency !== null) normalized.currency = currency;
+  if (rateUnit !== null) normalized.rate_unit = rateUnit;
+  if (transmission !== null) normalized.transmission = transmission;
+  return { valid, value: normalized };
+}
+
+export function normalizePendingVehicleSearch(value) {
+  const normalized = normalizeVehicleEntities(value);
+  if (!normalized.valid || !value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entities = normalized.value;
+  if (!entities.max_budget || entities.currency !== "PHP" || (!entities.brand && !entities.category)
+    || entities.rate_unit) return null;
+  return {
+    brand: entities.brand,
+    model: entities.model,
+    ...(entities.category ? { category: entities.category } : {}),
+    max_budget: entities.max_budget,
+    currency: "PHP",
+    ...(entities.transmission ? { transmission: entities.transmission } : {}),
+  };
+}
+
+function normalizeConditions(value) {
+  if (value == null) return { valid: true, value: {} };
+  if (typeof value !== "object" || Array.isArray(value)) return { valid: false, value: {} };
+  const booleanKeys = new Set(["remaining_balance", "payment_after_due_date"]);
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "downpayment_percent") {
+      if (!Number.isInteger(item) || item < 1 || item > 100) return { valid: false, value: {} };
+    } else if (!booleanKeys.has(key) || item !== true) {
+      return { valid: false, value: {} };
+    }
+    result[key] = item;
+  }
+  return { valid: true, value: result };
+}
+
+function normalizeClarification(value, required) {
+  if (value == null) return { valid: true, value: { required, type: null, field: null } };
+  if (typeof value !== "object" || Array.isArray(value)) return { valid: false, value: null };
+  if (Object.keys(value).some((key) => !["required", "type", "field"].includes(key))) return { valid: false, value: null };
+  const type = value.type ?? null;
+  const field = value.field ?? null;
+  const valid = value.required === required
+    && (type === null || ["missing_entity", "ambiguous_entity", "ambiguous_intent", "unknown_intent", "spelling_confirmation"].includes(type))
+    && (field === null || ["rate_unit", "booking", "brand", "model"].includes(field));
+  return { valid, value: { required, type, field } };
 }
 
 function hasSignalSlots(slots = {}) {
@@ -347,6 +410,11 @@ function normalizeVehicleForChatbot(vehicle = {}) {
   const specs = vehicle.specs || {};
   const images = Array.isArray(vehicle.images) ? vehicle.images : [];
   const hourlyRate = resolveVehicleHourlyRate(vehicle);
+  const listedRate = toNonNegativeNumber(vehicle.dailyRentalRate);
+  const pricingUnit = vehicle.pricingUnit === "daily" ? "daily" : "hourly";
+  const dailyRate = listedRate !== null && pricingUnit === "daily"
+    ? roundCurrency(listedRate)
+    : roundCurrency(hourlyRate * 24);
   const name = cleanText(vehicle.name) || "Unnamed vehicle";
   const identity = deriveVehicleIdentity(vehicle, name);
   return {
@@ -357,8 +425,9 @@ function normalizeVehicleForChatbot(vehicle = {}) {
     type: normalizeVehicleType(vehicle.type || specs.type || specs.subType || ""),
     transmission: normalizeTransmission(vehicle.transmission || specs.transmission || ""),
     seats: Number(vehicle.seats || specs.seats || 0) || 0,
-    dailyRate: hourlyRate,
+    dailyRate,
     hourlyRate,
+    pricingUnit,
     isAvailable: vehicle.isAvailable ?? vehicle.availabilityStatus === "available",
     location: cleanText(vehicle.location),
     imageUrl: cleanText(vehicle.imageUrl || images[0] || ""),
@@ -403,7 +472,7 @@ function isUniqueOneEditMatch(leftValue, rightValue) {
 function resolveRequestedModelFromLiveVehicles(model, brand, vehicles) {
   const original = cleanText(model);
   const requested = normalizeText(original);
-  if (!requested) return "";
+  if (!requested) return { model: "", candidates: [] };
 
   const brandVehicles = brand
     ? vehicles.filter((vehicle) => vehicle.brand === brand)
@@ -412,10 +481,10 @@ function resolveRequestedModelFromLiveVehicles(model, brand, vehicles) {
     const searchable = normalizeText(`${vehicle.model} ${vehicle.name}`);
     return ` ${searchable} `.includes(` ${requested} `);
   });
-  if (exactMatch) return original;
+  if (exactMatch) return { model: original, candidates: [] };
 
   const requestedTokens = requested.split(/\s+/u).filter(Boolean);
-  if (requestedTokens.length !== 1 || requested.length < 4) return original;
+  if (requestedTokens.length !== 1 || requested.length < 4) return { model: original, candidates: [] };
 
   const matches = new Map();
   for (const vehicle of brandVehicles) {
@@ -425,17 +494,20 @@ function resolveRequestedModelFromLiveVehicles(model, brand, vehicles) {
       matches.set(normalizedCandidate, candidate);
     }
   }
-  return matches.size === 1 ? [...matches.values()][0] : original;
+  const candidates = [...matches.values()].sort((left, right) => left.localeCompare(right, "en"));
+  return { model: candidates.length === 1 ? candidates[0] : original,
+    candidates: candidates.length > 1 ? candidates : [] };
 }
 
 function compareVehicles(a, b, slots) {
+  const rateField = slots.rateUnit === "day" ? "dailyRate" : "hourlyRate";
   const comparisons = [
     slots.brand ? Number(b.brand === slots.brand) - Number(a.brand === slots.brand) : 0,
     slots.model ? Number(normalizeText(b.model) === normalizeText(slots.model)) - Number(normalizeText(a.model) === normalizeText(slots.model)) : 0,
     slots.type ? Number(b.type === slots.type) - Number(a.type === slots.type) : 0,
     slots.transmission ? Number(b.transmission === slots.transmission) - Number(a.transmission === slots.transmission) : 0,
     slots.pax ? Math.abs(a.seats - slots.pax) - Math.abs(b.seats - slots.pax) : 0,
-    a.hourlyRate - b.hourlyRate,
+    a[rateField] - b[rateField],
     a.name.localeCompare(b.name, "en", { sensitivity: "base" }),
     a._id.localeCompare(b._id),
   ];
@@ -446,9 +518,10 @@ function filterVehiclesForChatbot(vehicles, slots) {
   const normalized = (Array.isArray(vehicles) ? vehicles : [])
     .map((vehicle) => normalizeVehicleForChatbot(vehicle))
     .filter((vehicle) => vehicle.isAvailable);
+  const modelResolution = resolveRequestedModelFromLiveVehicles(slots.model, slots.brand, normalized);
   const resolvedSlots = {
     ...slots,
-    model: resolveRequestedModelFromLiveVehicles(slots.model, slots.brand, normalized),
+    model: modelResolution.model,
   };
   const strict = normalized.filter((vehicle) => {
     if (resolvedSlots.brand && vehicle.brand !== resolvedSlots.brand) return false;
@@ -460,13 +533,14 @@ function filterVehiclesForChatbot(vehicles, slots) {
     if (resolvedSlots.type && vehicle.type !== resolvedSlots.type) return false;
     if (resolvedSlots.transmission && vehicle.transmission !== resolvedSlots.transmission) return false;
     if (resolvedSlots.pax && vehicle.seats < resolvedSlots.pax) return false;
-    if (resolvedSlots.budget && vehicle.hourlyRate > resolvedSlots.budget) return false;
+    if (resolvedSlots.budget && vehicle[resolvedSlots.rateUnit === "day" ? "dailyRate" : "hourlyRate"] > resolvedSlots.budget) return false;
     return true;
   });
   const chosen = strict.length || !hasSignalSlots(resolvedSlots) ? (strict.length ? strict : normalized) : [];
   return {
     slots: resolvedSlots,
     vehicles: chosen.sort((a, b) => compareVehicles(a, b, resolvedSlots)),
+    modelCandidates: modelResolution.candidates,
   };
 }
 
@@ -527,11 +601,13 @@ function buildBrandSearchReply(intent, language, payload, recommendations) {
   }
 
   if (intent === "rental_rate") {
-    const lowestRate = recommendations[0].hourlyRate;
+    const requestedUnit = payload.slots.rateUnit === "day" ? "day" : "hour";
+    const lowestRate = recommendations[0][requestedUnit === "day" ? "dailyRate" : "hourlyRate"];
     const formattedRate = Number(lowestRate || 0).toLocaleString("en-PH", { maximumFractionDigits: 2 });
-    if (selectedLanguage === "filipino") return `May nakita akong ${total} kasalukuyang listahan ng ${label}. Nagsisimula sa PHP ${formattedRate} bawat oras ang nakasaad na singil; nakadepende pa rin sa iskedyul at mga detalye ng booking ang eksaktong kabuuan.`;
-    if (selectedLanguage === "taglish") return `May nakita akong ${total} current ${label} listing${total === 1 ? "" : "s"}. The shown rate starts at PHP ${formattedRate} per hour; the exact total still depends on the schedule and booking details.`;
-    return `I found ${total} current ${label} listing${total === 1 ? "" : "s"}. The shown rate starts at PHP ${formattedRate} per hour; the exact total still depends on the schedule and booking details.`;
+    const unitLabel = requestedUnit === "day" ? "day" : "hour";
+    if (selectedLanguage === "filipino") return `May nakita akong ${total} kasalukuyang listahan ng ${label}. Nagsisimula sa PHP ${formattedRate} bawat ${requestedUnit === "day" ? "araw" : "oras"} ang rate; nakadepende pa rin sa iskedyul at mga detalye ng booking ang eksaktong kabuuan.`;
+    if (selectedLanguage === "taglish") return `May nakita akong ${total} current ${label} listing${total === 1 ? "" : "s"}. The rate starts at PHP ${formattedRate} per ${unitLabel}; the exact total still depends on the schedule and booking details.`;
+    return `I found ${total} current ${label} listing${total === 1 ? "" : "s"}. The rate starts at PHP ${formattedRate} per ${unitLabel}; the exact total still depends on the schedule and booking details.`;
   }
 
   if (selectedLanguage === "filipino") return `May nakita akong ${total} kasalukuyang listahan ng ${label} sa RentifyPro. Mga katugmang listahan pa lamang ito; ibigay ang petsa at oras ng pagkuha at pagbabalik upang makumpirma kung maaari itong rentahan sa iskedyul mo.`;
@@ -548,6 +624,16 @@ function buildRecommendationReply(intent, language, payload, recommendations) {
     if (selectedLanguage === "filipino") return "Wala akong mahanap na available na sasakyan na tugma sa request mo. Subukang baguhin ang passengers, budget, transmission, o uri ng sasakyan.";
     if (selectedLanguage === "taglish") return "Wala akong mahanap na available na sasakyan na match sa request mo. Try adjusting the passengers, budget, transmission, or vehicle type.";
     return "I couldn't find an available vehicle that matches your request. Try adjusting the passengers, budget, transmission, or vehicle type.";
+  }
+  if (intent === "available_vehicles" && payload.slots.budget && payload.slots.rateUnit) {
+    const unit = payload.slots.rateUnit;
+    const amount = Number(payload.slots.budget).toLocaleString("en-PH", { maximumFractionDigits: 2 });
+    const criteria = [payload.slots.brand, payload.slots.model,
+      payload.slots.type ? mapVehicleTypeLabel(payload.slots.type, selectedLanguage) : ""].filter(Boolean).join(" ");
+    const matching = criteria ? ` matching ${criteria}` : "";
+    if (selectedLanguage === "filipino") return `May ${payload.vehicles.length} kasalukuyang listing${matching} na hindi lalampas sa PHP ${amount} bawat ${unit === "day" ? "araw" : "oras"}. Ibigay ang pickup at return schedule para ma-check ang availability sa mga petsa mo.`;
+    if (selectedLanguage === "taglish") return `May ${payload.vehicles.length} current listing${payload.vehicles.length === 1 ? "" : "s"}${matching} under PHP ${amount} per ${unit}. Provide your pickup and return schedule to check availability for your dates.`;
+    return `I found ${payload.vehicles.length} current listing${payload.vehicles.length === 1 ? "" : "s"}${matching} under PHP ${amount} per ${unit}. Provide your pickup and return schedule to check availability for your dates.`;
   }
   if (intent !== "available_vehicles") {
     const base = getCanonicalAnswer(intent, selectedLanguage);
@@ -589,9 +675,15 @@ export function buildChatbotPayload(message, language, vehicles = [], entities =
   const originalMessage = cleanText(message);
   const selectedLanguage = resolveSelectedLanguage(language, originalMessage);
   const normalizedEntities = normalizeVehicleEntities(entities);
+  const extracted = extractSlots(originalMessage);
+  const classifierEntities = normalizedEntities.valid ? normalizedEntities.value : { brand: null, model: null };
   const initialSlots = {
-    ...extractSlots(originalMessage),
-    ...(normalizedEntities.valid ? normalizedEntities.value : { brand: null, model: null }),
+    ...extracted,
+    ...classifierEntities,
+    type: classifierEntities.category || extracted.type,
+    budget: Object.hasOwn(classifierEntities, "max_budget") ? classifierEntities.max_budget : entities ? null : extracted.budget,
+    rateUnit: classifierEntities.rate_unit || null,
+    transmission: classifierEntities.transmission || extracted.transmission,
   };
   const liveVehiclePayload = filterVehiclesForChatbot(vehicles, initialSlots);
   return {
@@ -600,6 +692,7 @@ export function buildChatbotPayload(message, language, vehicles = [], entities =
     normalizedMessage: normalizeText(originalMessage),
     slots: liveVehiclePayload.slots,
     vehicles: liveVehiclePayload.vehicles,
+    modelCandidates: liveVehiclePayload.modelCandidates,
   };
 }
 
@@ -617,10 +710,13 @@ export function normalizeChatbotResponse(response, fallbackLanguage = DEFAULT_LA
   const alternatives = rawAlternatives.map(normalizeAlternative);
   const alternativesValid = alternatives.every(Boolean);
   const normalizedEntities = normalizeVehicleEntities(response.entities);
+  const normalizedConditions = normalizeConditions(response.conditions);
+  const clarification = normalizeClarification(response.clarification, Boolean(response.requires_clarification));
   const intentValid = intent === "REJECT" || Boolean(getIntent(intent));
   const scoreValid = Number.isFinite(score) && score >= 0 && score <= 1;
   const languageValid = SUPPORTED_REPLY_STYLES.has(language);
-  const valid = intentValid && scoreValid && languageValid && alternativesValid && normalizedEntities.valid;
+  const valid = intentValid && scoreValid && languageValid && alternativesValid
+    && normalizedEntities.valid && normalizedConditions.valid && clarification.valid;
   return {
     ...response,
     valid,
@@ -637,6 +733,8 @@ export function normalizeChatbotResponse(response, fallbackLanguage = DEFAULT_LA
     requires_clarification: Boolean(response.requires_clarification),
     reason_code: cleanText(response.reason_code || response.decision_reason),
     entities: normalizedEntities.value,
+    conditions: normalizedConditions.value,
+    clarification: clarification.value,
   };
 }
 
@@ -656,12 +754,17 @@ export function buildRejectedChatbotResponse(language, reason = "fallback", repl
     requires_clarification: reason === "clarification",
     reason_code: reason,
     entities: { brand: null, model: null },
+    conditions: {},
+    clarification: { required: reason === "clarification", type: reason === "clarification" ? "unknown_intent" : null, field: null },
   };
 }
 
 export function applyChatbotGuardrails(response, payload) {
   const normalized = normalizeChatbotResponse(response, payload.selectedLanguage);
   if (!normalized.valid) return buildRejectedChatbotResponse(payload.selectedLanguage, "malformed_classifier");
+  if (normalized.intent !== "REJECT" && normalized.clarification?.type === "missing_entity") {
+    return { ...normalized, reply: normalized.reply, recommendations: [], requires_live_data: false };
+  }
   if (normalized.intent === "REJECT" || normalized.requires_clarification) {
     const rejected = buildRejectedChatbotResponse(
       LANGUAGE_NAME_BY_CODE[normalized.language] || payload.selectedLanguage,
@@ -676,11 +779,26 @@ export function applyChatbotGuardrails(response, payload) {
       top_preds: normalized.top_preds,
       reason_code: normalized.reason_code || rejected.reason_code,
       entities: normalized.entities,
+      conditions: normalized.conditions,
+      clarification: normalized.clarification,
     };
   }
 
   const datasetIntent = getIntent(normalized.intent);
   const selectedLanguage = LANGUAGE_NAME_BY_CODE[normalized.language] || payload.selectedLanguage;
+  if ((RECOMMENDATION_INTENTS.has(normalized.intent) || normalized.intent === "rental_rate")
+    && payload.modelCandidates?.length > 1) {
+    const models = joinNaturalList(payload.modelCandidates, selectedLanguage);
+    const questions = {
+      english: `I found similar current models: ${models}. Which model did you mean?`,
+      filipino: `May magkahawig na kasalukuyang modelo: ${models}. Aling modelo ang tinutukoy mo?`,
+      taglish: `May similar current models: ${models}. Which model did you mean?`,
+    };
+    return { ...normalized, reply: questions[selectedLanguage], recommendations: [],
+      requires_clarification: true,
+      clarification: { required: true, type: "ambiguous_entity", field: "model" },
+      requires_live_data: false };
+  }
   const canonicalReply = getCanonicalAnswer(normalized.intent, selectedLanguage);
   let reply = CONVERSATIONAL_INTENTS.has(normalized.intent) ? normalized.reply || canonicalReply : canonicalReply || normalized.reply;
   let recommendations = [];
@@ -688,10 +806,25 @@ export function applyChatbotGuardrails(response, payload) {
     recommendations = payload.vehicles.slice(0, TOP_RECOMMENDATIONS);
     reply = buildRecommendationReply(normalized.intent, selectedLanguage, payload, recommendations);
   }
+  if (["payment_downpayment", "unpaid_balance"].includes(normalized.intent)
+    && normalized.conditions?.payment_after_due_date) {
+    const mentionsDownpayment = normalized.intent === "payment_downpayment"
+      && normalized.conditions?.downpayment_percent === 30;
+    const dueReplies = {
+      english: `${mentionsDownpayment ? "You can choose the 30% down payment when that booking offers it. " : ""}The remaining balance becomes due when the vehicle is returned or its scheduled return time passes. Paying after that leaves a due balance, which can block another booking until settled. Check your booking's payment details for the amount and status; I can't confirm your specific balance here.`,
+      filipino: `${mentionsDownpayment ? "Puwede ang 30% down payment kung available ito sa booking mo. " : ""}Nagiging due ang natitirang balanse kapag naibalik ang sasakyan o lumampas ang nakatakdang oras ng pagbabalik. Kung babayaran ito pagkatapos noon, may due balance na maaaring humarang sa panibagong booking hanggang mabayaran. Tingnan ang payment details ng booking mo para sa eksaktong halaga at status.`,
+      taglish: `${mentionsDownpayment ? "Puwede ang 30% down payment kung offered sa booking mo. " : ""}Due ang remaining balance kapag naibalik ang vehicle o lumampas ang scheduled return time. Paying after that leaves a due balance that can block another booking until settled. Check your booking payment details for the exact amount and status.`,
+    };
+    reply = dueReplies[selectedLanguage];
+  }
   return {
     ...normalized,
     reply,
-    recommendations,
+    recommendations: recommendations.map((vehicle) => ({
+      ...vehicle,
+      displayRate: payload.slots.rateUnit === "day" ? vehicle.dailyRate : vehicle.hourlyRate,
+      displayRateUnit: payload.slots.rateUnit === "day" ? "day" : "hour",
+    })),
     entities: {
       ...normalized.entities,
       model: payload.slots.model || normalized.entities?.model || null,

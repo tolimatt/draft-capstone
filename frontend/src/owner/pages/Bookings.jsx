@@ -9,6 +9,7 @@ import ReportIssueModal from "../../components/ReportIssueModal";
 import ModalPortal from "../../components/ModalPortal";
 import OwnerPageHeader from "../components/OwnerPageHeader";
 import RequestFeedback from "../../components/RequestFeedback";
+import { BookingListSkeleton } from "../../components/LoadingSkeletons";
 import { bookingStatusLabel, bookingGuidance } from "../../utils/workflowStatus";
 
 const statusFilters = [
@@ -376,7 +377,8 @@ export default function Bookings() {
         ))}
       </div>
 
-      <RequestFeedback loading={loading || refreshing} label={refreshing ? "Refreshing bookings..." : "Loading bookings..."} error={error} onRetry={() => loadBookings({ background: bookings.length > 0 })} />
+      <RequestFeedback loading={refreshing} label="Refreshing bookings..." error={error} onRetry={() => loadBookings({ background: bookings.length > 0 })} />
+      {loading && <BookingListSkeleton />}
       {reportNotice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{reportNotice}</p>}
       {!loading && !error && !filteredBookings.length && (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">

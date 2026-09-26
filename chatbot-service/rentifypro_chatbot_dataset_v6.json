@@ -134,6 +134,66 @@
       "fallback_only": false
     },
     {
+      "id": "chat_gender_identity",
+      "description": "Answers questions about the assistant's own gender or sexual orientation and explains femboy as gender expression.",
+      "aliases": [],
+      "examples": [
+        "are you female",
+        "are you male",
+        "do you have a gender",
+        "what gender are you",
+        "what is your sexual orientation",
+        "are you straight",
+        "girl ka ba",
+        "boy ka ba",
+        "ikaw ba ay babae",
+        "ikaw ba ay lalaki",
+        "anong kasarian mo",
+        "may gender ka ba",
+        "tomboy ka ba",
+        "are you a femboy",
+        "femboy ka ba",
+        "ikaw ba ay femboy",
+        "what is a femboy",
+        "is femboy a sexual orientation",
+        "ano ang femboy",
+        "bading ka ba",
+        "beki ka ba",
+        "tibo ka ba",
+        "lesbiyana ka ba",
+        "silahis ka ba",
+        "bading ba si Rentify AI"
+      ],
+      "hard_negatives": [
+        "can a gay renter book a car",
+        "can a woman rent a vehicle",
+        "is the driver a woman",
+        "do you have a female driver",
+        "bading ba si owner",
+        "tomboy ba ang driver",
+        "can a femboy rent a car",
+        "femboy ba ang driver"
+      ],
+      "clarification": {},
+      "requires_live_data": false,
+      "live_source": "",
+      "policy_source": "assistant identity",
+      "reviewed_at": "2026-09-25",
+      "priority": 30,
+      "responses": {
+        "en": [
+          "I'm an AI assistant, so I don't have a gender or sexual orientation. I'm Rentify AI, and I can help with RentifyPro rentals and bookings."
+        ],
+        "fil": [
+          "AI assistant ako, kaya wala akong kasarian o seksuwal na oryentasyon. Ako si Rentify AI, at matutulungan kita sa mga tanong tungkol sa renta at booking."
+        ],
+        "taglish": [
+          "AI assistant ako, so wala akong gender or sexual orientation. I'm Rentify AI, and I can help with rentals and bookings."
+        ]
+      },
+      "fallback_only": false
+    },
+    {
       "id": "chat_language_support",
       "description": "Explains which languages Rentify AI can understand and use in its replies.",
       "aliases": [
@@ -1089,6 +1149,43 @@
       "fallback_only": false
     },
     {
+      "id": "booking_pickup_time",
+      "description": "Explains that the pickup time is set by the selected booking schedule.",
+      "examples": [
+        "what is the scheduled pickup time for a booking",
+        "when can I pick up the vehicle",
+        "what is my pickup time",
+        "anong oras pickup",
+        "anong oras ang pagkuha sa booking ko",
+        "pickup schedule ko",
+        "when is pickup",
+        "kailan nakatakda ang pagkuha sa booking"
+      ],
+      "aliases": ["pickup time", "pickup schedule", "oras ng pickup"],
+      "hard_negatives": [
+        "can I rent today",
+        "what time do I return the vehicle",
+        "can I extend my booking",
+        "what vehicles are available"
+      ],
+      "responses": {
+        "en": ["Your pickup time is the time scheduled on your booking. Check the booking details, or tell me which booking or vehicle you mean."],
+        "fil": ["Ang oras ng pagkuha ay ang nakatakdang oras sa booking mo. Tingnan ang detalye ng booking o sabihin kung aling booking o sasakyan ang tinutukoy mo."],
+        "taglish": ["Your pickup time is in your booking schedule. Check the booking details or sabihin kung aling booking or vehicle ang tinutukoy mo."]
+      },
+      "clarification": {
+        "en": "Which booking or vehicle do you mean? Pickup time is set in that booking's schedule.",
+        "fil": "Aling booking o sasakyan ang tinutukoy mo? Nasa iskedyul ng booking ang oras ng pagkuha.",
+        "taglish": "Which booking or vehicle do you mean? Nasa booking schedule ang pickup time."
+      },
+      "requires_live_data": true,
+      "live_source": "Authenticated GET /api/bookings/me",
+      "policy_source": "backend/models/Booking.js pickupAt",
+      "reviewed_at": "2026-09-24",
+      "priority": 40,
+      "fallback_only": false
+    },
+    {
       "id": "how_to_book",
       "examples": [
         "how do I book",
@@ -1301,6 +1398,8 @@
         "status ng booking",
         "check my booking",
         "pending booking",
+        "do I have a pending booking",
+        "may pending booking ba ako",
         "confirmed booking",
         "active booking",
         "completed booking",
@@ -1339,6 +1438,101 @@
       "policy_source": "backend/models/Booking.js",
       "reviewed_at": "2026-09-21",
       "priority": 35,
+      "fallback_only": false
+    },
+    {
+      "id": "my_active_bookings",
+      "description": "Checks whether the authenticated renter has confirmed or extended bookings.",
+      "examples": [
+        "do I have an active booking",
+        "show my active bookings",
+        "is there a current booking on my account",
+        "may active booking ba ako",
+        "may booking pa ba ako",
+        "meron ba akong kasalukuyang renta"
+      ],
+      "aliases": [],
+      "hard_negatives": [
+        "how many active bookings can I have",
+        "can my bookings overlap",
+        "what vehicles are available"
+      ],
+      "responses": {
+        "en": ["I can check your current bookings after verifying your renter session."],
+        "fil": ["Mache-check ko ang kasalukuyan mong bookings kapag na-verify ang renter session mo."],
+        "taglish": ["I can check your current bookings after ma-verify ang renter session mo."]
+      },
+      "clarification": {},
+      "requires_live_data": true,
+      "live_source": "Authenticated renter-scoped Booking records",
+      "policy_source": "backend/services/bookingEligibility.service.js",
+      "reviewed_at": "2026-09-25",
+      "priority": 45,
+      "fallback_only": false
+    },
+    {
+      "id": "my_overdue_return",
+      "description": "Checks the authenticated renter's current overdue vehicle returns and late-return balance status.",
+      "examples": [
+        "am I overdue for returning a vehicle",
+        "is my booking overdue for return",
+        "am I late returning my car",
+        "do I have a late return right now",
+        "are any of my rentals overdue",
+        "overdue na ba ang return ko",
+        "late na ba ang balik ko",
+        "may late return ba ako",
+        "nahuli ba ako sa pagsoli ng sasakyan"
+      ],
+      "aliases": [],
+      "hard_negatives": [
+        "what is the late return fee",
+        "how does the grace period work",
+        "can I extend my booking"
+      ],
+      "responses": {
+        "en": ["I can check your return status after verifying your renter session."],
+        "fil": ["Mache-check ko ang return status mo kapag na-verify ang renter session mo."],
+        "taglish": ["I can check your return status after ma-verify ang renter session mo."]
+      },
+      "clarification": {},
+      "requires_live_data": true,
+      "live_source": "Authenticated renter-scoped Booking records",
+      "policy_source": "backend/services/bookingEligibility.service.js",
+      "reviewed_at": "2026-09-25",
+      "priority": 45,
+      "fallback_only": false
+    },
+    {
+      "id": "my_unpaid_balance",
+      "description": "Checks due and not-yet-due balances on the authenticated renter's bookings.",
+      "examples": [
+        "do I have an unpaid balance",
+        "is there an overdue balance on my booking",
+        "do I have an overdue payment",
+        "how much do I still owe on my booking",
+        "do I still owe anything",
+        "may unpaid balance ba ako",
+        "may balance pa ba ako",
+        "magkano pa ang balance ko"
+      ],
+      "aliases": [],
+      "hard_negatives": [
+        "can I book with an unpaid balance",
+        "what happens if I do not pay the balance",
+        "can I pay the remaining balance in person"
+      ],
+      "responses": {
+        "en": ["I can check balances recorded on your bookings after verifying your renter session."],
+        "fil": ["Mache-check ko ang balance sa bookings mo kapag na-verify ang renter session mo."],
+        "taglish": ["I can check your booking balances after ma-verify ang renter session mo."]
+      },
+      "clarification": {},
+      "requires_live_data": true,
+      "live_source": "Authenticated renter-scoped Booking records",
+      "policy_source": "backend/services/bookingEligibility.service.js and backend/utils/bookingPayment.js",
+      "reviewed_at": "2026-09-25",
+      "priority": 45,
       "fallback_only": false
     },
     {

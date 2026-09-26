@@ -4,6 +4,7 @@ import API from "../../utils/api";
 import { formatDisplayName } from "../../utils/dateUtils";
 import { resolveAssetUrl } from "../../utils/media";
 import OwnerPageHeader from "../components/OwnerPageHeader";
+import { ActivityListSkeleton } from "../../components/LoadingSkeletons";
 
 const getRenterProfile = (renter) => {
   const name = formatDisplayName(renter?.name || "", "");
@@ -90,6 +91,8 @@ export default function Reviews() {
           <p className="text-sm text-gray-500">{filtered.length} review(s)</p>
         </div>
       )}
+
+      {loading && <ActivityListSkeleton label="Loading reviews" />}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

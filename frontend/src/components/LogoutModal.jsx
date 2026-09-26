@@ -14,12 +14,12 @@ export default function LogoutModal({ isOpen, onCancel, onConfirm }) {
         <div className="px-6 pt-5 pb-4 sm:px-7 border-b border-slate-200 bg-gradient-to-r from-[#0B75E7]/10 via-white to-white">
           <button
             onClick={onCancel}
-            className="absolute top-4 right-4 inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+            className="absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
             aria-label="Close"
           >
             <X size={16} />
           </button>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 pr-10">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-slate-200">
               <LogOut size={20} className="text-[#0B75E7]" />
             </div>

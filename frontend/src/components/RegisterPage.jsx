@@ -1003,7 +1003,7 @@ function RegisterForm({
               : "border-slate-200 hover:border-slate-300 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"
           } ${disabled ? "cursor-not-allowed bg-slate-100 text-slate-500" : ""}`}
         >
-          <option value="">{placeholder}</option>
+          <option value="" disabled hidden>{placeholder}</option>
           {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -1086,7 +1086,7 @@ function RegisterForm({
                             {accountType === "user" && <Check size={16} strokeWidth={2} aria-hidden="true" />}
                           </div>
                           <User size={18} className="text-gray-600" />
-                          <div className="min-w-0 text-left"><p className="font-semibold text-gray-800 text-sm">User</p><p className="text-xs text-gray-500">Rent vehicles</p></div>
+                          <div className="min-w-0 text-left"><p className="font-semibold text-gray-800 text-sm">Renter</p><p className="text-xs text-gray-500">Rent vehicles</p></div>
                         </button>
                         <button type="button" onClick={() => handleAccountSelect("owner")}
                           className="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 hover:border-[#017FE6] transition">

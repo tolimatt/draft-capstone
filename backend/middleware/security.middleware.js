@@ -218,11 +218,22 @@ export const kycLimiter = createLimiter({
   keyGenerator: keyByUserOrIp,
 });
 
-// Pre-registration KYC limit
+// Keep session creation separate from document and selfie attempts so a retry
+// does not consume the owner's session-creation budget.
 export const preKycLimiter = createLimiter({
   max: 15,
-  messagePrefix: "Too many verification attempts.",
-  skipCondition: skipForSignedIn,
+  messagePrefix: "Too many verification sessions.",
+});
+
+export const preKycUploadIpLimiter = createLimiter({
+  max: 15,
+  messagePrefix: "Too many verification attempts from this network.",
+});
+
+export const preKycAttemptLimiter = createLimiter({
+  max: 12,
+  messagePrefix: "Too many verification attempts in this session.",
+  keyGenerator: (req) => `session:${req.preKyc.sessionId}`,
 });
 
 // Status reads are lightweight and poll only while a signed pre-KYC session is active.

@@ -19,6 +19,8 @@ import {
 import {
   kycLimiter,
   preKycLimiter,
+  preKycUploadIpLimiter,
+  preKycAttemptLimiter,
   preKycStatusLimiter,
 } from "../middleware/security.middleware.js";
 import { requirePreKycSession } from "../middleware/preKycSession.middleware.js";
@@ -41,9 +43,9 @@ router.get("/me", protect, getMyKyc);
 
 // Pre-registration KYC routes
 router.post("/pre/session", preKycLimiter, createPreKycSession);
-router.post("/pre/id-register", preKycLimiter, requirePreKycSession, preRegisterIdFace);
-router.post("/pre/selfie/verify", preKycLimiter, requirePreKycSession, preSelfieVerify);
-router.post("/pre/supporting-doc/verify", preKycLimiter, requirePreKycSession, preVerifySupportingDocument);
+router.post("/pre/id-register", preKycUploadIpLimiter, requirePreKycSession, preKycAttemptLimiter, preRegisterIdFace);
+router.post("/pre/selfie/verify", preKycUploadIpLimiter, requirePreKycSession, preKycAttemptLimiter, preSelfieVerify);
+router.post("/pre/supporting-doc/verify", preKycUploadIpLimiter, requirePreKycSession, preKycAttemptLimiter, preVerifySupportingDocument);
 router.get("/pre/status", preKycStatusLimiter, requirePreKycSession, getPreKycStatus);
 
 // Internal callback from the Python service

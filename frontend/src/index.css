@@ -946,8 +946,8 @@ select:not([multiple]):disabled {
   display: grid;
   grid-template-columns: 21rem minmax(0, 1fr);
   width: 100%;
-  height: clamp(36rem, calc(100vh - 14.5rem), 48rem);
-  min-height: 36rem;
+  height: clamp(18rem, calc(100dvh - 16.75rem), 48rem);
+  min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(217, 228, 243, 0.96);
   border-radius: 22px;
@@ -1201,14 +1201,14 @@ select:not([multiple]):disabled {
 }
 
 .rp-chat-back-button {
-  width: 2.4rem;
-  height: 2.4rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 12px;
   color: #475569;
 }
 
 .rp-chat-delete-button {
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   gap: 0.4rem;
   border-color: #ffe4e6;
   border-radius: 12px;
@@ -1520,8 +1520,8 @@ select:not([multiple]):disabled {
 
   .rp-chat-shell {
     display: flex;
-    height: calc(100dvh - 13.5rem);
-    min-height: 31rem;
+    height: max(14rem, calc(100dvh - 16rem));
+    min-height: 0;
   }
 
   .rp-chat-sidebar,
@@ -1544,7 +1544,7 @@ select:not([multiple]):disabled {
   }
 
   .rp-chat-delete-button {
-    width: 2.4rem;
+    width: 2.75rem;
     padding: 0;
   }
 }
@@ -1562,8 +1562,8 @@ select:not([multiple]):disabled {
 .owner-messages-shell {
   display: flex;
   width: 100%;
-  height: calc(100vh - 14.5rem);
-  min-height: 34rem;
+  height: max(18rem, calc(100dvh - 16rem));
+  min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(217, 228, 243, 0.96);
   border-radius: 22px;
@@ -1807,6 +1807,14 @@ select:not([multiple]):disabled {
 .owner-messages-send-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+@media (pointer: coarse) {
+  .rp-chat-search input,
+  .rp-chat-composer textarea,
+  .owner-messages-input {
+    font-size: 1rem;
+  }
 }
 
 .owner-renter-card {
@@ -2128,8 +2136,8 @@ select:not([multiple]):disabled {
 
 @media (max-width: 1023px) {
   .owner-messages-shell {
-    height: calc(100dvh - 13rem);
-    min-height: 30rem;
+    height: max(12rem, calc(100dvh - 13rem));
+    min-height: 0;
   }
 
   .owner-messages-renters {
@@ -2556,7 +2564,7 @@ select:not([multiple]):disabled {
 }
 
 .rp-quick-filters button {
-  min-height: 2.3rem;
+  min-height: 2.75rem;
   flex: 0 0 auto;
   border: 1px solid #dbe5f0;
   border-radius: 999px;
@@ -2657,6 +2665,39 @@ select:not([multiple]):disabled {
   .rp-market-grid {
     grid-template-columns: repeat(auto-fit, var(--rp-vehicle-card-desktop-width));
     justify-content: center;
+  }
+}
+
+@media (max-height: 600px) and (max-width: 1023px) {
+  .owner-messages-page-header {
+    margin-bottom: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .owner-messages-page-header .rp-owner-page-header__description,
+  .owner-messages-page-header .rp-owner-page-header__actions {
+    display: none;
+  }
+
+  .owner-messages-page-header h1 {
+    margin-top: 0.15rem;
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-height: 600px) and (max-width: 767px) {
+  .rp-chat-main {
+    padding-top: 5rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .rp-chat-page-header {
+    margin-bottom: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .rp-chat-shell {
+    height: max(11rem, calc(100dvh - 11.75rem));
   }
 }
 
@@ -2926,13 +2967,13 @@ select:not([multiple]):disabled {
   }
 
   .rp-featured-carousel {
-    grid-auto-columns: 88%;
-    margin-inline: calc(-1 * var(--rp-mobile-gutter));
-    padding: 1.5rem var(--rp-mobile-gutter) 3rem;
-    scroll-padding-inline: var(--rp-mobile-gutter);
+    grid-auto-columns: 100%;
+    margin-inline: 0;
+    padding: 1.5rem 0 3rem;
+    scroll-padding-inline: 0;
   }
 
-  /* Keep the next card visible as a swipe cue, even below the reveal threshold. */
+  /* A complete first card keeps the vehicle details readable on narrow phones. */
   .rp-renter-home .rp-featured-carousel > .rp-scroll-reveal {
     opacity: 1;
     transform: none;

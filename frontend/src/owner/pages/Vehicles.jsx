@@ -4,6 +4,7 @@ import API from "../../utils/api";
 import { isPhilippineLocation } from "../../utils/locationValidation";
 import VehicleCover from "../../components/VehicleCover";
 import VehicleCard from "../../components/VehicleCard";
+import { VehicleGridSkeleton } from "../../components/LoadingSkeletons";
 import "./Vehicles.css";
 import ModalPortal from "../../components/ModalPortal";
 import InfoModal from "../../components/InfoModal";
@@ -1355,6 +1356,7 @@ function Vehicles() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {loading && <VehicleGridSkeleton label="Loading your vehicles" className="rp-owner-vehicle-grid" managed />}
       {!loading && filteredVehicles.length === 0 && (
         <div className="bg-white border rounded-xl p-6 text-sm text-gray-600">
           No vehicles found.

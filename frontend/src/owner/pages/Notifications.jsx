@@ -6,6 +6,7 @@ import { getSocket } from "../../utils/socket";
 import { requestLiveCountersRefresh } from "../../utils/liveCounters";
 import ModalPortal from "../../components/ModalPortal";
 import OwnerPageHeader from "../components/OwnerPageHeader";
+import { ActivityListSkeleton } from "../../components/LoadingSkeletons";
 
 const formatDateTime = (value) =>
   value
@@ -227,6 +228,7 @@ export default function Notifications() {
       />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {loading && <ActivityListSkeleton label="Loading notifications" />}
       {!loading && !notifications.length && (
         <div className="bg-white border rounded-xl p-6 text-sm text-gray-600">
           {showArchived ? "No archived notifications." : "No notifications yet."}

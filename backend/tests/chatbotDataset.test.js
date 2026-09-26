@@ -9,6 +9,7 @@ import {
   buildChatbotPayload,
   getChatbotDatasetInfo,
   normalizeChatbotResponse,
+  normalizePendingVehicleSearch,
   validateChatbotInput,
 } from "../utils/chatbotPayload.js";
 
@@ -73,7 +74,7 @@ test("v6 contains unique intents with complete multilingual responses", () => {
     intentIds.add(item.id);
   }
 
-  for (const requiredIntent of ["booking_limits", "schedule_conflict", "late_return_policy", "unpaid_balance", "vehicle_brand_search"]) {
+  for (const requiredIntent of ["booking_limits", "schedule_conflict", "late_return_policy", "unpaid_balance", "vehicle_brand_search", "my_active_bookings", "my_overdue_return", "my_unpaid_balance"]) {
     assert.equal(intentIds.has(requiredIntent), true, `${requiredIntent} must be supported`);
   }
   assert.equal(intentIds.has("chat_capabilities"), false, "chat capabilities should be merged into help_request");
@@ -349,4 +350,94 @@ test("does not present unsupported insurance or fixed-deposit claims as guarante
   const deposit = datasetV6.items.find((item) => item.id === "security_deposit");
   assert.doesNotMatch(insurance.responses.en[0], /included in all|every rental is insured/i);
   assert.doesNotMatch(deposit.responses.en[0], /(?:PHP|₱)\s*1,?000/i);
+});
+
+test("uses a fixed listing snapshot for daily rates and daily budgets", () => {
+  const vehicles = [
+    { _id: "vios", name: "Toyota Vios", dailyRentalRate: 2400, pricingUnit: "daily", availabilityStatus: "available", specs: { type: "sedan", seats: 5, transmission: "Automatic" } },
+    { _id: "everest", name: "Ford Everest", dailyRentalRate: 1800, pricingUnit: "daily", availabilityStatus: "available", specs: { type: "suv", seats: 7, transmission: "Automatic" } },
+    { _id: "fortuner", name: "Toyota Fortuner", dailyRentalRate: 2500, pricingUnit: "daily", availabilityStatus: "available", specs: { type: "suv", seats: 7, transmission: "Automatic" } },
+    { _id: "hidden", name: "Honda SUV", dailyRentalRate: 1000, pricingUnit: "daily", availabilityStatus: "unavailable", specs: { type: "suv", seats: 7, transmission: "Automatic" } },
+  ];
+  const rateClassifier = { intent: "rental_rate", confidence: 0.995, language: "en", reply: "",
+    entities: { brand: "Toyota", model: "Vios", rate_unit: "day" }, conditions: {} };
+  const ratePayload = buildChatbotPayload("How much is a Toyota Vios per day?", "auto", vehicles, rateClassifier.entities);
+  const rate = applyChatbotGuardrails(rateClassifier, ratePayload);
+  assert.deepEqual(rate.recommendations.map((vehicle) => vehicle._id), ["vios"]);
+  assert.match(rate.reply, /PHP 2,400 per day/);
+  assert.equal(rate.recommendations[0].displayRate, 2400);
+  assert.equal(rate.recommendations[0].displayRateUnit, "day");
+
+  const searchClassifier = { intent: "available_vehicles", confidence: 0.995, language: "en", reply: "",
+    entities: { brand: null, model: null, category: "suv", max_budget: 2000, currency: "PHP", rate_unit: "day" } };
+  const payload = buildChatbotPayload("Are there SUVs under ₱2,000 per day?", "auto", vehicles, searchClassifier.entities);
+  const first = applyChatbotGuardrails(searchClassifier, payload);
+  const second = applyChatbotGuardrails(searchClassifier, payload);
+  assert.deepEqual(first.recommendations.map((vehicle) => vehicle._id), ["everest"]);
+  assert.deepEqual(first, second);
+  assert.match(first.reply, /PHP 2,000 per day/);
+  assert.doesNotMatch(first.reply, /Fortuner|Honda SUV/);
+});
+
+test("keeps known-intent clarifications and validates pending search context", () => {
+  const entities = { brand: null, model: null, category: "suv", max_budget: 2000, currency: "PHP" };
+  const classifier = { intent: "available_vehicles", confidence: 0.995, language: "en",
+    entities, reply: "Is your PHP 2,000 budget per day or per hour?", requires_clarification: true,
+    clarification: { required: true, type: "missing_entity", field: "rate_unit" } };
+  const response = applyChatbotGuardrails(classifier, buildChatbotPayload("SUV under ₱2,000", "auto", [], entities));
+  assert.equal(response.intent, "available_vehicles");
+  assert.equal(response.clarification.field, "rate_unit");
+  assert.match(response.reply, /per day or per hour/);
+  assert.deepEqual(normalizePendingVehicleSearch(entities), entities);
+  assert.equal(normalizePendingVehicleSearch({ ...entities, currency: "USD" }), null);
+  assert.equal(normalizePendingVehicleSearch({ ...entities, secret: "x" }), null);
+
+  const malformed = normalizeChatbotResponse({ intent: "available_vehicles", confidence: 0.9, language: "en",
+    entities: { ...entities, rate_unit: "week" } });
+  assert.equal(malformed.valid, false);
+  const invalidCondition = normalizeChatbotResponse({ intent: "payment_downpayment", confidence: 0.9,
+    language: "en", conditions: { payment_after_due_date: "yes" } });
+  assert.equal(invalidCondition.valid, false);
+});
+
+test("covers the 30 percent option and balance-due condition without account guesses", () => {
+  const conditions = { downpayment_percent: 30, remaining_balance: true, payment_after_due_date: true };
+  for (const language of ["en", "fil", "taglish"]) {
+    const classifier = { intent: "payment_downpayment", confidence: 0.995, language,
+      entities: { brand: null, model: null }, conditions, reply: "" };
+    const response = applyChatbotGuardrails(classifier,
+      buildChatbotPayload("Can I pay 30% now and the balance after the due date?", "auto"));
+    assert.equal(response.intent, "payment_downpayment");
+    assert.match(response.reply, /30%/);
+    assert.match(response.reply, /balance|balanse/i);
+    assert.match(response.reply, /return|pagbabalik|naibalik/i);
+    assert.doesNotMatch(response.reply, /your balance is PHP|paid your balance/i);
+  }
+  const standalone = applyChatbotGuardrails({ intent: "unpaid_balance", confidence: 0.94,
+    language: "en", conditions: { remaining_balance: true, payment_after_due_date: true } },
+  buildChatbotPayload("Can I pay the remaining balance after the deadline?", "auto"));
+  assert.match(standalone.reply, /remaining balance.*due/i);
+  assert.match(standalone.reply, /block another booking/i);
+  assert.doesNotMatch(standalone.reply, /30%/);
+});
+
+test("asks for the booking or model when the live reference is missing or ambiguous", () => {
+  const pickup = applyChatbotGuardrails({ intent: "booking_pickup_time", confidence: 0.995, language: "en",
+    reply: "Which booking or vehicle are you asking about?", requires_clarification: true,
+    clarification: { required: true, type: "missing_entity", field: "booking" } },
+  buildChatbotPayload("What time can I pick up the car?", "auto"));
+  assert.equal(pickup.intent, "booking_pickup_time");
+  assert.match(pickup.reply, /booking or vehicle/i);
+  assert.doesNotMatch(pickup.reply, /deposit|late.return fee/i);
+
+  const vehicles = [
+    { _id: "civic", name: "Honda Civic", model: "Civic", hourlyRate: 100, availabilityStatus: "available", specs: { type: "sedan" } },
+    { _id: "civix", name: "Honda Civix", model: "Civix", hourlyRate: 105, availabilityStatus: "available", specs: { type: "sedan" } },
+  ];
+  const entities = { brand: "Honda", model: "Civi" };
+  const response = applyChatbotGuardrails({ intent: "vehicle_brand_search", confidence: 0.995,
+    language: "en", entities, reply: "" }, buildChatbotPayload("Honda Civi", "auto", vehicles, entities));
+  assert.equal(response.clarification.type, "ambiguous_entity");
+  assert.match(response.reply, /Civic and Civix/);
+  assert.deepEqual(response.recommendations, []);
 });

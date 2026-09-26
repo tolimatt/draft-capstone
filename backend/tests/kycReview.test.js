@@ -108,6 +108,18 @@ test("opposing repeated decisions and replacement documents require a fresh revi
   assert.equal(document.status, "pending_review");
 });
 
+test("same-file rescreening after corrected details invalidates the old admin review", async (t) => {
+  const { document } = fixture(t);
+  document.reviewVersion = "new-screening";
+  await assert.rejects(
+    reviewKycDocument({ id: docId, action: "approve", reviewVersion: "old-screening", reviewerId: adminId }),
+    { status: 409 },
+  );
+  assert.equal(document.status, "pending_review");
+  await reviewKycDocument({ id: docId, action: "approve", reviewVersion: "new-screening", reviewerId: adminId });
+  assert.equal(document.status, "verified");
+});
+
 test("pre-registration decisions and unchanged legacy cases do not overwrite an existing account", async (t) => {
   const { writes } = fixture(t, { sessionId: "signed-registration-attempt", caseStatus: "approved" });
   await reviewKycDocument({ id: docId, action: "approve", reviewerId: adminId });

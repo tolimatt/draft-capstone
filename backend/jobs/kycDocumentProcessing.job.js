@@ -83,13 +83,25 @@ const processClaimedDocument = async (document) => {
     throw Object.assign(new Error("Private document integrity check failed."), { permanent: true });
   }
 
+  const throttleStartedAt = Date.now();
   await throttleGemini();
-  const result = await verifyPhilippinesDocument({
-    base64: buffer.toString("base64"),
-    mimeType: document.mimeType || "image/jpeg",
-    docType: document.docType,
-    selectedDocType: document.selectedDocCategory,
-  });
+  const providerStartedAt = Date.now();
+  let result;
+  try {
+    result = await verifyPhilippinesDocument({
+      base64: buffer.toString("base64"),
+      mimeType: document.mimeType || "image/jpeg",
+      docType: document.docType,
+      selectedDocType: document.selectedDocCategory,
+    });
+  } catch (error) {
+    error.screeningTiming = {
+      throttleWaitMs: providerStartedAt - throttleStartedAt,
+      providerMs: Date.now() - providerStartedAt,
+    };
+    throw error;
+  }
+  const providerFinishedAt = Date.now();
 
   const preliminary = evaluateDocumentExtraction({
     extraction: result,
@@ -125,7 +137,7 @@ const processClaimedDocument = async (document) => {
   const status = decision.status;
   const now = new Date();
   const updateResult = await PreKycDocument.updateOne(
-    { _id: document._id, status: "processing", fileHash: document.fileHash, processingLockedAt: document.processingLockedAt },
+    { _id: document._id, status: "processing", fileHash: document.fileHash, ...(document.reviewVersion ? { reviewVersion: document.reviewVersion } : {}), processingLockedAt: document.processingLockedAt },
     {
       $set: {
         status,
@@ -153,10 +165,15 @@ const processClaimedDocument = async (document) => {
       },
     },
   );
-  auditLog.info("KYC", "Queued document screening completed", {
+  if (updateResult.modifiedCount === 1) auditLog.info("KYC", "Queued document screening completed", {
     reviewId: document._id.toString(),
+    docType: document.docType,
     status,
     attempt: document.processingAttempts,
+    queueWaitMs: document.queuedAt ? Math.max(0, new Date(document.processingLockedAt) - new Date(document.queuedAt)) : null,
+    throttleWaitMs: providerStartedAt - throttleStartedAt,
+    providerMs: providerFinishedAt - providerStartedAt,
+    totalMs: document.queuedAt ? Math.max(0, Date.now() - new Date(document.queuedAt)) : null,
   });
   const sessionId = String(document.sessionId || "");
   if (updateResult.modifiedCount === 1 && status === "verified" && sessionId.startsWith("user:")) {
@@ -174,8 +191,8 @@ const handleProcessingFailure = async (document, error) => {
     : error?.permanent
       ? "We could not securely read the uploaded file. Please upload the document again."
       : "Automated screening was unavailable. A reviewer will check this document manually.";
-  await PreKycDocument.updateOne(
-    { _id: document._id, status: "processing", fileHash: document.fileHash, processingLockedAt: document.processingLockedAt },
+  const updateResult = await PreKycDocument.updateOne(
+    { _id: document._id, status: "processing", fileHash: document.fileHash, ...(document.reviewVersion ? { reviewVersion: document.reviewVersion } : {}), processingLockedAt: document.processingLockedAt },
     {
       $set: {
         status,
@@ -192,11 +209,16 @@ const handleProcessingFailure = async (document, error) => {
       },
     },
   );
-  auditLog.warn("KYC", "Queued document screening deferred", {
+  if (updateResult.modifiedCount === 1) auditLog.warn("KYC", "Queued document screening deferred", {
     reviewId: document._id.toString(),
+    docType: document.docType,
     status,
     attempt,
     httpStatus: Number(error?.status || 0),
+    queueWaitMs: document.queuedAt ? Math.max(0, new Date(document.processingLockedAt) - new Date(document.queuedAt)) : null,
+    throttleWaitMs: error?.screeningTiming?.throttleWaitMs ?? null,
+    providerMs: error?.screeningTiming?.providerMs ?? null,
+    totalMs: document.queuedAt ? Math.max(0, Date.now() - new Date(document.queuedAt)) : null,
   });
 };
 

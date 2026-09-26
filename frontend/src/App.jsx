@@ -31,6 +31,7 @@ import LogoutModal from "./components/LogoutModal";
 import IdleWarningModal from "./components/IdleWarningModal";
 import RenterNotificationsModal from "./components/RenterNotificationsModal";
 import SessionSkeleton from "./components/SessionSkeleton";
+import { RouteSkeleton, SignOutProgress } from "./components/LoadingSkeletons";
 import { disconnectSocket } from "./utils/socket";
 import API from "./utils/api";
 import {
@@ -842,11 +843,11 @@ const App = () => {
   }
 
   if (logoutState.status === "pending") {
-    return <SessionSkeleton label="Signing out" />;
+    return <SignOutProgress />;
   }
 
   if (isSessionBootstrapping || !hasSessionMinimumElapsed) {
-    return <SessionSkeleton />;
+    return <SessionSkeleton page={currentPage} />;
   }
 
   return (
@@ -873,7 +874,7 @@ const App = () => {
         onViewAllNotifications={handleViewAllRenterNotifications}
       />
 
-      <Suspense fallback={<SessionSkeleton />}>
+      <Suspense fallback={<RouteSkeleton page={currentPage} label="Loading page" />}>
 
       {/* home */}
       {currentPage === "home" && (

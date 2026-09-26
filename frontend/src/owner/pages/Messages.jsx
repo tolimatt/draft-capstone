@@ -21,6 +21,7 @@ import ModalPortal from "../../components/ModalPortal";
 import MessageReportModal from "../../components/MessageReportModal";
 import ChatMessageInput from "../../components/ChatMessageInput";
 import OwnerPageHeader from "../components/OwnerPageHeader";
+import { ConversationListSkeleton, MessageThreadSkeleton } from "../../components/LoadingSkeletons";
 
 const getId = (value) => String(value?._id || value || "");
 
@@ -587,6 +588,7 @@ export default function Messages() {
           )}
 
           <div className="owner-messages-renter-list">
+            {loadingThreads && <ConversationListSkeleton label="Loading renter conversations" />}
             {!loadingThreads && filteredRenterThreads.map((thread) => (
               <RenterCard
                 key={thread.partner._id}
@@ -613,7 +615,7 @@ export default function Messages() {
                   <button
                     type="button"
                     onClick={() => setShowConversationList(true)}
-                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50 lg:hidden"
+                    className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50 lg:hidden"
                     aria-label="Back to renters"
                   >
                     <ArrowLeft size={18} strokeWidth={2} />
@@ -635,7 +637,7 @@ export default function Messages() {
               <button
                 type="button"
                 onClick={() => setShowDeleteConversationConfirm(true)}
-                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-lg border border-rose-100 bg-white px-3 text-xs font-medium text-rose-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-lg border border-rose-100 bg-white px-3 text-xs font-medium text-rose-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
               >
                 <Trash2 size={18} strokeWidth={2} aria-hidden="true" />
                 <span className="hidden sm:inline">Delete</span>
@@ -643,6 +645,7 @@ export default function Messages() {
             </div>
 
             <div className="owner-messages-chat-body" onClick={() => setActiveMessageActionId("")}>
+              {loadingMessages && <MessageThreadSkeleton label="Loading renter messages" />}
               {error && (
                 <div className="mb-4 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
                   {error}

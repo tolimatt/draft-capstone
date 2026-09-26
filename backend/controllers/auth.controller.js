@@ -17,18 +17,19 @@ import {
   getActionRequiredPreKycDocs,
   clearPreKycDocs,
   preKycIdentityMatchesRegistration,
+  preKycSupportingMatchesRegistration,
 } from "../utils/preKycDocs.js";
 import { isPreKycFaceVerified, clearPreKycFace } from "../utils/preKycFace.js";
 import { isValidPhilippineMobile, normalizePhilippineMobile } from "../utils/phone.js";
 import { verifyPreKycSession } from "../utils/preKycSession.js";
 import { releaseExpiredModerationSuspension } from "../utils/accountModeration.js";
+import { hashAuthToken, revokeSessionToken } from "../utils/authTokenRevocation.js";
+import { disconnectSessionSockets } from "../socket/index.js";
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_SECONDS = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 45);
 const PASSWORD_RESET_TOKEN_EXPIRE = process.env.PASSWORD_RESET_TOKEN_EXPIRE || "15m";
 const PASSWORD_RESET_TOKEN_SECRET = process.env.PASSWORD_RESET_TOKEN_SECRET || process.env.JWT_SECRET;
-// Local fallback only. Production multi-instance deployments must use Redis keyed by a hashed jti.
-const tokenBlacklist = new Map();
 const MIN_RENTER_AGE = 18;
 const MAX_RENTER_AGE = 100;
 const EMERGENCY_CONTACT_NAME_REGEX = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
@@ -40,30 +41,6 @@ const CLEAR_PREKYC_ON_REGISTER =
 const AVATAR_UPLOAD_DIR = process.env.AVATAR_UPLOAD_DIR || path.resolve("uploads", "avatars");
 const AVATAR_MAX_BYTES = Number(process.env.AVATAR_MAX_BYTES || 2 * 1024 * 1024);
 const AVATAR_MEDIA_PREFIX = "uploads/avatars/";
-
-export const isTokenBlacklisted = (token) => {
-  const expiresAt = tokenBlacklist.get(token);
-  if (!expiresAt) return false;
-  if (expiresAt <= Date.now()) {
-    tokenBlacklist.delete(token);
-    return false;
-  }
-  return true;
-};
-
-const blacklistUntilTokenExpiry = (token) => {
-  const now = Date.now();
-  for (const [candidate, expiresAt] of tokenBlacklist) {
-    if (expiresAt <= now) tokenBlacklist.delete(candidate);
-  }
-  try {
-    const decoded = jwt.decode(token);
-    const expiresAt = Number(decoded?.exp) * 1000;
-    if (Number.isFinite(expiresAt) && expiresAt > now) tokenBlacklist.set(token, expiresAt);
-  } catch {
-    // The cookie is still cleared even if its token cannot be decoded.
-  }
-};
 
 function signToken(user) {
   return jwt.sign(
@@ -513,6 +490,23 @@ export const registerUser = async (req, res) => {
       });
     }
 
+    if (requestedRole === "owner" && !await preKycSupportingMatchesRegistration(
+      normalizedEmail,
+      preKycSession.sessionId,
+      {
+        business_name: businessName,
+        permit_number: permitNumber,
+        tax_identification_number: req.body.taxIdentificationNumber,
+        branch_code: req.body.branchCode,
+      }
+    )) {
+      return res.status(409).json({
+        success: false,
+        message: "Your business details changed after document review. Return to the supporting document step and submit it for review again.",
+        supportingDetailsChanged: true,
+      });
+    }
+
     const faceVerified = await isPreKycFaceVerified(normalizedEmail, preKycSession.sessionId);
     if (!faceVerified) {
       return res.status(400).json({
@@ -749,7 +743,8 @@ export const logoutUser = async (req, res) => {
   try {
     const cookieToken = String(req.cookies?.token || "").trim();
     if (cookieToken) {
-      blacklistUntilTokenExpiry(cookieToken);
+      await revokeSessionToken(cookieToken);
+      disconnectSessionSockets(cookieToken);
       auditLog.info("AUTH", "Logged out", { userId: req.user?._id?.toString() });
     }
     clearAuthCookie(res);
@@ -992,13 +987,30 @@ export const verifyPasswordResetOTP = async (req, res) => {
       });
     }
 
-    await Otp.deleteMany({ email: normalizedEmail, purpose: "password_reset" });
+    const consumedCode = await Otp.findOneAndDelete({
+      _id: record._id,
+      email: normalizedEmail,
+      purpose: "password_reset",
+      expiresAt: { $gt: new Date() },
+    });
+    if (!consumedCode) {
+      return res.status(400).json({ success: false, message: "Invalid or expired code." });
+    }
 
     const resetToken = jwt.sign(
-      { email: normalizedEmail, purpose: "password_reset" },
+      { email: normalizedEmail, purpose: "password_reset", jti: crypto.randomUUID() },
       PASSWORD_RESET_TOKEN_SECRET,
       { expiresIn: PASSWORD_RESET_TOKEN_EXPIRE }
     );
+
+    const resetSession = await User.updateOne(
+      { _id: user._id },
+      { $set: { passwordResetTokenHash: hashAuthToken(resetToken) } }
+    );
+    if (resetSession.matchedCount !== 1) {
+      return res.status(400).json({ success: false, message: "Invalid or expired code." });
+    }
+    await Otp.deleteMany({ email: normalizedEmail, purpose: "password_reset" });
 
     res.json({
       success: true,
@@ -1049,19 +1061,23 @@ export const resetPassword = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email: normalizedEmail }).select("+password");
+    const salt = await bcrypt.genSalt(12);
+    const passwordHash = await bcrypt.hash(newPassword, salt);
+    const user = await User.findOneAndUpdate(
+      { email: normalizedEmail, passwordResetTokenHash: hashAuthToken(token) },
+      {
+        $set: { password: passwordHash },
+        $unset: { passwordResetTokenHash: "" },
+        $inc: { sessionVersion: 1 },
+      },
+      { new: true }
+    );
     if (!user) {
       return res.status(400).json({
         success: false,
         message: "Reset session is invalid or expired.",
       });
     }
-
-    const salt = await bcrypt.genSalt(12);
-    user.password = await bcrypt.hash(newPassword, salt);
-    await user.save();
-    await Otp.deleteMany({ email: normalizedEmail, purpose: "password_reset" });
-
     clearAuthCookie(res);
     auditLog.info("AUTH", `Password reset completed: ${normalizedEmail}`, { userId: user._id.toString() });
 
@@ -1106,8 +1122,20 @@ export const changePassword = async (req, res) => {
     }
 
     const salt = await bcrypt.genSalt(12);
-    user.password = await bcrypt.hash(newPassword, salt);
-    await user.save();
+    const passwordHash = await bcrypt.hash(newPassword, salt);
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: user._id, password: user.password },
+      {
+        $set: { password: passwordHash },
+        $unset: { passwordResetTokenHash: "" },
+        $inc: { sessionVersion: 1 },
+      },
+      { new: true }
+    );
+    if (!updatedUser) {
+      return res.status(409).json({ success: false, message: "Password changed in another session. Please sign in again." });
+    }
+    setAuthCookie(res, signToken(updatedUser));
 
     auditLog.info("AUTH", "Password changed", { userId: user._id.toString() });
 

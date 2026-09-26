@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import API from "../../utils/api";
 import OwnerPageHeader from "../components/OwnerPageHeader";
+import { AnalyticsContentSkeleton } from "../../components/LoadingSkeletons";
 
 const PERIOD_OPTIONS = [
   { value: "30d", label: "Last 30 days" },
@@ -167,7 +168,7 @@ export default function Analytics() {
       )}
 
       {loading && !analytics ? (
-        <AnalyticsSkeleton />
+        <AnalyticsContentSkeleton />
       ) : analytics ? (
         <>
           {vehiclePerformance.length > 0 && (
@@ -501,16 +502,6 @@ function EmptyFleet() {
       <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-slate-600">
         Add a vehicle first. Its booking demand will appear here as renters send requests.
       </p>
-    </div>
-  );
-}
-
-function AnalyticsSkeleton() {
-  return (
-    <div aria-label="Loading vehicle analytics" role="status" className="space-y-5">
-      <span className="sr-only">Loading vehicle analytics...</span>
-      <div className="h-96 animate-pulse rounded-2xl bg-slate-200/70" />
-      <div className="h-96 animate-pulse rounded-2xl bg-slate-200/70" />
     </div>
   );
 }

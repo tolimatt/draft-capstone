@@ -20,6 +20,7 @@ import {
 } from "../utils/dateUtils";
 import LocationSearchInput from "../components/LocationSearchInput";
 import VehicleCard from "../components/VehicleCard";
+import { VehicleGridSkeleton } from "../components/LoadingSkeletons";
 import VehicleTypeCarousel from "../components/VehicleTypeCarousel";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
 import { formatVehicleTypeLabel } from "../utils/vehicleText";
@@ -502,6 +503,9 @@ export default function RentifyPro({
           {featuredError && (
             <div className="rp-surface p-6 text-sm text-rose-600">{featuredError}</div>
           )}
+          {featuredLoading && (
+            <VehicleGridSkeleton label="Loading featured vehicles" count={4} className="rp-featured-carousel" />
+          )}
           {!featuredLoading && !featuredError && featuredVehicles.length === 0 && (
             <div className="rp-surface p-6 text-sm text-slate-600">
               No available vehicles to feature right now.
@@ -509,27 +513,35 @@ export default function RentifyPro({
           )}
 
           {!featuredLoading && !featuredError && featuredVehicles.length > 0 && (
-            <div
-              ref={featuredCarouselRef}
-              className="rp-featured-carousel"
-              role="region"
-              aria-label="Featured vehicles"
-              tabIndex="0"
-            >
-              {featuredVehicles.map((vehicle, index) => (
-                <VehicleCard
-                  key={vehicle.id}
-                  vehicle={vehicle}
-                  onPreview={openVehiclePreview}
-                  onBookNow={handleFeaturedBookNow}
-                  className="rp-scroll-reveal rp-reveal-card"
-                  imageClassName="rp-reveal-media-image"
-                  data-rp-reveal=""
-                  data-featured-card=""
-                  style={{ "--rp-reveal-delay": `${index * 90}ms` }}
-                />
-              ))}
-            </div>
+            <>
+              {featuredVehicles.length > 1 && (
+                <p id="featured-carousel-hint" className="mt-4 flex items-center gap-1 text-sm font-medium text-slate-600 sm:hidden">
+                  Swipe for more vehicles <ArrowRight size={16} aria-hidden="true" />
+                </p>
+              )}
+              <div
+                ref={featuredCarouselRef}
+                className="rp-featured-carousel"
+                role="region"
+                aria-label="Featured vehicles"
+                aria-describedby={featuredVehicles.length > 1 ? "featured-carousel-hint" : undefined}
+                tabIndex="0"
+              >
+                {featuredVehicles.map((vehicle, index) => (
+                  <VehicleCard
+                    key={vehicle.id}
+                    vehicle={vehicle}
+                    onPreview={openVehiclePreview}
+                    onBookNow={handleFeaturedBookNow}
+                    className="rp-scroll-reveal rp-reveal-card"
+                    imageClassName="rp-reveal-media-image"
+                    data-rp-reveal=""
+                    data-featured-card=""
+                    style={{ "--rp-reveal-delay": `${index * 90}ms` }}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </div>
       </section>

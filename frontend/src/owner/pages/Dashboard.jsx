@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import API from "../../utils/api";
+import { OwnerDashboardSkeleton } from "../../components/LoadingSkeletons";
 import { getSocket } from "../../utils/socket";
 import {
   formatDisplayName,
@@ -926,7 +927,7 @@ export default function Dashboard() {
     window.dispatchEvent(new CustomEvent("navigate", { detail: page }));
   };
 
-  if (loading) return null;
+  if (loading) return <OwnerDashboardSkeleton />;
 
   /* ── Render ───────────────────────────────────────── */
 
@@ -990,7 +991,7 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={() => setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:text-[#017FE6]"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:text-[#017FE6]"
                 aria-label="Previous month"
               >
                 <ChevronLeft size={16} />
@@ -998,7 +999,7 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={() => setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:text-[#017FE6]"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-blue-200 hover:text-[#017FE6]"
                 aria-label="Next month"
               >
                 <ChevronRight size={16} />
@@ -1010,7 +1011,7 @@ export default function Dashboard() {
                   setVisibleMonth(new Date(now.getFullYear(), now.getMonth(), 1));
                   setSelectedDate(now);
                 }}
-                className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-blue-200 hover:text-[#017FE6]"
+                className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-blue-200 hover:text-[#017FE6]"
               >
                 Today
               </button>
@@ -1579,7 +1580,7 @@ function SummaryCard({
               <button
                 type="button"
                 onClick={onToggleValueVisibility}
-                className="absolute right-0 top-0 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40 sm:static sm:h-8 sm:w-8"
+                className="absolute right-0 top-0 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#017FE6]/40 sm:static"
                 aria-label={isValueVisible ? `Hide ${title}` : `Show ${title}`}
                 title={isValueVisible ? `Hide ${title}` : `Show ${title}`}
               >
@@ -1592,7 +1593,7 @@ function SummaryCard({
             <button
               type="button"
               onClick={onAction}
-              className="mt-auto inline-flex min-h-11 items-center justify-between gap-1 pt-3 text-left text-xs font-semibold leading-4 text-[#017FE6] transition hover:text-[#0168be] sm:min-h-0 sm:justify-start sm:pt-2"
+              className="mt-auto inline-flex min-h-11 items-center justify-between gap-1 pt-3 text-left text-xs font-semibold leading-4 text-[#017FE6] transition hover:text-[#0168be] sm:justify-start sm:pt-2"
               aria-label={subtitle}
             >
               {subtitle}
@@ -1611,7 +1612,7 @@ function SectionViewAllFooter({ label, onClick, pushToBottom = false }) {
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex w-full items-center justify-center gap-1.5 text-sm font-semibold text-[#017FE6] transition hover:text-[#0168be]"
+        className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 text-sm font-semibold text-[#017FE6] transition hover:text-[#0168be]"
       >
         {label}
         <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />

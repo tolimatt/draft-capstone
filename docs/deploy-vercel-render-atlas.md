@@ -94,5 +94,6 @@ For local verification from backend folder:
 1. Take and test an Atlas point-in-time restore before migrations. Keep an encrypted copy in a separate account/project according to your RPO/RTO.
 2. Run `npm run db:migrate:kyc` first (dry run), review counts, then run `npm run db:migrate:kyc -- --apply`. The legacy collection is retained for rollback.
 3. Use an object store with a private, SSE-KMS encrypted `kyc/` prefix and lifecycle rules for KYC evidence. The local private directory is a development fallback, not durable multi-instance storage.
-4. Configure Redis for shared rate limits, job leases, token revocation, and short public-response caching before scaling to multiple backend instances.
+4. Configure Redis for shared rate limits, job leases, and short public-response caching before scaling to multiple backend instances. Logout token revocations are stored in MongoDB.
 5. Run `npm run db:migrate:notifications` first (dry run), then `npm run db:migrate:notifications -- --apply` after backup. Test one booking notification email before enabling it for all users.
+6. Run `npm run db:migrate:session-revocations` first (dry run), then `npm run db:migrate:session-revocations -- --apply` before deploying the backend auth changes. This creates the lookup and TTL indexes for hashed logout tokens.

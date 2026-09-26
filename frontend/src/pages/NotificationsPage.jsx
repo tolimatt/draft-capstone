@@ -5,6 +5,7 @@ import NotificationDetailsModal from "../components/NotificationDetailsModal";
 import API from "../utils/api";
 import { getSocket } from "../utils/socket";
 import { requestLiveCountersRefresh } from "../utils/liveCounters";
+import { ActivityListSkeleton } from "../components/LoadingSkeletons";
 
 const formatDateTime = (value) =>
   value
@@ -295,6 +296,7 @@ export default function NotificationsPage({
         </div>
 
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        {loading && <ActivityListSkeleton label="Loading notifications" />}
         {!loading && !notifications.length && (
           <div className="rp-minimal-card p-6 text-sm text-gray-600">
             {showArchived ? "No archived notifications." : "No notifications yet."}

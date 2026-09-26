@@ -13,6 +13,7 @@ import {
 } from "../utils/realtimeChatInput";
 import MessageReportModal from "../components/MessageReportModal";
 import ChatMessageInput from "../components/ChatMessageInput";
+import { ConversationListSkeleton, MessageThreadSkeleton } from "../components/LoadingSkeletons";
 
 const getId = (value) => String(value?._id || value || "");
 const formatDateTime = (value) =>
@@ -483,7 +484,7 @@ export default function RealtimeChatPage({
         onLogout={onLogout}
       />
 
-      <main className="rp-renter-main mx-auto max-w-[1380px] px-4 pb-12 pt-24 sm:px-6 sm:pt-28">
+      <main className="rp-renter-main rp-chat-main mx-auto max-w-[1380px] px-4 pb-12 pt-24 sm:px-6 sm:pt-28">
         <div className="rp-chat-page-header rp-surface">
           <div className="rp-chat-page-heading">
             <span className="rp-chat-page-icon" aria-hidden="true">
@@ -531,6 +532,7 @@ export default function RealtimeChatPage({
             </div>
 
             <div className="rp-chat-conversation-list">
+              {loadingConversations && <ConversationListSkeleton />}
               {!loadingConversations && !conversations.length && (
                 <div className="rp-chat-list-empty">
                   <MessageCircle size={20} strokeWidth={2} aria-hidden="true" />
@@ -626,6 +628,7 @@ export default function RealtimeChatPage({
               className="rp-chat-message-area"
               onClick={() => setActiveMessageActionId("")}
             >
+              {loadingMessages && activePartnerId && <MessageThreadSkeleton />}
               {!loadingMessages && !messages.length && (
                 <div className="rp-chat-empty-thread">
                   <span aria-hidden="true"><MessageCircle size={24} strokeWidth={2} /></span>

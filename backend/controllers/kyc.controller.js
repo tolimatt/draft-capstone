@@ -12,9 +12,9 @@ import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { ensureFaceServiceReady, isFaceServiceConnectionError } from "../utils/faceServiceManager.js";
 import { issuePreKycSession, renewPreKycSession } from "../utils/preKycSession.js";
 import { reconcileUserKyc, reviewKycDocument } from "../services/kycReview.service.js";
-import { resolveSupportedDocumentType } from "../services/documentValidation.service.js";
+import { isBirSupportingDocumentType, resolveSupportedDocumentType } from "../services/documentValidation.service.js";
 import { triggerKycDocumentProcessing } from "../jobs/kycDocumentProcessing.job.js";
-import { isIdentityReadyForSelfie } from "../utils/preKycDocs.js";
+import { isIdentityReadyForSelfie, screeningProfileMatchesSnapshot } from "../utils/preKycDocs.js";
 
 const isProduction = process.env.NODE_ENV === "production";
 const getFaceServiceUrl = () => {
@@ -122,10 +122,13 @@ const queuePreKycDocument = async ({
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedEmail || !normalizedSessionId || !docType || !fileMeta?.fileHash) return null;
 
-  const existing = await PreKycDocument.findOne({ email: normalizedEmail, docType }).select("status fileHash sessionId");
+  const existing = await PreKycDocument.findOne({ email: normalizedEmail, docType })
+    .select("status fileHash sessionId selectedDocCategory +profileSnapshot");
   if (
     existing?.fileHash === fileMeta.fileHash &&
     existing.sessionId === normalizedSessionId &&
+    existing.selectedDocCategory === String(selectedDocCategory || "").trim() &&
+    screeningProfileMatchesSnapshot(existing.profileSnapshot, profileSnapshot) &&
     ["queued", "processing", "retry_wait", "pending_review", "verified"].includes(existing.status)
   ) {
     return existing;
@@ -145,6 +148,8 @@ const queuePreKycDocument = async ({
         role: role || "user",
         docType,
         status: "queued",
+        queuedAt: now,
+        reviewVersion: crypto.randomUUID(),
         selectedDocCategory: String(selectedDocCategory || "").trim(),
         provider: "gemini-queued",
         profileSnapshot: profileSnapshot || {},
@@ -666,6 +671,18 @@ export const preVerifySupportingDocument = async (req, res) => {
       });
     }
 
+    if (isBirSupportingDocumentType(selectedSupportingType)) {
+      if (!String(user_profile?.business_name || "").trim()) {
+        return res.status(400).json({ success: false, message: "Enter the business name shown on your BIR document." });
+      }
+      if (!/^\d{9}$/.test(String(user_profile?.tax_identification_number || ""))) {
+        return res.status(400).json({ success: false, message: "Enter the 9-digit TIN shown on your BIR document." });
+      }
+      if (!/^\d{3,5}$/.test(String(user_profile?.branch_code || ""))) {
+        return res.status(400).json({ success: false, message: "Enter the branch code shown on your BIR document." });
+      }
+    }
+
     const fallbackName = splitFirstLastName(user_profile?.full_name);
     const profileContext = {
       full_name: user_profile?.full_name,
@@ -673,6 +690,8 @@ export const preVerifySupportingDocument = async (req, res) => {
       last_name: user_profile?.last_name || fallbackName.last_name,
       business_name: user_profile?.business_name,
       permit_number: user_profile?.permit_number,
+      tax_identification_number: user_profile?.tax_identification_number,
+      branch_code: user_profile?.branch_code,
     };
 
     const fileMeta = await saveKycBase64File({
@@ -730,7 +749,7 @@ export const getPreKycStatus = async (req, res) => {
 export const listPendingKycReviews = async (_req, res) => {
   try {
     const reviews = await PreKycDocument.find({ status: { $in: ["queued", "processing", "retry_wait", "pending_review"] } })
-      .select("email role sessionId docType status docCategory selectedDocCategory detailsMatched mismatchFields suspectedTampering reason reasonCode documentSurface validationChecks extractedData qualityIssues decisionSource processingAttempts nextAttemptAt fileName mimeType fileSize fileHash createdAt expiresAt")
+      .select("email role sessionId docType status docCategory selectedDocCategory detailsMatched mismatchFields suspectedTampering reason reasonCode documentSurface validationChecks extractedData qualityIssues decisionSource processingAttempts nextAttemptAt fileName mimeType fileSize fileHash reviewVersion createdAt expiresAt")
       .sort({ createdAt: 1 })
       .limit(200)
       .lean();

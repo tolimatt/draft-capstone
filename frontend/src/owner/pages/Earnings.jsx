@@ -3,6 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 import API from "../../utils/api";
 import { getDurationHoursFromMinutes, getDurationMinutesBetween } from "../../utils/dateUtils";
 import OwnerPageHeader from "../components/OwnerPageHeader";
+import { EarningsContentSkeleton } from "../../components/LoadingSkeletons";
 const money = (value) => `\u20b1${Number(value || 0).toLocaleString("en-PH")}`;
 const HIDDEN_MONEY = "\u20b1\u2022\u2022\u2022\u2022\u2022\u2022";
 const getBookingAmountPayable = (booking) => {
@@ -106,7 +107,7 @@ export default function Earnings() {
   const latestMonth = useMemo(() => monthly[0] || null, [monthly]);
   const displayMoney = (value) => isEarningsVisible ? money(value) : HIDDEN_MONEY;
 
-  if (loading) return null;
+  if (loading) return <EarningsContentSkeleton />;
 
   return (
     <div className="space-y-6">

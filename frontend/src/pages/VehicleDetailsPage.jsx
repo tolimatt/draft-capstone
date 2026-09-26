@@ -505,7 +505,7 @@ export default function VehicleDetailsPage({
                       type="button"
                       onClick={goPrevImage}
                       aria-label="Previous image"
-                      className="absolute left-3 top-1/2 z-10 -translate-y-1/2 h-9 w-9 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white"
+                      className="absolute left-2 top-1/2 z-10 h-11 w-11 -translate-y-1/2 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white sm:left-3"
                     >
                       <ChevronLeft size={18} className="mx-auto" />
                     </button>
@@ -513,7 +513,7 @@ export default function VehicleDetailsPage({
                       type="button"
                       onClick={goNextImage}
                       aria-label="Next image"
-                      className="absolute right-3 top-1/2 z-10 -translate-y-1/2 h-9 w-9 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white"
+                      className="absolute right-2 top-1/2 z-10 h-11 w-11 -translate-y-1/2 rounded-xl bg-white/90 text-slate-700 shadow-md hover:bg-white sm:right-3"
                     >
                       <ChevronRight size={18} className="mx-auto" />
                     </button>

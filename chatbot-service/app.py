@@ -65,6 +65,7 @@ CONVERSATIONAL_INTENTS = {
     "chat_greeting",
     "chat_wellbeing",
     "chat_identity",
+    "chat_gender_identity",
     "chat_language_support",
     "chat_gratitude",
     "chat_acknowledgement",
@@ -106,6 +107,82 @@ MODEL_BOUNDARY_TOKENS = {
     "mayroon", "meron", "please", "po", "price", "rate", "rent", "rental", "sana", "show", "today",
     "tomorrow", "vehicle", "vehicles", "with", "available", "automatic", "manual",
 }
+MODEL_CONTEXT_START = re.compile(
+    r"\b(?:per|bawat|kada|daily|hourly|today|tomorrow|bukas|ngayon|"
+    r"for\s+(?:\d+|one|two|three|isang|dalawang)\s+(?:days?|hours?|araw|oras)|"
+    r"under|below|less\s+than|up\s+to|maximum|max|hanggang|mas\s+mababa\s+sa|"
+    r"available|availability|rate|price|cost|rent|rental|"
+    r"automatic|manual|in|at|sa|on|from)\b",
+    re.IGNORECASE,
+)
+VEHICLE_CATEGORIES = {
+    "suv": "suv", "suvs": "suv", "sedan": "sedan", "sedans": "sedan",
+    "van": "van", "vans": "van", "truck": "pickup", "trucks": "pickup",
+    "pickup": "pickup", "motorcycle": "motorcycle", "motorcycles": "motorcycle",
+    "motorbike": "motorcycle", "motorbikes": "motorcycle", "car": "sedan",
+    "cars": "sedan", "kotse": "sedan",
+}
+AMOUNT_PATTERN = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*k?"
+BUDGET_PATTERN = re.compile(
+    rf"\b(?:under|below|less\s+than|up\s+to|max(?:imum)?|budget(?:\s+of)?|"
+    rf"hanggang|mas\s+mababa\s+sa)\s*(?:php|₱|p)?\s*({AMOUNT_PATTERN})\b",
+    re.IGNORECASE,
+)
+DAY_UNIT_PATTERN = re.compile(r"\b(?:per\s+day|per\s+24\s*hours?|daily|bawat\s+araw|kada\s+araw)\b", re.IGNORECASE)
+HOUR_UNIT_PATTERN = re.compile(r"\b(?:per\s+hour|hourly|bawat\s+oras|kada\s+oras)\b", re.IGNORECASE)
+PICKUP_TIME_PATTERN = re.compile(
+    r"\b(?:pickup\s+(?:time|schedule)|(?:when|what\s+time)\s+(?:is\s+)?(?:my\s+)?pickup|"
+    r"(?:what|when|anong|ilang)\s+(?:time|oras).*\b(?:pick\s*up|pickup|kukunin|kunin|kuha)|"
+    r"(?:pick\s*up|pickup|kukunin|kunin|kuha).*\b(?:what|when|time|oras|schedule|kailan))\b",
+    re.IGNORECASE,
+)
+PERSONAL_BOOKING_PATTERNS = (
+    ("my_active_bookings", (
+        re.compile(r"^(?:do i have|have i got|is there|are there|show(?: me)?|check)\b.{0,55}\b(?:active|current|ongoing)\b.{0,20}\b(?:bookings?|rentals?)\b"),
+        re.compile(r"^(?:may|meron|mayroon)\b.{0,50}\b(?:active|current|ongoing|kasalukuyang)\b.{0,20}\b(?:booking|rental|renta)\b.{0,20}\b(?:ako|ko)\b"),
+        re.compile(r"^(?:may|meron|mayroon)\s+(?:booking|rental|renta)\s+pa\s+ba\s+ako\b"),
+    )),
+    ("my_unpaid_balance", (
+        re.compile(r"^(?:do i have|is there|are there|how much|what is my|check my)\b.{0,65}\b(?:unpaid|outstanding|remaining|due|overdue|owe)\b.{0,25}\b(?:balance|payment|amount|fee|bookings?)\b"),
+        re.compile(r"^(?:do i|am i)\s+(?:still\s+)?owe\b"),
+        re.compile(r"^(?:may|meron|mayroon)\b.{0,45}\b(?:unpaid|balance|balanse|utang)\b.{0,25}\b(?:ako|ko)\s*(?:ba)?$"),
+        re.compile(r"^magkano\b.{0,35}\b(?:balance|balanse|utang)\s+ko\b"),
+    )),
+    ("my_overdue_return", (
+        re.compile(r"^(?:am i|is my|are my|do i have|are any of my)\b.{0,65}\b(?:overdue|late(?:\s+return)?|returning\s+late)\b"),
+        re.compile(r"^(?:late|overdue|nahuli)\s+(?:na\s+)?ba\b.{0,50}\b(?:booking|return|balik|rental|renta|ako|ko)\b"),
+        re.compile(r"^(?:may|meron|mayroon)\b.{0,35}\b(?:late|overdue)\s+(?:return|balik)\b.{0,15}\b(?:ako|ko)\b"),
+    )),
+    ("booking_status", (
+        re.compile(r"^(?:do i have|have i got)\b.{0,45}\b(?:bookings?|reservations?)\b(?:\s+(?:right now|currently))?$"),
+        re.compile(r"^(?:do i have|have i got|may|meron|mayroon)\b.{0,35}\b(?:pending|confirmed)\s+(?:booking|reservation|renta)\b"),
+    )),
+)
+# These forms address the assistant itself. Keep third-party rental questions out
+# of this conversational intent (for example, "can a gay renter book?").
+ASSISTANT_IDENTITY_TERMS = (
+    r"(?:girl|boy|woman|man|gay|lesbian|male|female|straight|non[- ]?binary|"
+    r"bisexual|pansexual|asexual|queer|transgender|trans|tomboy|fem[- ]?boy|"
+    r"babae|lalaki|bakla|bading|beki|tibo|lesbiyana|silahis)"
+)
+FEMBOY_PATTERN = re.compile(r"\bfem[- ]?boy\b")
+SELF_GENDER_QUESTION_PATTERNS = (
+    re.compile(rf"^(?:are you|r u)\s+(?:(?:a|an)\s+)?{ASSISTANT_IDENTITY_TERMS}\b"),
+    re.compile(r"^(?:what(?:'s| is)|which is)\s+your\s+(?:gender|sex|sexuality|sexual orientation)\b"),
+    re.compile(r"^what\s+gender\s+are\s+you\b"),
+    re.compile(rf"^do you (?:have\s+(?:a\s+)?(?:gender|sex|sexuality|sexual orientation)|identify as\s+(?:a\s+)?{ASSISTANT_IDENTITY_TERMS})\b"),
+    re.compile(rf"^(?:ikaw\s+(?:ba\s+)?(?:ay\s+)?)?{ASSISTANT_IDENTITY_TERMS}\s+ka\b|^ikaw\s+(?:ba\s+)?(?:ay\s+)?{ASSISTANT_IDENTITY_TERMS}\b"),
+    re.compile(rf"^{ASSISTANT_IDENTITY_TERMS}\s+ba\s+(?:ikaw|si\s+rentify\s+ai|ang\s+chatbot)\b"),
+    re.compile(r"^(?:ano|anong)\s+(?:ang\s+)?(?:kasarian|gender|sexual orientation)\s+mo\b"),
+    re.compile(r"^(?:may|meron|mayroon)\s+ka\s+ba(?:ng)?\s+(?:kasarian|gender|sexual orientation)\b"),
+)
+STYLE_DIRECTIVE_PATTERN = re.compile(
+    r"^\s*(?:(?:please\s+)?(?:reply|answer|respond|speak)\s+in\s+"
+    r"(?P<en>english)|(?:please\s+)?(?:reply|answer|respond|speak)\s+in\s+"
+    r"(?P<fil>filipino|tagalog)|(?:please\s+)?(?:reply|answer|respond|speak)\s+in\s+"
+    r"(?P<taglish>taglish))\s*[:,.]?\s*",
+    re.IGNORECASE,
+)
 
 FILIPINO_TOKENS = {
     "ako", "ang", "ano", "anong", "at", "ba", "bakit", "balanse", "bayad",
@@ -115,6 +192,13 @@ FILIPINO_TOKENS = {
     "na", "ng", "ngayon", "paano", "pano", "para", "pasahero", "po", "puwedeng", "pwede",
     "renta", "rentahan", "sabay", "salamat", "sana", "sasakyan", "sige", "sobra", "tulong",
     "wala", "yung", "kasya",
+    "oo", "opo", "ko", "kong", "akin", "gusto", "nasaan", "dito", "doon",
+    "iyan", "yon", "yun", "naman", "pala", "kasi", "pero", "tapos", "kapag",
+    "pag", "baka", "talaga", "puwede", "kuha", "kunin", "ibalik", "bayaran",
+    "oras", "araw", "bukas", "ngayon", "yung", "maaaring", "bawat", "mas",
+    "ikaw", "ka", "babae", "lalaki", "bakla", "bading", "beki",
+    "tibo", "tomboy", "femboy", "lesbiyana", "silahis", "kasarian",
+    "nahuli", "balik", "utang", "kasalukuyang",
 }
 ENGLISH_TOKENS = {
     "account", "available", "balance", "book", "booking", "can", "cancel",
@@ -123,6 +207,25 @@ ENGLISH_TOKENS = {
     "late", "level", "methods", "pax", "payment", "pending", "price", "rate", "rent",
     "rental", "requirements", "return", "same", "status", "vehicle", "what", "when",
     "where", "which", "why",
+    "pickup", "time", "hour", "hours", "daily", "hourly", "model", "brand",
+    "van", "truck", "motorcycle", "today", "tomorrow", "budget",
+    "under", "below", "maximum", "minimum", "refund", "refundable", "due",
+    "overdue", "unpaid", "active", "current", "ongoing", "owe", "owner",
+    "location", "schedule", "manual", "listing",
+    "availability", "extension",
+    "thank", "thanks", "please", "you",
+    "girl", "boy", "woman", "man", "gay", "lesbian", "male", "female", "gender",
+    "sexuality", "straight", "nonbinary", "bisexual", "pansexual", "asexual",
+    "queer", "transgender", "trans", "tomboy", "femboy",
+}
+FILIPINO_GRAMMAR_PATTERN = re.compile(r"\b(?:may|meron|mayroon)\b.*\b(?:ba|bang)\b|\b(?:yung|ang|ng|ko|kong|mga)\b", re.IGNORECASE)
+ENGLISH_DOMAIN_PATTERN = re.compile(
+    r"\b(?:available|booking|payment|status|vehicle|pickup|rental|rate|extend|"
+    r"automatic|manual|van|car|driver|per\s+day|per\s+hour)\b", re.IGNORECASE
+)
+AMBIGUOUS_SHORT_FOLLOWUPS = {
+    "oo", "opo", "sige", "ok", "okay", "yes", "no", "per day", "per hour",
+    "bawat araw", "bawat oras", "daily", "hourly",
 }
 
 GENERIC_CLARIFICATIONS = {
@@ -130,11 +233,23 @@ GENERIC_CLARIFICATIONS = {
     "fil": "Gusto kong masigurong tama ang sagot ko. Maaari mo bang dagdagan ng kaunting detalye ang tanong?",
     "taglish": "Gusto kong masigurong tama ang sagot ko. Could you add a little more detail?",
 }
+FEMBOY_REPLIES = {
+    "en": "Femboy usually describes feminine gender expression, not sexual orientation. I'm an AI assistant, so I'm not a femboy and I don't have a sexual orientation.",
+    "fil": "Ang femboy ay karaniwang tumutukoy sa pambabaeng pagpapahayag ng kasarian, hindi sa seksuwal na oryentasyon. AI assistant ako, kaya hindi ako femboy at wala akong seksuwal na oryentasyon.",
+    "taglish": "Femboy usually describes feminine gender expression, hindi sexual orientation. AI assistant ako, so hindi ako femboy at wala akong sexual orientation.",
+}
+FEMBOY_DEFINITION_REPLIES = {
+    "en": "Femboy usually describes feminine gender expression, not sexual orientation. A person's orientation cannot be inferred from that label.",
+    "fil": "Ang femboy ay karaniwang tumutukoy sa pambabaeng pagpapahayag ng kasarian, hindi sa seksuwal na oryentasyon. Hindi matutukoy ang oryentasyon ng isang tao mula sa tawag na iyon.",
+    "taglish": "Femboy usually describes feminine gender expression, hindi sexual orientation. Hindi malalaman ang orientation ng isang tao from that label alone.",
+}
 
 
 class ChatRequest(BaseModel):
     message: str
     language: Optional[str] = "auto"
+    previous_language: Optional[str] = None
+    previous_context: Optional[Dict[str, Any]] = None
     # Retained for backward compatibility. Live recommendations are fulfilled
     # by the Node backend after this service selects the intent.
     vehicles: Optional[List[Dict[str, Any]]] = None
@@ -217,6 +332,17 @@ def find_brand_token_span(message: str) -> Tuple[Optional[str], int, int, List[s
     return None, -1, -1, original_tokens
 
 
+def mentioned_brands(message: str) -> List[str]:
+    tokens = [normalize_for_match(token) for token in TOKEN_PATTERN.findall(clean_text(message))]
+    found = set()
+    for normalized_brand, canonical in VEHICLE_BRAND_BY_NORMALIZED.items():
+        width = len(normalized_brand.split())
+        if any(tokens[index:index + width] == normalized_brand.split()
+               for index in range(len(tokens) - width + 1)):
+            found.add(canonical)
+    return sorted(found)
+
+
 def canonicalize_model_token(token: str) -> str:
     if token.islower() or token.isupper():
         return token[:1].upper() + token[1:].lower()
@@ -228,10 +354,14 @@ def extract_vehicle_entities(message: str) -> Dict[str, Optional[str]]:
     if not brand:
         return {"brand": None, "model": None}
 
+    suffix = " ".join(original_tokens[brand_end:])
+    context = MODEL_CONTEXT_START.search(suffix)
+    if context:
+        suffix = suffix[:context.start()]
     model_tokens: List[str] = []
-    for token in original_tokens[brand_end:]:
+    for token in TOKEN_PATTERN.findall(suffix):
         normalized = normalize_for_match(token)
-        if not normalized or normalized in MODEL_BOUNDARY_TOKENS:
+        if not normalized or normalized in MODEL_BOUNDARY_TOKENS or normalized in VEHICLE_CATEGORIES:
             break
         model_tokens.append(canonicalize_model_token(token))
         if len(model_tokens) >= 4:
@@ -240,6 +370,80 @@ def extract_vehicle_entities(message: str) -> Dict[str, Optional[str]]:
         "brand": brand,
         "model": " ".join(model_tokens) or None,
     }
+
+
+def extract_query_entities(message: str, original_message: Optional[str] = None) -> Dict[str, Any]:
+    entities: Dict[str, Any] = extract_vehicle_entities(message)
+    normalized = normalize_for_match(message)
+    for token in tokenize(normalized):
+        category = VEHICLE_CATEGORIES.get(token)
+        if category:
+            entities["category"] = category
+            break
+    day_unit = bool(DAY_UNIT_PATTERN.search(normalized))
+    hour_unit = bool(HOUR_UNIT_PATTERN.search(normalized))
+    if day_unit != hour_unit:
+        entities["rate_unit"] = "day" if day_unit else "hour"
+    budget_match = BUDGET_PATTERN.search(clean_text(original_message or message))
+    if budget_match:
+        amount = budget_match.group(1).replace(",", "").replace(" ", "").lower()
+        multiplier = 1000 if amount.endswith("k") else 1
+        try:
+            budget = float(amount.rstrip("k")) * multiplier
+        except ValueError:
+            budget = 0
+        if 0 < budget <= 10_000_000:
+            entities["max_budget"] = round(budget, 2)
+            entities["currency"] = "PHP"
+    transmission = re.search(r"\b(automatic|manual|matic)\b", normalized)
+    if transmission:
+        entities["transmission"] = "automatic" if transmission.group(1) in {"automatic", "matic"} else "manual"
+    return entities
+
+
+def extract_conditions(message: str) -> Dict[str, Any]:
+    normalized = normalize_for_match(message)
+    conditions: Dict[str, Any] = {}
+    percent = re.search(r"\b(\d{1,3})\s*%", normalized)
+    if percent and 0 < int(percent.group(1)) <= 100:
+        conditions["downpayment_percent"] = int(percent.group(1))
+    if re.search(r"\b(?:remaining|outstanding|unpaid)\s+balance\b|\bbalance\b|\bbalanse\b|\bnatitirang\s+bayad\b", normalized):
+        conditions["remaining_balance"] = True
+    if re.search(
+        r"\b(?:after|past|beyond)\s+(?:the\s+)?(?:due\s+date|deadline)|"
+        r"\b(?:pagkatapos\s+ng|lampas\s+sa)\s+(?:due\s+date|deadline)|"
+        r"\b(?:pay|payment|balance|balanse|bayad)\b.*\boverdue\b",
+        normalized,
+    ):
+        conditions["payment_after_due_date"] = True
+    return conditions
+
+
+def validated_pending_search(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict) or set(value) - {
+        "brand", "model", "category", "max_budget", "currency", "transmission"
+    }:
+        return {}
+    brand = value.get("brand")
+    category = value.get("category")
+    budget = value.get("max_budget")
+    if brand not in VEHICLE_BRAND_BY_NORMALIZED.values() and brand is not None:
+        return {}
+    if category is not None and category not in set(VEHICLE_CATEGORIES.values()):
+        return {}
+    if not brand and not category:
+        return {}
+    if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not 0 < budget <= 10_000_000:
+        return {}
+    if value.get("currency") != "PHP":
+        return {}
+    model = value.get("model")
+    if model is not None and (not isinstance(model, str) or len(model) > 80):
+        return {}
+    transmission = value.get("transmission")
+    if transmission is not None and transmission not in {"automatic", "manual"}:
+        return {}
+    return {key: item for key, item in value.items() if item is not None}
 
 
 def one_edit_apart(left: str, right: str) -> bool:
@@ -434,21 +638,40 @@ def load_dataset(path: Path) -> List[Dict[str, Any]]:
 def detect_style(text: str) -> str:
     normalized = normalize_for_match(text)
     tokens = tokenize(normalized)
-    fil_hits = [token for token in tokens if token in FILIPINO_TOKENS]
-    en_hits = [token for token in tokens if token in ENGLISH_TOKENS]
-    if fil_hits and en_hits:
+    fil_hits = [token for token in tokens if token in FILIPINO_TOKENS and token not in ENGLISH_TOKENS]
+    en_hits = [token for token in tokens if token in ENGLISH_TOKENS and token not in FILIPINO_TOKENS]
+    filipino_grammar = bool(FILIPINO_GRAMMAR_PATTERN.search(normalized))
+    english_domain = bool(ENGLISH_DOMAIN_PATTERN.search(normalized))
+    if (fil_hits or filipino_grammar) and (en_hits or english_domain):
         return "taglish"
     if fil_hits:
         return "fil"
     return "en"
 
 
-def resolve_style(requested_language: Optional[str], text: str) -> str:
+def extract_style_directive(message: str) -> Tuple[Optional[str], str]:
+    match = STYLE_DIRECTIVE_PATTERN.match(message)
+    if not match:
+        return None, message
+    style = "en" if match.group("en") else "fil" if match.group("fil") else "taglish"
+    return style, message[match.end():].strip()
+
+
+def resolve_style(requested_language: Optional[str], text: str, previous_language: Optional[str] = None) -> str:
     requested = normalize_for_match(requested_language or "")
     if requested and requested != "auto":
         mapped = REQUESTED_LANGUAGE_TO_STYLE.get(requested)
         if mapped in SUPPORTED_STYLES:
             return mapped
+    directive, _ = extract_style_directive(text)
+    if directive:
+        return directive
+    normalized = normalize_for_match(text)
+    tokens = tokenize(normalized)
+    previous = REQUESTED_LANGUAGE_TO_STYLE.get(normalize_for_match(previous_language or ""))
+    has_language_signal = any(token in FILIPINO_TOKENS or token in ENGLISH_TOKENS for token in tokens)
+    if previous and len(tokens) <= 2 and (normalized in AMBIGUOUS_SHORT_FOLLOWUPS or not has_language_signal):
+        return previous
     return detect_style(text)
 
 
@@ -625,6 +848,9 @@ def prioritize_intent(
 
 
 def select_response(intent_id: str, style: str, normalized_query: str) -> str:
+    if intent_id == "chat_gender_identity" and FEMBOY_PATTERN.search(normalized_query):
+        self_question = any(pattern.search(normalized_query) for pattern in SELF_GENDER_QUESTION_PATTERNS)
+        return FEMBOY_REPLIES[style] if self_question else FEMBOY_DEFINITION_REPLIES[style]
     responses = INTENTS_BY_ID[intent_id]["responses"].get(style, [])
     if not responses:
         responses = INTENTS_BY_ID[intent_id]["responses"]["en"]
@@ -649,7 +875,15 @@ def build_alternatives(candidates: List[Dict[str, Any]], exclude_intent: str = "
     return alternatives
 
 
-def clarification_reply(candidates: List[Dict[str, Any]], style: str) -> str:
+def clarification_reply(candidates: List[Dict[str, Any]], style: str, query: str = "") -> str:
+    if not re.search(
+        r"\b(?:payment|pay|bayad|balanse|balance|deposit|rate|price|cost|magkano|"
+        r"booking|reservation|vehicle|vehicles|car|cars|kotse|suv|van|motorcycle|"
+        r"pickup|return|rent|rental)\b",
+        query,
+        re.IGNORECASE,
+    ):
+        return GENERIC_CLARIFICATIONS[style]
     for candidate in candidates:
         clarification = INTENTS_BY_ID[candidate["intent"]]["clarification"].get(style)
         if clarification:
@@ -657,21 +891,63 @@ def clarification_reply(candidates: List[Dict[str, Any]], style: str) -> str:
     return GENERIC_CLARIFICATIONS[style]
 
 
-def classify_message(message: str, requested_language: Optional[str] = "auto") -> Dict[str, Any]:
+def classify_message(
+    message: str, requested_language: Optional[str] = "auto", previous_language: Optional[str] = None,
+    previous_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     clean_message = clean_text(message)
-    normalized_message = normalize_for_match(clean_message)
-    informal_query = normalize_informal_text(clean_message)
+    style = resolve_style(requested_language, clean_message, previous_language)
+    directive_style, question = extract_style_directive(clean_message)
+    query_message = question if directive_style and question else clean_message
+    normalized_message = normalize_for_match(query_message)
+    informal_query = normalize_informal_text(query_message)
     normalized_query = (
         informal_query
         if find_controlled_alias_matches(informal_query)
         else normalize_unique_known_typos(informal_query)
     )
     used_controlled_normalization = normalized_query != normalized_message
-    style = resolve_style(requested_language, normalized_query)
-    entities = extract_vehicle_entities(normalized_query)
+    entities = extract_query_entities(normalized_query, query_message)
+    pending = validated_pending_search(previous_context)
+    context_followup = bool(pending and entities.get("rate_unit")
+                            and len(tokenize(normalized_query)) <= 3
+                            and not entities.get("brand") and not entities.get("category")
+                            and "max_budget" not in entities)
+    if context_followup:
+        entities = {"brand": None, "model": None, **pending, "rate_unit": entities["rate_unit"]}
+    conditions = extract_conditions(normalized_query)
+
+    def with_details(result: Dict[str, Any], clarification_type: Optional[str] = None,
+                     clarification_field: Optional[str] = None) -> Dict[str, Any]:
+        return {
+            **result,
+            "language": style,
+            "reply_lang": style,
+            "entities": entities,
+            "conditions": conditions,
+            "clarification": {
+                "required": bool(result.get("requires_clarification")),
+                "type": clarification_type,
+                "field": clarification_field,
+            },
+        }
+
+    if directive_style and not question:
+        reply = {
+            "en": "I'll reply in English. What would you like to know about your rental?",
+            "fil": "Sasagot ako sa Filipino. Ano ang gusto mong malaman tungkol sa rental mo?",
+            "taglish": "I'll reply in Taglish. Ano ang gusto mong malaman sa rental mo?",
+        }[style]
+        return with_details({
+            "intent": "chat_language_support", "intent_id": "chat_language_support",
+            "confidence": 0.99, "score": 0.99, "reply": reply,
+            "alternatives": [], "top_preds": [], "requires_clarification": False,
+            "matched_alias": "", "reason_code": "language_preference",
+            "requires_live_data": False, "live_source": "",
+        })
 
     if not normalized_query:
-        return {
+        return with_details({
             "intent": "REJECT",
             "intent_id": "REJECT",
             "confidence": 0.0,
@@ -687,7 +963,23 @@ def classify_message(message: str, requested_language: Optional[str] = "auto") -
             "requires_live_data": False,
             "live_source": "",
             "entities": entities,
-        }
+        }, "unknown_intent")
+
+    brands = mentioned_brands(normalized_query)
+    if len(brands) > 1:
+        entities = {"brand": None, "model": None}
+        names = " and ".join(brands)
+        reply = {
+            "en": f"Are you asking me to compare current {names} vehicle listings?",
+            "fil": f"Gusto mo bang ihambing ang kasalukuyang {names} vehicle listings?",
+            "taglish": f"Gusto mo bang i-compare ang current {names} vehicle listings?",
+        }[style]
+        return with_details({
+            "intent": "REJECT", "intent_id": "REJECT", "confidence": 0.7, "score": 0.7,
+            "reply": reply, "alternatives": [], "top_preds": [], "requires_clarification": True,
+            "matched_alias": "", "reason_code": "multiple_brands",
+            "requires_live_data": False, "live_source": "",
+        }, "ambiguous_entity", "brand")
 
     suggested_brand = find_safe_brand_typo(normalized_query) if not entities["brand"] else None
     if suggested_brand:
@@ -696,7 +988,7 @@ def classify_message(message: str, requested_language: Optional[str] = "auto") -
             "score": 0.74,
             "matched_source": "brand_spelling_clarification",
         }]
-        return {
+        return with_details({
             "intent": "REJECT",
             "intent_id": "REJECT",
             "confidence": 0.74,
@@ -716,7 +1008,7 @@ def classify_message(message: str, requested_language: Optional[str] = "auto") -
             "requires_live_data": False,
             "live_source": "",
             "entities": entities,
-        }
+        }, "spelling_confirmation", "brand")
 
     matched_ids, exact_reason = exact_candidates(normalized_query)
     candidates = rank_exact_candidates(matched_ids) if matched_ids else retrieve_intents(normalized_query)
@@ -728,7 +1020,27 @@ def classify_message(message: str, requested_language: Optional[str] = "auto") -
         and candidates[0].get("matched_source") != "controlled_alias"
         else ""
     )
-    if entities["brand"]:
+    self_gender_question = any(pattern.search(normalized_query) for pattern in SELF_GENDER_QUESTION_PATTERNS)
+    personal_booking_intent = next(
+        (intent_id for intent_id, patterns in PERSONAL_BOOKING_PATTERNS
+         if any(pattern.search(normalized_query) for pattern in patterns)),
+        None,
+    )
+    pickup_time = bool(PICKUP_TIME_PATTERN.search(normalized_query))
+    vehicle_budget_search = "max_budget" in entities and bool(entities.get("brand") or entities.get("category"))
+    if self_gender_question:
+        candidates = prioritize_intent(candidates, "chat_gender_identity", "assistant_gender_question")
+        decision_reason = "assistant_gender_question"
+    elif personal_booking_intent:
+        candidates = prioritize_intent(candidates, personal_booking_intent, "renter_booking_status_question")
+        decision_reason = "renter_booking_status_question"
+    elif pickup_time:
+        candidates = prioritize_intent(candidates, "booking_pickup_time", "pickup_time_context")
+        decision_reason = "pickup_time_context"
+    elif vehicle_budget_search or context_followup:
+        candidates = prioritize_intent(candidates, "available_vehicles", "vehicle_budget_context")
+        decision_reason = "vehicle_budget_context"
+    elif entities["brand"]:
         current_intent = candidates[0]["intent"] if candidates else ""
         if RATE_QUERY_PATTERN.search(normalized_query):
             target_intent = "rental_rate"
@@ -768,14 +1080,14 @@ def classify_message(message: str, requested_language: Optional[str] = "auto") -
             if low_confidence
             else "ambiguous_intent"
         )
-        return {
+        return with_details({
             "intent": "REJECT",
             "intent_id": "REJECT",
             "confidence": round(top_score, 6),
             "score": round(top_score, 6),
             "language": style,
             "reply_lang": style,
-            "reply": clarification_reply(candidates, style),
+            "reply": clarification_reply(candidates, style, normalized_query),
             "alternatives": build_alternatives(candidates),
             "top_preds": [
                 {"intent_id": candidate["intent"], "id": candidate["intent"], "score": round(float(candidate["score"]), 6)}
@@ -787,30 +1099,48 @@ def classify_message(message: str, requested_language: Optional[str] = "auto") -
             "requires_live_data": False,
             "live_source": "",
             "entities": entities,
-        }
+        }, "ambiguous_intent" if ambiguous or exact_ambiguous else "unknown_intent")
 
     selected_intent = candidates[0]["intent"]
     selected_item = INTENTS_BY_ID[selected_intent]
-    return {
+    missing_rate_unit = selected_intent == "available_vehicles" and "max_budget" in entities and "rate_unit" not in entities
+    missing_booking = selected_intent == "booking_pickup_time"
+    if missing_rate_unit:
+        currency_amount = f"PHP {entities['max_budget']:,.0f}"
+        reply = {
+            "en": f"Is your {currency_amount} budget per day or per hour?",
+            "fil": f"Ang {currency_amount} budget mo ba ay bawat araw o bawat oras?",
+            "taglish": f"Yung {currency_amount} budget mo ba ay per day or per hour?",
+        }[style]
+    elif missing_booking:
+        reply = {
+            "en": "Pickup time is set for each booking. Which booking or vehicle are you asking about? Check your booking details for the scheduled time.",
+            "fil": "Nakatakda ang oras ng pagkuha sa bawat booking. Aling booking o sasakyan ang tinutukoy mo? Tingnan ang detalye ng booking para sa oras nito.",
+            "taglish": "Pickup time depends on your booking. Aling booking or vehicle ang tinutukoy mo? Check your booking details for the scheduled time.",
+        }[style]
+    else:
+        reply = select_response(selected_intent, style, normalized_query)
+    return with_details({
         "intent": selected_intent,
         "intent_id": selected_intent,
         "confidence": round(top_score, 6),
         "score": round(top_score, 6),
         "language": style,
         "reply_lang": style,
-        "reply": select_response(selected_intent, style, normalized_query),
+        "reply": reply,
         "alternatives": build_alternatives(candidates, exclude_intent=selected_intent),
         "top_preds": [
             {"intent_id": candidate["intent"], "id": candidate["intent"], "score": round(float(candidate["score"]), 6)}
             for candidate in candidates
         ],
-        "requires_clarification": False,
+        "requires_clarification": missing_rate_unit or missing_booking,
         "matched_alias": candidates[0].get("matched_alias", "") or (clean_message if exact_reason == "exact_alias" else ""),
-        "reason_code": decision_reason or exact_reason or candidates[0].get("matched_source", "semantic_match"),
-        "requires_live_data": selected_item["requires_live_data"],
+        "reason_code": "missing_rate_unit" if missing_rate_unit else "missing_booking" if missing_booking else decision_reason or exact_reason or candidates[0].get("matched_source", "semantic_match"),
+        "requires_live_data": selected_item["requires_live_data"] and not (missing_rate_unit or missing_booking),
         "live_source": selected_item["live_source"],
         "entities": entities,
-    }
+    }, "missing_entity" if missing_rate_unit or missing_booking else None,
+        "rate_unit" if missing_rate_unit else "booking" if missing_booking else None)
 
 
 if not DATASET_PATH.is_file():
@@ -854,4 +1184,4 @@ def health() -> Dict[str, str]:
 
 @app.post("/chat")
 def chat(req: ChatRequest) -> Dict[str, Any]:
-    return classify_message(req.message, req.language)
+    return classify_message(req.message, req.language, req.previous_language, req.previous_context)

@@ -19,6 +19,11 @@ import { auditLog } from "../middleware/auditLogger.middleware.js";
 import { chatbotConcurrencyGuard, chatbotLimiter } from "../middleware/security.middleware.js";
 import Booking from "../models/Booking.js";
 import Vehicle from "../models/Vehicle.js";
+import {
+  getRenterBookingStatusReply,
+  renterBookingRenterOnlyReply,
+  renterBookingSignInReply,
+} from "../services/chatbotBookingStatus.service.js";
 import { ensureChatbotServiceReady } from "../utils/chatbotServiceManager.js";
 import { censorProfanityInText } from "../utils/chatModeration.js";
 import {
@@ -26,6 +31,7 @@ import {
   buildRejectedChatbotResponse,
   buildChatbotPayload,
   normalizeChatbotResponse,
+  normalizePendingVehicleSearch,
   validateChatbotInput,
 } from "../utils/chatbotPayload.js";
 
@@ -39,11 +45,17 @@ const LIVE_VEHICLE_INTENTS = new Set([
   "passenger_capacity",
   "vehicle_brand_search",
 ]);
+const PRIVATE_BOOKING_STATUS_INTENTS = new Set([
+  "booking_status", "my_active_bookings", "my_overdue_return", "my_unpaid_balance",
+]);
 
 router.post("/", chatbotLimiter, chatbotConcurrencyGuard, async (req, res, next) => {
   try {
     const rawMessage = String(req.body?.message || "");
     const language = String(req.body?.language || "auto").trim().toLowerCase();
+    const previousLanguage = ["en", "fil", "taglish"].includes(req.body?.previousLanguage)
+      ? req.body.previousLanguage : null;
+    const previousContext = normalizePendingVehicleSearch(req.body?.pendingSearch);
     const validation = validateChatbotInput(rawMessage);
     if (!validation.isValid) {
       const rejectedResponse = buildRejectedChatbotResponse(
@@ -71,13 +83,15 @@ router.post("/", chatbotLimiter, chatbotConcurrencyGuard, async (req, res, next)
       `${chatbotBaseUrl}/chat`,
       {
         message: payload.originalMessage,
-        language: payload.selectedLanguage,
+        language: ["auto", "english", "filipino", "taglish", "en", "fil", "tag"].includes(language) ? language : "auto",
+        previous_language: previousLanguage,
+        previous_context: previousContext,
       },
       { timeout: 15000 }
     );
 
     const chatbotResponse = normalizeChatbotResponse(classifierResponse, payload.selectedLanguage);
-    const needsLiveVehicleData = chatbotResponse.valid && (
+    const needsLiveVehicleData = chatbotResponse.valid && !chatbotResponse.requires_clarification && (
       LIVE_VEHICLE_INTENTS.has(chatbotResponse.intent) ||
       (chatbotResponse.intent === "rental_rate" && chatbotResponse.entities?.brand)
     );
@@ -110,12 +124,47 @@ router.post("/", chatbotLimiter, chatbotConcurrencyGuard, async (req, res, next)
     }
 
     const finalResponse = applyChatbotGuardrails(chatbotResponse, payload);
+    if (chatbotResponse.valid && !chatbotResponse.requires_clarification
+      && PRIVATE_BOOKING_STATUS_INTENTS.has(chatbotResponse.intent)) {
+      res.set("Cache-Control", "no-store");
+      const replyWithStatus = (reply, reasonCode, usedLiveData = false) => res.json({
+        ...finalResponse,
+        reply,
+        reason_code: reasonCode,
+        requires_live_data: usedLiveData,
+        recommendations: [],
+      });
+      if (!req.cookies?.token) {
+        return replyWithStatus(renterBookingSignInReply(finalResponse.language), "authentication_required");
+      }
+      return protect(req, res, async (authError) => {
+        if (authError) return next(authError);
+        if (req.user?.role !== "user") {
+          return replyWithStatus(renterBookingRenterOnlyReply(finalResponse.language), "renter_account_required");
+        }
+        try {
+          const reply = await getRenterBookingStatusReply(
+            req.user._id, chatbotResponse.intent, finalResponse.language
+          );
+          return replyWithStatus(reply, "authenticated_renter_booking_status", true);
+        } catch (error) {
+          return next(error);
+        }
+      });
+    }
 
     if (!isProduction) {
       auditLog.info("CHATBOT", "RentifyAI routing", {
         inputLength: message.length,
         classifierIntent: chatbotResponse.intent,
         confidence: chatbotResponse.confidence,
+        style: finalResponse.language,
+        brand: chatbotResponse.entities?.brand || null,
+        category: chatbotResponse.entities?.category || null,
+        rateUnit: chatbotResponse.entities?.rate_unit || null,
+        hasBudget: Boolean(chatbotResponse.entities?.max_budget),
+        conditionKeys: Object.keys(chatbotResponse.conditions || {}),
+        clarificationType: finalResponse.clarification?.type || null,
         alternative: chatbotResponse.alternatives?.[0] || null,
         requiresLiveData: Boolean(finalResponse.requires_live_data),
         clarification: Boolean(finalResponse.requires_clarification),

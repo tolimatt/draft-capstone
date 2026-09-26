@@ -268,3 +268,96 @@ test("document numbers are masked and fingerprinted only after hard gates pass",
     else process.env.KYC_DOCUMENT_FINGERPRINT_SECRET = originalSecret;
   }
 });
+
+const supportingExtraction = {
+  ...validIdExtraction,
+  document_type: "BIR Notice to Issue Receipt/Invoice",
+  document_surface: "OFFICIAL_DIGITAL_DOCUMENT",
+  structural_features: {
+    ...passportStructure,
+    holder_portrait_present: false,
+    document_number_region_present: false,
+    birth_date_region_present: false,
+    expiration_date_region_present: false,
+    machine_readable_zone_present: false,
+    business_registration_features_present: true,
+  },
+  extracted_data: {
+    business_name: "Maria's Motors",
+    full_name: "Maria Cruz",
+    tax_identification_number: "123456789",
+    branch_code: "00000",
+    document_number: "",
+    permit_number: "",
+  },
+};
+
+const evaluateSupporting = (selectedDocType, extraction, suppliedProfile) => evaluateDocumentExtraction({
+  extraction,
+  docType: "supporting",
+  selectedDocType,
+  profile: suppliedProfile,
+  allowAutomaticVerification: true,
+  now: new Date("2026-01-01T00:00:00.000Z"),
+});
+
+test("BIR notice uses visible TIN and branch code without inventing a permit number", () => {
+  const inspection = normalizeDocumentInspection(supportingExtraction);
+  assert.equal(inspection.extracted_data.tax_identification_number, "123456789");
+  assert.equal(inspection.extracted_data.branch_code, "00000");
+  assert.match(buildDocumentExtractionInstruction({ docType: "supporting" }), /Do not treat a TIN as a permit number/);
+  const result = evaluateSupporting("BIR Notice to Issue Receipt/Invoice", supportingExtraction, {
+    business_name: "Maria's Motors",
+    tax_identification_number: "123456789",
+    branch_code: "00000",
+  });
+  assert.equal(result.status, "verified");
+  assert.equal(result.checks.structuralFeaturesPresent, true);
+  assert.equal(result.checks.permitNumberMatches, true);
+  assert.equal(result.extractedData.documentNumberMasked, "**** 0000");
+  assert.equal(JSON.stringify(result).includes("123456789"), false);
+
+  const mismatch = evaluateSupporting("BIR Notice to Issue Receipt/Invoice", supportingExtraction, {
+    business_name: "Maria's Motors",
+    tax_identification_number: "123456789",
+    branch_code: "00001",
+  });
+  assert.equal(mismatch.status, "pending_review");
+  assert.deepEqual(mismatch.mismatchFields, ["TIN or branch code"]);
+});
+
+test("BIR certificate requires both visible TIN and branch code", () => {
+  const extraction = { ...supportingExtraction, document_type: "BIR Certificate of Registration (Form 2303)" };
+  const result = evaluateSupporting(extraction.document_type, extraction, {
+    business_name: "Maria's Motors", tax_identification_number: "123456789", branch_code: "00000",
+  });
+  assert.equal(result.status, "verified");
+  const missingBranch = evaluateSupporting(extraction.document_type, {
+    ...extraction,
+    structural_features: { ...extraction.structural_features, document_number_region_present: true },
+    extracted_data: { ...extraction.extracted_data, branch_code: "" },
+  }, {
+    business_name: "Maria's Motors", tax_identification_number: "123456789", branch_code: "00000",
+  });
+  assert.equal(missingBranch.status, "reupload_required");
+  assert.equal(missingBranch.reasonCode, DOCUMENT_REASON_CODES.REQUIRED_FIELDS_MISSING);
+});
+
+test("permit documents still compare their permit number, while numberless clearance needs review", () => {
+  const permit = evaluateSupporting("Mayor's/Business Permit", {
+    ...supportingExtraction,
+    document_type: "Mayor's/Business Permit",
+    structural_features: { ...supportingExtraction.structural_features, document_number_region_present: true },
+    extracted_data: { business_name: "Maria's Motors", permit_number: "MP-123", document_number: "MP-123" },
+  }, { business_name: "Maria's Motors", permit_number: "MP-123" });
+  assert.equal(permit.status, "verified");
+
+  const clearance = evaluateSupporting("Barangay Business Clearance", {
+    ...supportingExtraction,
+    document_type: "Barangay Business Clearance",
+    extracted_data: { business_name: "Maria's Motors", document_number: "", permit_number: "" },
+  }, { business_name: "Maria's Motors", permit_number: "" });
+  assert.equal(clearance.status, "pending_review");
+  assert.equal(clearance.reasonCode, DOCUMENT_REASON_CODES.REVIEW_REQUIRED);
+  assert.equal(clearance.checks.requiredFieldsPresent, true);
+});

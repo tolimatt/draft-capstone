@@ -102,9 +102,10 @@ const createWelcomeMessage = (language, date = new Date()) => ({
   showViewAvailableVehicles: false,
 });
 
-const formatHourlyRate = (value) => {
-  const amount = Number(value || 0);
-  return `P${amount.toLocaleString()} / hour`;
+const formatRecommendationRate = (vehicle) => {
+  const amount = Number(vehicle.displayRate ?? vehicle.hourlyRate ?? vehicle.dailyRate ?? 0);
+  const unit = vehicle.displayRateUnit === "day" ? "day" : "hour";
+  return `P${amount.toLocaleString()} / ${unit}`;
 };
 
 const normalizeRecommendations = (recommendations) =>
@@ -149,6 +150,10 @@ const normalizeMessage = (message) => {
     sender,
     text,
     recommendations: sender === "bot" ? normalizeRecommendations(message.recommendations) : [],
+    replyStyle: sender === "bot" && ["en", "fil", "taglish"].includes(message.replyStyle)
+      ? message.replyStyle : null,
+    pendingSearch: sender === "bot" && message.pendingSearch && typeof message.pendingSearch === "object"
+      ? message.pendingSearch : null,
     showViewAvailableVehicles:
       sender === "bot" ? Boolean(message.showViewAvailableVehicles) : false,
   };
@@ -297,6 +302,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
   const [draftByLanguage, setDraftByLanguage] = useState(initialState.drafts);
   const [isSending, setIsSending] = useState(false);
   const bottomRef = useRef(null);
+  const inputRef = useRef(null);
   const conversationIdRef = useRef(initialState.conversation.id);
 
   const messages = ensureConversation(messagesByLanguage[language], language);
@@ -340,6 +346,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
       window.sessionStorage.removeItem(getStorageKey(storageScope));
     }
     replaceChatState(getDefaultChatState());
+    inputRef.current?.focus();
   }, [replaceChatState, storageScope]);
 
   useEffect(() => {
@@ -392,6 +399,10 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [isOpen, messages, isSending]);
 
+  useEffect(() => {
+    if (isOpen) inputRef.current?.focus();
+  }, [isOpen, language]);
+
   const updateMessagesForLanguage = (targetLanguage, updater) => {
     setMessagesByLanguage((current) => {
       const currentMessages = ensureConversation(current[targetLanguage], targetLanguage);
@@ -433,7 +444,16 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
       updateDraftForLanguage(activeLanguage, limitedDraft);
     }
 
+    inputRef.current?.focus();
     if (!message || isSending) return;
+
+    const previousLanguage = [...(messagesByLanguage[activeLanguage] || [])]
+      .reverse()
+      .find((item) => item.sender === "bot" && ["en", "fil", "taglish"].includes(item.replyStyle))?.replyStyle || null;
+    const lastBotMessage = [...(messagesByLanguage[activeLanguage] || [])]
+      .reverse()
+      .find((item) => item.sender === "bot" && !isWelcomeMessage(item));
+    const pendingSearch = lastBotMessage?.pendingSearch || null;
 
     const requestConversationId = conversationIdRef.current;
     const userMessageId = `user-${Date.now()}`;
@@ -453,7 +473,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
     const thinkingStartedAt = Date.now();
 
     try {
-      const response = await API.chatWithBot({ message, language: "auto" });
+      const response = await API.chatWithBot({ message, language: "auto", previousLanguage, pendingSearch });
       const remainingThinkingTime = Math.max(
         0,
         MIN_THINKING_DISPLAY_MS - (Date.now() - thinkingStartedAt)
@@ -477,6 +497,9 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
           {
             id: `bot-${Date.now()}`,
             sender: "bot",
+            replyStyle: ["en", "fil", "taglish"].includes(response.language) ? response.language : null,
+            pendingSearch: response.intent === "available_vehicles" && response.clarification?.field === "rate_unit"
+              ? response.entities : null,
             text:
               response.reply ||
               (activeLanguage === "filipino"
@@ -611,7 +634,7 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
                         {vehicle.seats || 0} seats
                       </p>
                       <p className="mt-2 text-sm font-semibold text-[#0B75E7]">
-                        {formatHourlyRate(vehicle.hourlyRate ?? vehicle.dailyRate)}
+                        {formatRecommendationRate(vehicle)}
                       </p>
                     </article>
                   ))}
@@ -676,6 +699,8 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
       <div className="border-t border-slate-200/80 bg-white/95 p-3.5 backdrop-blur">
         <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-1.5 transition focus-within:border-blue-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-blue-50">
           <input
+            ref={inputRef}
+            aria-label="Message Rentify AI"
             value={draft}
             onChange={(event) =>
               updateDraftForLanguage(language, limitDraftInput(event.target.value))
@@ -692,7 +717,6 @@ export default function ChatWidget({ isOpen, onClose, onViewAvailableVehicles })
                 : "Ask about vehicles or booking..."
             }
             className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-slate-800 outline-none placeholder:text-slate-400"
-            disabled={isSending}
             maxLength={CHAT_INPUT_MAX_LENGTH}
           />
           <button

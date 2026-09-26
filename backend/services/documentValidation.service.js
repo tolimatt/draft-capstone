@@ -23,6 +23,13 @@ export const SUPPORTING_DOCUMENT_TYPES = [
   "CDA Certificate of Registration",
 ];
 
+const BIR_SUPPORTING_TYPES = new Set([
+  "BIR Certificate of Registration (Form 2303)",
+  "BIR Notice to Issue Receipt/Invoice",
+]);
+const OPTIONAL_REFERENCE_TYPES = new Set(["Barangay Business Clearance"]);
+export const isBirSupportingDocumentType = (value) => BIR_SUPPORTING_TYPES.has(value);
+
 export const UNKNOWN_DOCUMENT_TYPE = "Unknown";
 
 export const DOCUMENT_REASON_CODES = Object.freeze({
@@ -167,6 +174,8 @@ const detectedFields = (data) => Object.entries({
   expirationDate: data.expiration_date,
   businessName: data.business_name,
   permitNumber: data.permit_number,
+  taxIdentificationNumber: data.tax_identification_number,
+  branchCode: data.branch_code,
 }).filter(([, value]) => Boolean(clean(value))).map(([key]) => key);
 
 const clampPercentage = (value) => Math.max(0, Math.min(100, Number(value) || 0));
@@ -185,12 +194,18 @@ const getStructuralChecks = (extraction, canonicalType, docType) => {
   const layoutConsistent = features.layout_consistent === true;
   const hasFace = features.holder_portrait_present === true || extraction.has_face === true;
   const documentNumberRegionPresent = features.document_number_region_present === true;
+  const birIdentifierVisible = isBirSupportingDocumentType(canonicalType)
+    && Boolean(normalizeIdentifier(extraction.extracted_data?.tax_identification_number)
+      && normalizeIdentifier(extraction.extracted_data?.branch_code));
   const birthDateRegionPresent = features.birth_date_region_present === true;
   const expirationDateRegionPresent = features.expiration_date_region_present === true;
   const machineReadableZonePresent = features.machine_readable_zone_present === true;
   const businessRegistrationFeaturesPresent = features.business_registration_features_present === true;
 
-  let structuralFeaturesPresent = officialMarkingsPresent && layoutConsistent && documentNumberRegionPresent;
+  const numberRegionRequired = docType !== "supporting"
+    || !OPTIONAL_REFERENCE_TYPES.has(canonicalType);
+  let structuralFeaturesPresent = officialMarkingsPresent && layoutConsistent
+    && (!numberRegionRequired || documentNumberRegionPresent || birIdentifierVisible);
   if (docType === "supporting") {
     structuralFeaturesPresent = structuralFeaturesPresent && businessRegistrationFeaturesPresent;
   } else {
@@ -278,14 +293,21 @@ export const evaluateDocumentExtraction = ({
   const structural = getStructuralChecks(extraction, detectedCanonical, docType);
   const authenticityUncertain = extraction.authenticity_uncertain === true;
   const suspectedTampering = extraction.suspected_tampering === true;
-  const documentNumber = clean(data.document_number || data.permit_number, 120);
+  const isBirSupporting = docType === "supporting" && isBirSupportingDocumentType(detectedCanonical);
+  const optionalReference = docType === "supporting" && OPTIONAL_REFERENCE_TYPES.has(detectedCanonical);
+  const extractedTin = normalizeIdentifier(data.tax_identification_number);
+  const extractedBranch = normalizeIdentifier(data.branch_code);
+  const documentNumber = isBirSupporting
+    ? clean(extractedTin && extractedBranch ? `${extractedTin}-${extractedBranch}` : "", 120)
+    : clean(data.document_number || data.permit_number, 120);
   const extractedBirthDate = normalizeDate(data.birth_date);
   const expired = isExpired(data.expiration_date, now);
   const requiredFieldsPresent = docType === "id"
     ? Boolean(clean(data.full_name) && extractedBirthDate && documentNumber)
       && (detectedCanonical !== "Philippine Passport" || Boolean(normalizeDate(data.expiration_date)))
       && (detectedCanonical !== "LTO Driver's License" || Boolean(normalizeDate(data.expiration_date)))
-    : Boolean((clean(data.business_name) || clean(data.full_name)) && documentNumber);
+    : Boolean((clean(data.business_name) || clean(data.full_name))
+      && (optionalReference || (isBirSupporting ? extractedTin && extractedBranch : documentNumber)));
 
   const checks = {
     imageReadable,
@@ -413,13 +435,18 @@ export const evaluateDocumentExtraction = ({
     : Boolean(extractedBirthDate && expectedBirthDate === extractedBirthDate);
   const expectedPermit = normalizeIdentifier(profile.permit_number);
   const extractedPermit = normalizeIdentifier(data.permit_number || data.document_number);
+  const expectedTin = normalizeIdentifier(profile.tax_identification_number);
+  const expectedBranch = normalizeIdentifier(profile.branch_code);
   const permitNumberMatches = docType !== "supporting"
-    || !expectedPermit
-    || Boolean(extractedPermit && expectedPermit === extractedPermit);
+    || (isBirSupporting
+      ? Boolean(expectedTin && expectedBranch && extractedTin === expectedTin && extractedBranch === expectedBranch)
+      : optionalReference && !expectedPermit
+        ? true
+        : Boolean(expectedPermit && extractedPermit && expectedPermit === extractedPermit));
   const mismatchFields = [];
   if (!nameMatches) mismatchFields.push(docType === "id" ? "Name" : "Registered name");
   if (birthDateMatches === false) mismatchFields.push("Date of birth");
-  if (!permitNumberMatches) mismatchFields.push("Permit or registration number");
+  if (!permitNumberMatches) mismatchFields.push(isBirSupporting ? "TIN or branch code" : "Permit or registration number");
   checks.nameMatches = nameMatches;
   checks.birthDateMatches = birthDateMatches;
   checks.permitNumberMatches = permitNumberMatches;
@@ -437,6 +464,13 @@ export const evaluateDocumentExtraction = ({
     return buildResult({
       status: "pending_review",
       reasonCode: DOCUMENT_REASON_CODES.DUPLICATE_DOCUMENT,
+      compareData: true,
+    });
+  }
+  if (optionalReference && !documentNumber) {
+    return buildResult({
+      status: "pending_review",
+      reasonCode: DOCUMENT_REASON_CODES.REVIEW_REQUIRED,
       compareData: true,
     });
   }

@@ -64,7 +64,7 @@ const toReviewError = (failure) => {
   };
 };
 
-export default function PreKycReviewNotice({ email, role = "user", enabled, onResubmit, onIdStatus, onDocumentsChange }) {
+export default function PreKycReviewNotice({ email, role = "user", enabled, onResubmit, onCorrectDetails, onIdStatus, onDocumentsChange, refreshKey = 0, ignoreSupportingDocument = false }) {
   const [documents, setDocuments] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -91,7 +91,8 @@ export default function PreKycReviewNotice({ email, role = "user", enabled, onRe
       try {
         const result = await getPreKycStatus(email, role);
         if (!active) return;
-        const nextDocuments = result.documents || [];
+        const nextDocuments = (result.documents || []).filter((document) =>
+          !(ignoreSupportingDocument && document.docType === "supporting"));
         setDocuments(nextDocuments);
         onDocumentsChange?.(nextDocuments);
         setError(null);
@@ -113,13 +114,15 @@ export default function PreKycReviewNotice({ email, role = "user", enabled, onRe
       active = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [email, role, enabled, onIdStatus, onDocumentsChange, refreshSignal]);
+  }, [email, role, enabled, onIdStatus, onDocumentsChange, refreshSignal, refreshKey, ignoreSupportingDocument]);
   if (!enabled) return null;
 
   const expectedDocuments = role === "owner"
     ? [{ type: "supporting", label: "Supporting document" }, { type: "id", label: "Government ID" }]
     : [{ type: "id", label: "Government ID" }];
-  const documentsByType = new Map(documents.map((document) => [document.docType, document]));
+  const documentsByType = new Map(documents
+    .filter((document) => !(ignoreSupportingDocument && document.docType === "supporting"))
+    .map((document) => [document.docType, document]));
   const showInitialLoading = loading && documents.length === 0 && !error;
 
   return <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -145,6 +148,9 @@ export default function PreKycReviewNotice({ email, role = "user", enabled, onRe
         const status = document?.status || "not_uploaded";
         const typeMismatch = status === "reupload_required"
           && document?.reasonCode === "DOCUMENT_TYPE_MISMATCH";
+        const supportingDetailsMismatch = type === "supporting"
+          && status === "pending_review"
+          && document?.reasonCode === "IDENTITY_DATA_MISMATCH";
         const expectedType = documentTypeLabel(document?.selectedDocCategory, label);
         const detectedType = documentTypeLabel(document?.docCategory, "Unknown");
         return <div key={type} className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
@@ -164,6 +170,10 @@ export default function PreKycReviewNotice({ email, role = "user", enabled, onRe
             </div>
           </dl>}
           {["pending_review", "reupload_required", "rejected"].includes(status) && document?.reason && <p className={`mt-2 break-words ${status === "pending_review" ? "text-amber-900" : "text-rose-700"}`}><span className="font-semibold">Next step:</span> {document.reason}</p>}
+          {supportingDetailsMismatch && <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+            <button type="button" onClick={onCorrectDetails} className="font-semibold text-blue-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Check registration details</button>
+            <button type="button" onClick={() => onResubmit?.(type)} className="font-semibold text-blue-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Upload another document</button>
+          </div>}
           {["reupload_required", "rejected"].includes(status) && <button type="button" onClick={() => onResubmit?.(type)} className="mt-2 font-semibold text-blue-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">Upload a new document</button>}
         </div>;
       })}

@@ -71,6 +71,9 @@ const preKycDocumentSchema = new mongoose.Schema(
     documentNumberFingerprint: { type: String, default: "", select: false, index: true },
     provider: { type: String, default: "gemini" },
     processingAttempts: { type: Number, default: 0 },
+    queuedAt: { type: Date, default: null },
+    // Changes for every screening request, including a corrected profile with the same file.
+    reviewVersion: { type: String, default: "" },
     nextAttemptAt: { type: Date, default: null, index: true },
     processingLockedAt: { type: Date, default: null },
     lastProcessedAt: { type: Date, default: null },

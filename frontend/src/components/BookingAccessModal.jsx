@@ -20,12 +20,12 @@ export default function BookingAccessModal({
         <div className="px-6 pt-5 pb-4 sm:px-7 border-b border-slate-200 bg-gradient-to-r from-[#0B75E7]/10 via-white to-white">
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
+            className="absolute right-2 top-2 inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200"
             aria-label="Close"
           >
             <X size={16} />
           </button>
-          <h3 className="text-xl font-bold text-slate-900">Bookings require an account</h3>
+          <h3 className="pr-10 text-xl font-bold text-slate-900">Bookings require an account</h3>
           <p className="text-sm text-slate-600 mt-1">
             Sign in or register to view your booking history, status updates, and notifications.
           </p>

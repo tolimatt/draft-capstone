@@ -117,6 +117,7 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar, isS
 
           {/* notifications */}
           <button
+            type="button"
             onClick={() => {
               if (onNavigateToNotifications) {
                 onNavigateToNotifications();
@@ -125,12 +126,13 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar, isS
               window.dispatchEvent(new CustomEvent("navigate", { detail: "Notifications" }));
             }}
             className="
-              relative w-10 h-10 rounded-xl
+              relative h-11 w-11 rounded-xl
               bg-white/15 border border-white/20
               hover:bg-white/25 transition
               flex items-center justify-center
             "
             title="Notifications"
+            aria-label="Notifications"
           >
             <Bell size={18} className="text-white" />
             {unreadNotifications > 0 && (
@@ -142,6 +144,7 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar, isS
 
           {/* add vehicle */}
           <button
+            type="button"
             onClick={() => {
               window.dispatchEvent(
                 new CustomEvent("navigate", { detail: "Vehicles" })
@@ -151,7 +154,7 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar, isS
               }, 0);
             }}
             className="
-              h-10 px-3 sm:px-4 rounded-xl
+              h-11 px-3 sm:px-4 rounded-xl
               bg-white text-[#017FE6]
               font-semibold
               hover:bg-white/90 transition
@@ -160,6 +163,7 @@ export default function Topbar({ onNavigateToNotifications, onToggleSidebar, isS
             style={{
               boxShadow: "0 10px 22px rgba(0,0,0,0.18)",
             }}
+            aria-label="Add vehicle"
           >
             <Plus size={18} />
             <span className="hidden sm:inline">Add Vehicle</span>

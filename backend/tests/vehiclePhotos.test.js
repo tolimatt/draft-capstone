@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import express from "express";
 import jwt from "jsonwebtoken";
+import RevokedSession from "../models/RevokedSession.js";
 import sharp from "sharp";
 import Vehicle from "../models/Vehicle.js";
 import VehiclePhoto from "../models/VehiclePhoto.js";
@@ -142,6 +143,7 @@ test("HTTP photo routes reject unauthenticated access and owner attempts to appr
   const previousSecret = process.env.JWT_SECRET;
   process.env.JWT_SECRET = "vehicle-photo-test-secret";
   t.mock.method(User, "findById", () => ({ select: async () => ({ _id: owner, role: "owner", isVerified: true, sessionVersion: 0 }) }));
+  t.mock.method(RevokedSession, "exists", async () => null);
   const app = express(); app.use(express.json());
   app.use((req, _res, next) => { req.cookies = req.headers["x-fixture-token"] ? { token: req.headers["x-fixture-token"] } : {}; next(); });
   app.use("/api/vehicle-photos", vehiclePhotoRoutes);

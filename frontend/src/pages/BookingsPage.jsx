@@ -1,6 +1,7 @@
 import VehicleThumbnail from "../components/VehicleThumbnail";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RequestFeedback from "../components/RequestFeedback";
+import { BookingListSkeleton } from "../components/LoadingSkeletons";
 import { bookingStatusLabel, bookingGuidance } from "../utils/workflowStatus";
 import {
   CalendarDays,
@@ -1157,7 +1158,8 @@ export default function BookingsPage({
           ))}
         </div>
 
-        <RequestFeedback loading={loading || refreshing} label={refreshing ? "Refreshing bookings..." : "Loading bookings..."} error={loadError} onRetry={() => load({ background: bookings.length > 0 })} />
+        <RequestFeedback loading={refreshing} label="Refreshing bookings..." error={loadError} onRetry={() => load({ background: bookings.length > 0 })} />
+        {loading && <BookingListSkeleton />}
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         {paymentNotice && <p role="status" className="text-sm text-emerald-700">{paymentNotice}</p>}
         {paymentRecovery && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p>Checking payment for booking #{paymentRecovery.bookingId.slice(-6).toUpperCase()}. Keep this page open or return to it to verify the same checkout.</p><button type="button" disabled={Boolean(verifyingBookingId)} onClick={() => setPaymentRetrySignal((value) => value + 1)} className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold disabled:opacity-50">{verifyingBookingId ? "Checking payment..." : "Check payment status"}</button></div>}

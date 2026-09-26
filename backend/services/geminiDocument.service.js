@@ -67,7 +67,7 @@ export const buildDocumentExtractionInstruction = ({ docType = "id" } = {}) => {
   const allowedTypes = isId ? ID_DOCUMENT_TYPES : SUPPORTING_DOCUMENT_TYPES;
   const fieldInstructions = isId
     ? "Extract the holder's full name, birth date, document number, issue date, and expiration date when visibly present."
-    : "Extract the registered person name, business name, permit or registration number, issue date, and expiration date when visibly present.";
+    : "Extract the registered person name, business name, document reference, permit or registration number, issue date, and expiration date when visibly present. For a BIR Certificate of Registration or Notice to Issue Receipt/Invoice, extract the 9-digit TIN and its branch code into separate fields. Do not treat a TIN as a permit number. Do not invent a permit or document number if none is visible.";
 
   return `Independently inspect one uploaded Philippine ${isId ? "identity" : "business registration"} document for RentifyPro.
 Do not approve, reject, or compare the upload with any registration data. No user-selected document type is provided to you.
@@ -88,7 +88,7 @@ document_surface must be exactly one of: PHYSICAL_DOCUMENT, OFFICIAL_DIGITAL_DOC
 For a Philippine Passport, confirm the passport layout, holder portrait, document-number area, biographic-data area, expiration-date area, and machine-readable zone.
 For an LTO Driver's License, confirm the license-card layout, official markings, holder portrait, license-number area, birth-date area, and expiration-date area.
 For a PhilSys National ID or another supported ID, confirm the expected card layout, official markings, holder portrait, document-number area, and birth-date area.
-For a supporting business document, confirm the official registration or permit layout, issuing-body markings, registration-number area, and business-registration features.
+For a supporting business document, confirm the official layout, issuing-body markings, and business-registration features. The identifier area may show a permit or registration number, a TIN and branch code on a BIR document, or no reference number on a Barangay Business Clearance.
 Set authenticity_uncertain=true when the document is recognized but its official structure or visible security characteristics cannot be confidently assessed. Set suspected_tampering=true only for visible signs of alteration; do not claim issuer or database authentication.
 ${fieldInstructions}
 
@@ -121,7 +121,9 @@ Return JSON only with this exact structure:
     "issue_date": "YYYY-MM-DD" | "",
     "expiration_date": "YYYY-MM-DD" | "",
     "business_name": string,
-    "permit_number": string
+    "permit_number": string,
+    "tax_identification_number": string,
+    "branch_code": string
   }
 }`;
 };
@@ -182,6 +184,8 @@ export const normalizeDocumentInspection = (parsed) => {
       expiration_date: clean(data.expiration_date, 40),
       business_name: clean(data.business_name, 180),
       permit_number: clean(data.permit_number, 120),
+      tax_identification_number: clean(data.tax_identification_number, 40),
+      branch_code: clean(data.branch_code, 20),
     },
   };
 };

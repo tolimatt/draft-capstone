@@ -59,7 +59,7 @@ export async function reviewKycDocument({ id, action, remarks = "", reviewerId, 
   const now = new Date();
   const current = await PreKycDocument.findById(id);
   if (!current) throw fail(404, "This document is no longer available. Refresh the document list.");
-  if (reviewVersion && current.fileHash !== reviewVersion) {
+  if (reviewVersion && (current.reviewVersion || current.fileHash) !== reviewVersion) {
     throw fail(409, "The applicant uploaded a replacement document. Refresh and review the new file before deciding.");
   }
   if (current.status !== status && !REVIEWABLE_DOCUMENT_STATUSES.includes(current.status)) {
@@ -73,7 +73,7 @@ export async function reviewKycDocument({ id, action, remarks = "", reviewerId, 
   }
 
   const updated = current.status === status ? null : await PreKycDocument.findOneAndUpdate(
-    { _id: id, status: { $in: REVIEWABLE_DOCUMENT_STATUSES }, ...(reviewVersion ? { fileHash: reviewVersion } : {}) },
+    { _id: id, status: { $in: REVIEWABLE_DOCUMENT_STATUSES }, ...(reviewVersion ? { [current.reviewVersion ? "reviewVersion" : "fileHash"]: reviewVersion } : {}) },
     { $set: {
       status, reason: reason || "Approved by a RentifyPro administrator.",
       decisionSource: "admin_review",
@@ -84,11 +84,13 @@ export async function reviewKycDocument({ id, action, remarks = "", reviewerId, 
   );
   const document = updated || await PreKycDocument.findById(id);
   if (!document) throw fail(404, "This document is no longer available. Refresh the document list.");
-  if (reviewVersion && document.fileHash !== reviewVersion) throw fail(409, "The applicant uploaded a replacement document. Refresh and review the new file before deciding.");
+  if (reviewVersion && (document.reviewVersion || document.fileHash) !== reviewVersion) throw fail(409, "The applicant uploaded a replacement document. Refresh and review the new file before deciding.");
   if (document.status !== status) throw fail(409, "This document already has another decision. Refresh the document list before reviewing it.");
 
   if (updated) auditLog.info("KYC", "Manual document review completed", {
     reviewId: String(document._id), userId: String(reviewerId), action,
+    reviewWaitMs: document.lastProcessedAt ? Math.max(0, now - new Date(document.lastProcessedAt)) : null,
+    totalMs: document.queuedAt ? Math.max(0, now - new Date(document.queuedAt)) : null,
   });
   const sessionId = String(document.sessionId || "");
   if (sessionId.startsWith("user:") && mongoose.Types.ObjectId.isValid(sessionId.slice(5))) {

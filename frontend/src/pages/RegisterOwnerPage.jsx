@@ -35,15 +35,24 @@ import AuthShell from "../components/AuthShell";
 import LegalPolicyModal from "../components/LegalPolicyModal";
 import RegistrationDraftNotice from "../components/RegistrationDraftNotice";
 import RegistrationProgress from "../components/RegistrationProgress";
+import PasswordStrengthIndicator from "../components/PasswordStrengthIndicator";
 import SelfieCapture from "../components/SelfieCapture";
 import useRegistrationDraft from "../hooks/useRegistrationDraft";
 import useRegistrationEmailCheck from "../hooks/useRegistrationEmailCheck";
 import API from "../utils/api";
 import { ALLOWED_EMAIL_DOMAINS, NAME_REGEX } from "../data/registerValidation";
-import { ID_DOCUMENT_TYPES, SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
+import { BIR_SUPPORTING_DOCUMENT_TYPES, ID_DOCUMENT_TYPES, SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
-const STEP_LABELS = ["Account", "Owner profile", "Address", "Business document", "Identity", "Review"];
+const STEP_LABELS = ["Account", "Address", "Business document", "Identity", "Review"];
 const TOTAL_STEPS = STEP_LABELS.length;
+const BIR_DOCUMENT_TYPES = new Set(BIR_SUPPORTING_DOCUMENT_TYPES);
+const DOCUMENT_NUMBER_LABELS = {
+  "DTI Business Name Registration": "DTI registration number",
+  "SEC Certificate of Registration": "SEC registration number",
+  "Mayor's/Business Permit": "Business permit number",
+  "Barangay Business Clearance": "Clearance or reference number (if shown)",
+  "CDA Certificate of Registration": "CDA registration number",
+};
 const ACTION_COOLDOWN_MS = 2000;
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
 
@@ -81,6 +90,8 @@ const initialForm = {
   ownerType: "individual",
   businessName: "",
   permitNumber: "",
+  taxIdentificationNumber: "",
+  branchCode: "",
   password: "",
   confirmPassword: "",
   agree: false,
@@ -160,6 +171,7 @@ function RegisterOwnerForm({
   const [kyc, setKyc] = useState(initialKyc);
   const [supportingDocType, setSupportingDocType] = useState("");
   const [supportingDocStatus, setSupportingDocStatus] = useState({ submitted: false, message: "" });
+  const [documentRefreshKey, setDocumentRefreshKey] = useState(0);
   const [documentStatuses, setDocumentStatuses] = useState({ id: "not_uploaded", supporting: "not_uploaded" });
   const handleDocumentsChange = useCallback((documents) => {
     const nextStatuses = { id: "not_uploaded", supporting: "not_uploaded" };
@@ -419,8 +431,14 @@ function RegisterOwnerForm({
           if (values.businessName.length > 120) return "Business name is too long (max 120 characters).";
           return "";
         case "permitNumber":
-          if (!values.permitNumber.trim()) return "Permit number is required.";
-          if (values.permitNumber.length > 50) return "Permit number is too long (max 50 characters).";
+          if (!values.permitNumber.trim() && supportingDocType !== "Barangay Business Clearance") return "Enter the number shown on your document.";
+          if (values.permitNumber.length > 50) return "Document number is too long (max 50 characters).";
+          return "";
+        case "taxIdentificationNumber":
+          if (!/^\d{9}$/.test(values.taxIdentificationNumber)) return "Enter the 9-digit TIN shown on your BIR document.";
+          return "";
+        case "branchCode":
+          if (!/^\d{3,5}$/.test(values.branchCode)) return "Enter the 3- to 5-digit branch code shown on your BIR document.";
           return "";
         case "password":
           return validateOwnerPassword(values.password);
@@ -436,7 +454,7 @@ function RegisterOwnerForm({
           return "";
       }
     },
-    [form, provinces.length]
+    [form, provinces.length, supportingDocType]
   );
 
   useEffect(() => {
@@ -448,7 +466,7 @@ function RegisterOwnerForm({
 
     const nextForm = { ...form, address: composedAddress };
     setForm((prev) => (prev.address === composedAddress ? prev : nextForm));
-    if (step === 3 && touchedStep1.address) {
+    if (step === 2 && touchedStep1.address) {
       setErrors((prev) => ({ ...prev, address: validateStep1Field("address", nextForm) }));
     }
   }, [
@@ -465,7 +483,7 @@ function RegisterOwnerForm({
 
   const handleStep1Blur = useCallback(
     (field, values = form) => {
-      if (![1, 2, 3, 6].includes(step)) return;
+      if (![1, 2, 3, 5].includes(step)) return;
       if (!touchedStep1[field]) return;
       setErrors((prev) => {
         const next = { ...prev, [field]: validateStep1Field(field, values) };
@@ -492,15 +510,16 @@ function RegisterOwnerForm({
       const nextForm = { ...form, [name]: nextValue };
       setForm(nextForm);
       setFormError("");
-      if ([1, 2, 3, 6].includes(step)) {
+      if ([1, 2, 3, 5].includes(step)) {
         setTouchedStep1((prev) => ({ ...prev, [name]: true }));
       }
       setErrors((prev) => ({ ...prev, [name]: "" }));
       if (name === "password") {
         setErrors((prev) => ({ ...prev, confirmPassword: "" }));
       }
-      if (["businessEmail", "firstName", "lastName", "businessName", "permitNumber"].includes(name)) {
+      if (["businessEmail", "firstName", "lastName", "businessName", "permitNumber", "taxIdentificationNumber", "branchCode"].includes(name)) {
         setSupportingDocStatus({ submitted: false, message: "" });
+        setDocumentStatuses((previous) => ({ ...previous, supporting: "not_uploaded" }));
         setErrors((prev) => ({ ...prev, supportingDocument: "" }));
       }
       if (["businessEmail", "firstName", "lastName"].includes(name)) {
@@ -628,9 +647,12 @@ function RegisterOwnerForm({
         ...prev,
         businessName: "",
         permitNumber: "",
+        taxIdentificationNumber: "",
+        branchCode: "",
         supportingDocument: "",
       }));
       setSupportingDocStatus({ submitted: false, message: "" });
+      setDocumentStatuses((previous) => ({ ...previous, supporting: "not_uploaded" }));
     },
     [form, setForm]
   );
@@ -652,6 +674,7 @@ function RegisterOwnerForm({
     setErrors((prev) => ({ ...prev, [name]: "" }));
     if (name === "supportingDocument") {
       setSupportingDocStatus({ submitted: false, message: "" });
+      setDocumentStatuses((previous) => ({ ...previous, supporting: "not_uploaded" }));
     }
   }, []);
 
@@ -659,8 +682,10 @@ function RegisterOwnerForm({
     const value = String(e?.target?.value || "");
     setSupportingDocType(value);
     setSupportingDocStatus({ submitted: false, message: "" });
-    setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "" }));
-  }, []);
+    setDocumentStatuses((previous) => ({ ...previous, supporting: "not_uploaded" }));
+    setForm((previous) => ({ ...previous, permitNumber: "", taxIdentificationNumber: "", branchCode: "" }));
+    setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "", permitNumber: "", taxIdentificationNumber: "", branchCode: "" }));
+  }, [setForm]);
 
   const handleIdTypeChange = useCallback((e) => {
     const value = String(e?.target?.value || "");
@@ -704,11 +729,7 @@ function RegisterOwnerForm({
   }, [form, validateStep1Field]);
 
   const validateAccountStep = useCallback(
-    () => validateFields(["businessEmail", "phone", "password", "confirmPassword"]),
-    [validateFields]
-  );
-  const validateOwnerProfileStep = useCallback(
-    () => validateFields(["firstName", "lastName", "businessName", "permitNumber"]),
+    () => validateFields(["firstName", "lastName", "businessEmail", "phone", "password", "confirmPassword"]),
     [validateFields]
   );
   const validateAddressStep = useCallback(
@@ -719,6 +740,12 @@ function RegisterOwnerForm({
 
   const validateSupportingDocumentStep = useCallback(() => {
     const next = {};
+    const detailFields = ["businessName"];
+    if (supportingDocType) {
+      detailFields.push(...(BIR_DOCUMENT_TYPES.has(supportingDocType)
+        ? ["taxIdentificationNumber", "branchCode"] : ["permitNumber"]));
+    }
+    const detailsValid = validateFields(detailFields);
     if (!supportingDocType) next.supportingDocType = "Please select a document type.";
     if (!files.supportingDocument) next.supportingDocument = "Please upload a supporting document.";
     setErrors((prev) => ({
@@ -726,8 +753,8 @@ function RegisterOwnerForm({
       supportingDocType: next.supportingDocType || "",
       supportingDocument: next.supportingDocument || "",
     }));
-    return Object.keys(next).length === 0;
-  }, [files.supportingDocument, supportingDocType]);
+    return detailsValid && Object.keys(next).length === 0;
+  }, [files.supportingDocument, supportingDocType, validateFields]);
 
   const verifySupportingDoc = async () => {
     if (supportingDocStatus.submitted) return true;
@@ -768,6 +795,8 @@ function RegisterOwnerForm({
           last_name: form.lastName.trim(),
           business_name: form.businessName,
           permit_number: form.permitNumber,
+          tax_identification_number: form.taxIdentificationNumber,
+          branch_code: form.branchCode,
         },
       });
       if (!result.success) throw new Error(result.message || "Supporting document verification failed.");
@@ -778,6 +807,8 @@ function RegisterOwnerForm({
           result.message ||
           "Supporting document uploaded securely. Automated checks have started.",
       });
+      setDocumentStatuses((previous) => ({ ...previous, supporting: "queued" }));
+      setDocumentRefreshKey((previous) => previous + 1);
       setErrors((prev) => ({ ...prev, supportingDocType: "", supportingDocument: "" }));
       return true;
     } catch (error) {
@@ -826,14 +857,13 @@ function RegisterOwnerForm({
       }
       return;
     }
-    if (step === 2 && !validateOwnerProfileStep()) return;
-    if (step === 3 && !validateAddressStep()) return;
-    if (step === 4) {
+    if (step === 2 && !validateAddressStep()) return;
+    if (step === 3) {
       if (!validateSupportingDocumentStep()) return;
       const verified = await verifySupportingDoc();
       if (!verified) return;
     }
-    if (step === 5 && !validateIdentityStep()) return;
+    if (step === 4 && !validateIdentityStep()) return;
     setStep((prev) => Math.min(TOTAL_STEPS, prev + 1));
   };
 
@@ -883,6 +913,8 @@ function RegisterOwnerForm({
         selfieDataUrl: "",
         selfieBase64Clean: "",
       }));
+      setDocumentStatuses((previous) => ({ ...previous, id: "queued" }));
+      setDocumentRefreshKey((previous) => previous + 1);
       setStepErrors((prev) => ({ ...prev, idType: "", idRegistered: "" }));
       setKycUi((prev) => ({ ...prev, statusText: "ID uploaded. We are checking that its personal details match your registration." }));
     } catch (error) {
@@ -947,20 +979,16 @@ function RegisterOwnerForm({
       setStep(1);
       return;
     }
-    if (!validateOwnerProfileStep()) {
+    if (!validateAddressStep()) {
       setStep(2);
       return;
     }
-    if (!validateAddressStep()) {
+    if (!validateSupportingDocumentStep()) {
       setStep(3);
       return;
     }
-    if (!validateSupportingDocumentStep()) {
-      setStep(4);
-      return;
-    }
     if (!validateIdentityStep()) {
-      setStep(5);
+      setStep(4);
       return;
     }
     if (!validateReviewStep()) return;
@@ -992,6 +1020,8 @@ function RegisterOwnerForm({
         ownerType: form.ownerType,
         businessName: form.businessName,
         permitNumber: form.permitNumber,
+        taxIdentificationNumber: form.taxIdentificationNumber,
+        branchCode: form.branchCode,
         preKycToken,
       });
 
@@ -1057,7 +1087,7 @@ function RegisterOwnerForm({
       panelTitle="Create your RentifyPro account."
       panelDescription="Complete your owner details, document checks, and email confirmation in focused steps."
       highlights={[
-        "Clear 6-step onboarding with progress tracking",
+        "Clear 5-step onboarding with progress tracking",
         "Supporting document, ID, and face verification",
         "Ready after successful OTP verification",
       ]}
@@ -1099,39 +1129,17 @@ function RegisterOwnerForm({
           )}
 
           <fieldset disabled={isLoading} className="min-w-0 space-y-4">
-          {[1, 2, 3].includes(step) && (
+          {[1, 2].includes(step) && (
             <>
-              {step === 2 && (
-              <div className="rounded-2xl border border-gray-200 p-4 bg-white">
-                <p className="font-semibold text-gray-900 mb-2">Owner Type</p>
-                <p className="text-sm text-gray-500 mb-3">Choose if you are registering as an individual or business owner.</p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {[
-                    { type: "individual", label: "Individual", sub: "Personal lessor", icon: User },
-                    { type: "business", label: "Business", sub: "Company lessor", icon: Building2 },
-                  ].map(({ type, label, sub, icon: Icon }) => (
-                    <button key={type} type="button" onClick={() => handleOwnerTypeSelect(type)} className={`flex items-center gap-3 p-3 rounded-xl border-2 transition ${form.ownerType === type ? "border-[#017FE6] bg-blue-50" : "border-gray-200 hover:border-[#017FE6]"}`}>
-                      <Icon size={18} className="text-gray-600" />
-                      <div className="text-left">
-                        <p className="text-sm font-semibold text-gray-800">{label}</p>
-                        <p className="text-xs text-gray-500">{sub}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              )}
-
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <p className="font-semibold text-gray-900 mb-1">Step {step} — {STEP_LABELS[step - 1]}</p>
                 <p className="text-sm text-gray-500">
-                  {step === 1 && "Set up your owner account contact details and password."}
-                  {step === 2 && "Enter the legal owner and business details shown on your documents."}
-                  {step === 3 && "Select the address tied to your owner registration."}
+                  {step === 1 && "Enter your legal name, contact details, and password."}
+                  {step === 2 && "Select the address tied to your owner registration."}
                 </p>
               </div>
 
-              {step === 2 && (
+              {step === 1 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field
                   label="First Name"
@@ -1199,7 +1207,7 @@ function RegisterOwnerForm({
               </div>
               )}
 
-              {step === 3 && (
+              {step === 2 && (
               <div className="rounded-2xl border border-gray-200 p-4 bg-white space-y-3">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
@@ -1276,37 +1284,6 @@ function RegisterOwnerForm({
               </div>
               )}
 
-              {step === 2 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field
-                  label={form.ownerType === "individual" ? "Business / Trade Name" : "Business Name"}
-                  name="businessName"
-                  value={form.businessName}
-                  onChange={handleChange}
-                  onBlur={() => handleStep1Blur("businessName")}
-                  error={errors.businessName}
-                  disabled={isLoading}
-                  icon={Building2}
-                  placeholder="Sample Transport Services Inc."
-                  helper="Use the business or trade name shown in your supporting document."
-                  maxLength={120}
-                />
-                <Field
-                  label="Permit / Registration No."
-                  name="permitNumber"
-                  value={form.permitNumber}
-                  onChange={handleChange}
-                  onBlur={() => handleStep1Blur("permitNumber")}
-                  error={errors.permitNumber}
-                  disabled={isLoading}
-                  icon={Building2}
-                  placeholder="DTI/SEC/Permit No."
-                  helper="Enter the permit or registration number shown on your uploaded document."
-                  maxLength={50}
-                />
-              </div>
-              )}
-
               {step === 1 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <PasswordField
@@ -1322,6 +1299,7 @@ function RegisterOwnerForm({
                   helper="Create Password"
                   placeholder="Create Password"
                   maxLength={128}
+                  showStrength
                 />
                 <PasswordField
                   label="Confirm Password"
@@ -1342,15 +1320,34 @@ function RegisterOwnerForm({
             </>
           )}
 
-          {step === 4 && (
+          {step === 3 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0"><FileText size={20} className="text-[#017FE6]" /></div>
                   <div>
-                    <p className="font-semibold text-gray-900">Step 4 — Business document</p>
-                    <p className="text-sm text-gray-500 mt-1">Upload your supporting document for owner verification.</p>
+                    <p className="font-semibold text-gray-900">Step 3 — Business document</p>
+                    <p className="text-sm text-gray-500 mt-1">Enter the details visible on your document, then upload it for review.</p>
                   </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4 bg-white">
+                <p className="font-semibold text-gray-900 mb-2">Owner Type</p>
+                <p className="text-sm text-gray-500 mb-3">Choose if you are registering as an individual or business owner.</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {[
+                    { type: "individual", label: "Individual", sub: "Personal lessor", icon: User },
+                    { type: "business", label: "Business", sub: "Company lessor", icon: Building2 },
+                  ].map(({ type, label, sub, icon: Icon }) => (
+                    <button key={type} type="button" onClick={() => handleOwnerTypeSelect(type)} className={`flex items-center gap-3 p-3 rounded-xl border-2 transition ${form.ownerType === type ? "border-[#017FE6] bg-blue-50" : "border-gray-200 hover:border-[#017FE6]"}`}>
+                      <Icon size={18} className="text-gray-600" />
+                      <div className="text-left">
+                        <p className="text-sm font-semibold text-gray-800">{label}</p>
+                        <p className="text-xs text-gray-500">{sub}</p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -1366,9 +1363,74 @@ function RegisterOwnerForm({
                 placeholder="Select the document type you uploaded"
               />
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field
+                  label={form.ownerType === "individual" ? "Business / Trade Name" : "Business Name"}
+                  name="businessName"
+                  value={form.businessName}
+                  onChange={handleChange}
+                  onBlur={() => handleStep1Blur("businessName")}
+                  error={errors.businessName}
+                  disabled={isLoading}
+                  icon={Building2}
+                  placeholder="Name shown on your document"
+                  helper="Use the business or trade name shown in your supporting document."
+                  maxLength={120}
+                />
+                {BIR_DOCUMENT_TYPES.has(supportingDocType) ? (
+                  <>
+                    <Field
+                      label="Taxpayer Identification Number (TIN)"
+                      name="taxIdentificationNumber"
+                      value={form.taxIdentificationNumber}
+                      onChange={handleChange}
+                      onBlur={() => handleStep1Blur("taxIdentificationNumber")}
+                      error={errors.taxIdentificationNumber}
+                      disabled={isLoading}
+                      icon={FileText}
+                      placeholder="9 digits"
+                      helper="Enter the 9-digit TIN on this BIR document."
+                      maxLength={9}
+                      onlyNumbers
+                    />
+                    <Field
+                      label="Branch Code"
+                      name="branchCode"
+                      value={form.branchCode}
+                      onChange={handleChange}
+                      onBlur={() => handleStep1Blur("branchCode")}
+                      error={errors.branchCode}
+                      disabled={isLoading}
+                      icon={FileText}
+                      placeholder="As shown on your document"
+                      helper="Enter the branch code next to the TIN."
+                      maxLength={5}
+                      onlyNumbers
+                    />
+                  </>
+                ) : supportingDocType ? (
+                  <Field
+                    label={DOCUMENT_NUMBER_LABELS[supportingDocType] || "Document number"}
+                    name="permitNumber"
+                    value={form.permitNumber}
+                    onChange={handleChange}
+                    onBlur={() => handleStep1Blur("permitNumber")}
+                    error={errors.permitNumber}
+                    disabled={isLoading}
+                    icon={FileText}
+                    placeholder="Number shown on your document"
+                    helper={supportingDocType === "Barangay Business Clearance"
+                      ? "Leave blank if your clearance has no reference number; it will need manual review."
+                      : "Copy the number exactly as shown on your document."}
+                    maxLength={50}
+                    required={supportingDocType !== "Barangay Business Clearance"}
+                  />
+                ) : null}
+              </div>
+
               <FileInput
                 label="Supporting Business Document"
-                helper="Upload a Philippines-issued document (DTI/SEC/Mayor's Permit/etc.) that matches your business name and permit/registration number."
+                helper="Upload the selected Philippines-issued document showing the business details you entered."
                 name="supportingDocument"
                 onChange={handleFile}
                 error={errors.supportingDocument}
@@ -1381,13 +1443,13 @@ function RegisterOwnerForm({
             </>
           )}
 
-          {step === 5 && (
+          {step === 4 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0"><ShieldCheck size={20} className="text-[#017FE6]" /></div>
                   <div>
-                    <p className="font-semibold text-gray-900">Step 5 — Identity verification</p>
+                    <p className="font-semibold text-gray-900">Step 4 — Identity verification</p>
                     <p className="text-sm text-gray-500 mt-1">Upload your government ID, then capture a live selfie to verify your identity.</p>
                   </div>
                 </div>
@@ -1498,34 +1560,41 @@ function RegisterOwnerForm({
             </>
           )}
 
-          {(step === 4 || step === 5 || step === 6) && (
+          {(step === 3 || step === 4 || step === 5) && (
             <PreKycReviewNotice
               email={form.businessEmail}
               role="owner"
               enabled={kyc.idRegistered || supportingDocStatus.submitted}
+              refreshKey={documentRefreshKey}
+              ignoreSupportingDocument={!supportingDocStatus.submitted}
               onDocumentsChange={handleDocumentsChange}
               onIdStatus={handleIdStatus}
+              onCorrectDetails={() => {
+                setSupportingDocStatus({ submitted: false, message: "" });
+                setDocumentStatuses((current) => ({ ...current, supporting: "not_uploaded" }));
+                setStep(3);
+              }}
               onResubmit={(type) => {
                 if (type === "supporting") {
                   setSupportingDocStatus({ submitted: false, message: "" });
                   setFiles((current) => ({ ...current, supportingDocument: null }));
                   setDocumentStatuses((current) => ({ ...current, supporting: "not_uploaded" }));
-                  setStep(4);
+                  setStep(3);
                 } else {
                   setKyc(initialKyc);
                   setKycUi({ statusText: "" });
                   setDocumentStatuses((current) => ({ ...current, id: "not_uploaded" }));
                   setStepErrors({});
-                  setStep(5);
+                  setStep(4);
                 }
               }}
             />
           )}
 
-          {step === 6 && (
+          {step === 5 && (
             <>
               <div className="rounded-2xl border border-gray-200 p-4 bg-white">
-                <p className="font-semibold text-gray-900">Step 6 — Review & submit</p>
+                <p className="font-semibold text-gray-900">Step 5 — Review & submit</p>
                 <p className="text-sm text-gray-500 mt-1">Confirm your details before creating your account.</p>
               </div>
 
@@ -1541,7 +1610,8 @@ function RegisterOwnerForm({
                   { label: "Barangay", value: barangays.find((entry) => entry.code === form.barangay)?.name || "-" },
                   { label: "Owner Type", value: canShowBusinessFields ? "Business" : "Individual" },
                   { label: "Business Name", value: form.businessName || "-" },
-                  { label: "Permit Number", value: form.permitNumber || "-" },
+                  { label: BIR_DOCUMENT_TYPES.has(supportingDocType) ? "TIN" : DOCUMENT_NUMBER_LABELS[supportingDocType] || "Document number", value: BIR_DOCUMENT_TYPES.has(supportingDocType) ? `•••-•••-${form.taxIdentificationNumber.slice(-3)}` : form.permitNumber || "Not shown" },
+                  ...(BIR_DOCUMENT_TYPES.has(supportingDocType) ? [{ label: "Branch Code", value: form.branchCode || "-" }] : []),
                   { label: "Supporting Document Type", value: supportingDocType || "-" },
                   { label: "Supporting Document", value: files.supportingDocument ? "Uploaded" : "Missing" },
                   { label: "ID Type", value: kyc.idType || "-" },
@@ -1570,11 +1640,11 @@ function RegisterOwnerForm({
 
           <div className="flex items-center gap-3 pt-1">
             <button type="button" onClick={step === 1 ? onBack : goBack} disabled={isLoading} className="rp-btn-secondary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-50">
-              <ArrowLeft size={18} /> {step === 1 ? "Register as User" : "Back"}
+              <ArrowLeft size={18} /> {step === 1 ? "Register as Renter" : "Back"}
             </button>
             {step < TOTAL_STEPS ? (
               <button type="button" onClick={goNext} disabled={isLoading} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
-                {isCheckingEmail ? <><Loader size={18} className="animate-spin" aria-hidden="true" /> Checking email...</> : <>Next <ArrowRight size={18} /></>}
+                {isCheckingEmail ? <><Loader size={18} className="animate-spin" aria-hidden="true" /> Checking email...</> : <>{step === 3 ? supportingDocStatus.submitted ? "Continue to ID" : "Upload and continue" : "Next"} <ArrowRight size={18} /></>}
               </button>
             ) : (
               <button type="submit" disabled={isLoading || !areDocumentsApproved} className="rp-btn-primary flex w-full items-center justify-center gap-2 py-3 disabled:cursor-not-allowed disabled:opacity-70">
@@ -1620,6 +1690,7 @@ function Field({
   helper = "",
   maxLength,
   prefixText = "",
+  required = true,
   onBlur,
   inputRef,
 }) {
@@ -1654,7 +1725,7 @@ function Field({
   return (
     <div className="space-y-1.5">
       <label className="block text-sm font-semibold text-gray-700">
-        {label} <span className="text-red-500">*</span>
+        {label} {required && <span className="text-red-500">*</span>}
       </label>
       {helper ? <p className="text-xs text-gray-500">{helper}</p> : null}
       <div className="relative">
@@ -1675,6 +1746,8 @@ function Field({
           disabled={disabled}
           placeholder={placeholder}
           maxLength={maxLength}
+          inputMode={onlyNumbers ? "numeric" : undefined}
+          autoComplete={["taxIdentificationNumber", "branchCode"].includes(name) ? "off" : undefined}
           className={`relative z-0 w-full h-11 rounded-xl border px-4 text-[15px] placeholder:text-gray-400 outline-none shadow-sm transition ${Icon ? "pr-11" : ""} ${prefixText ? "pl-14" : ""} ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
         />
         {Icon && <Icon size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500" />}
@@ -1713,7 +1786,7 @@ function SelectField({
           disabled={disabled}
           className={`w-full h-11 rounded-xl border px-4 text-sm outline-none shadow-sm transition ${error ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100" : "border-gray-300 hover:border-gray-400 focus:border-[#017FE6] focus:ring-4 focus:ring-blue-100"} ${disabled ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white text-gray-900"}`}
         >
-          <option value="">{fallbackPlaceholder}</option>
+          <option value="" disabled hidden>{fallbackPlaceholder}</option>
           {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -1739,6 +1812,7 @@ function PasswordField({
   placeholder = "",
   maxLength,
   onBlur,
+  showStrength = false,
 }) {
   const sanitizePasswordValue = (rawValue = "") => String(rawValue).replace(/\s/g, "");
 
@@ -1793,6 +1867,7 @@ function PasswordField({
         </button>
       </div>
       {error && <p className="text-xs text-red-500">{error}</p>}
+      {showStrength && <PasswordStrengthIndicator value={value} />}
     </div>
   );
 }

@@ -42,6 +42,11 @@ export default function SelfieCapture({
   const mountedRef = useRef(true);
   const [cameraState, setCameraState] = useState("idle");
   const [cameraError, setCameraError] = useState("");
+  const [frameAspectRatio, setFrameAspectRatio] = useState(null);
+
+  const updateFrameAspectRatio = (width, height) => {
+    if (width > 0 && height > 0) setFrameAspectRatio(width / height);
+  };
 
   const closeCamera = useCallback(() => {
     stopCamera(streamRef.current || videoRef.current);
@@ -52,9 +57,10 @@ export default function SelfieCapture({
 
   useEffect(() => {
     mountedRef.current = true;
+    const video = videoRef.current;
     return () => {
       mountedRef.current = false;
-      stopCamera(streamRef.current || videoRef.current);
+      stopCamera(streamRef.current || video);
       streamRef.current = null;
     };
   }, []);
@@ -152,14 +158,18 @@ export default function SelfieCapture({
         </div>
       </div>
 
-      <div className="relative mx-auto mt-4 aspect-[3/4] w-full max-w-md overflow-hidden rounded-2xl bg-slate-950 sm:aspect-video">
+      <div
+        className="relative mx-auto mt-4 aspect-[3/4] w-full max-w-md overflow-hidden rounded-2xl bg-slate-950 sm:aspect-video"
+        style={frameAspectRatio ? { aspectRatio: frameAspectRatio } : undefined}
+      >
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
           aria-label="Live camera preview"
-          className={`h-full w-full object-cover transition-opacity ${cameraVisible && !hasPreview ? "opacity-100" : "opacity-0"}`}
+          onLoadedMetadata={(event) => updateFrameAspectRatio(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+          className={`h-full w-full object-contain transition-opacity ${cameraVisible && !hasPreview ? "opacity-100" : "opacity-0"}`}
           style={{ transform: "scaleX(-1)" }}
         />
 
@@ -167,7 +177,8 @@ export default function SelfieCapture({
           <img
             src={previewUrl}
             alt="Captured selfie preview"
-            className="absolute inset-0 h-full w-full object-cover"
+            onLoad={(event) => updateFrameAspectRatio(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+            className="absolute inset-0 h-full w-full object-contain"
             style={{ transform: "scaleX(-1)" }}
           />
         )}
@@ -181,7 +192,10 @@ export default function SelfieCapture({
 
         {cameraVisible && !hasPreview && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
-            <div className="h-[62%] w-[56%] max-w-60 rounded-[50%] border-2 border-white/70 shadow-[0_0_0_999px_rgba(15,23,42,0.16)]" />
+            <svg viewBox="0 0 300 400" preserveAspectRatio="xMidYMid meet" className="h-full w-full">
+              <ellipse cx="150" cy="200" rx="108" ry="143" fill="none" stroke="rgba(15, 23, 42, 0.55)" strokeWidth="5" vectorEffect="non-scaling-stroke" />
+              <ellipse cx="150" cy="200" rx="108" ry="143" fill="none" stroke="rgba(255, 255, 255, 0.9)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+            </svg>
           </div>
         )}
 
@@ -195,7 +209,7 @@ export default function SelfieCapture({
 
       {!hasPreview && (
         <p className="mt-2 text-center text-xs font-medium text-slate-500">
-          The oval helps with positioning only; it does not perform liveness detection.
+          Center your face in the oval with a little space around it. The guide does not check liveness.
         </p>
       )}
 

@@ -64,19 +64,21 @@ export const evaluateBookingEligibility = (bookings, { pickupAt, returnAt, now =
   return { eligible: reasons.length === 0, limits: BOOKING_LIMITS, counts, reasons };
 };
 
+export const getRenterBookingStatusRecords = async (renterId) => Booking.find({
+  renter: renterId,
+  $or: [
+    { status: { $in: OPEN_BOOKING_STATUSES } },
+    // Include paid records with a recorded balance too: adding a final late
+    // fee must not be bypassed just because a historical status is stale.
+    { status: "completed", paymentStatus: { $ne: "refunded" }, $or: [
+      { paymentStatus: { $ne: "paid" } }, { paymentAmountDue: { $gt: 0 } }, { lateReturnPenaltyFee: { $gt: 0 } },
+    ] },
+  ],
+}).select("_id status pickupAt returnAt actualReturnAt returnStatus paymentStatus paymentAmountPaid paymentAmountDue totalAmount baseAmount driverAmount transactionFee lateReturnPenaltyFee lateReturnFeeType lateReturnFeeValue lateReturnGraceMinutes vehicleDailyRate driverDailyRate rentalRateUnit driverSelected bookingDurationHours bookingDurationMinutes bookingDays")
+  .maxTimeMS(10_000).lean();
+
 export const getRenterBookingEligibility = async (renterId, options = {}) => {
-  const bookings = await Booking.find({
-    renter: renterId,
-    $or: [
-      { status: { $in: OPEN_BOOKING_STATUSES } },
-      // Include paid records with a recorded balance too: adding a final late
-      // fee must not be bypassed just because a historical status is stale.
-      { status: "completed", paymentStatus: { $ne: "refunded" }, $or: [
-        { paymentStatus: { $ne: "paid" } }, { paymentAmountDue: { $gt: 0 } }, { lateReturnPenaltyFee: { $gt: 0 } },
-      ] },
-    ],
-  }).select("_id status pickupAt returnAt actualReturnAt returnStatus paymentStatus paymentAmountPaid paymentAmountDue totalAmount baseAmount driverAmount transactionFee lateReturnPenaltyFee lateReturnFeeType lateReturnFeeValue lateReturnGraceMinutes vehicleDailyRate driverDailyRate rentalRateUnit driverSelected bookingDurationHours bookingDurationMinutes bookingDays")
-    .maxTimeMS(10_000).lean();
+  const bookings = await getRenterBookingStatusRecords(renterId);
   return evaluateBookingEligibility(bookings, options);
 };
 

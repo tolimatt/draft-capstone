@@ -20,3 +20,8 @@ export const SUPPORTING_DOCUMENT_TYPES = [
   "Barangay Business Clearance",
   "CDA Certificate of Registration",
 ];
+
+export const BIR_SUPPORTING_DOCUMENT_TYPES = [
+  "BIR Certificate of Registration (Form 2303)",
+  "BIR Notice to Issue Receipt/Invoice",
+];

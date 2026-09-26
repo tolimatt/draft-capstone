@@ -13,6 +13,7 @@ import Navbar from "../components/Navbar";
 import ChatWidget from "../components/ChatWidget";
 import InfoModal from "../components/InfoModal";
 import API from "../utils/api";
+import { reconnectSocket } from "../utils/socket";
 import VerificationStepper from "../verification/VerificationStepper";
 import {
   getStoredUser,
@@ -29,9 +30,10 @@ import {
 import { validateAvatarImageFile } from "../utils/fileValidation";
 import { getPreKycSessionToken, preVerifySupportingDocument } from "../utils/kycApi";
 import { RELATIONSHIP_OPTIONS } from "../data/registerValidation";
-import { SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
+import { BIR_SUPPORTING_DOCUMENT_TYPES, SUPPORTING_DOCUMENT_TYPES } from "../data/kycDocumentTypes";
 
 const PSGC_BASE_URL = "https://psgc.gitlab.io/api";
+const BIR_SUPPORTING_TYPES = new Set(BIR_SUPPORTING_DOCUMENT_TYPES);
 const fetchPsgcOptions = async (path, signal) => {
   const response = await fetch(`${PSGC_BASE_URL}${path}`, { signal });
   if (!response.ok) throw new Error(`PSGC request failed with status ${response.status}.`);
@@ -362,6 +364,8 @@ const AccountSettings = ({
   const [ownerUpgradeError, setOwnerUpgradeError] = useState("");
   const [supportingDocFile, setSupportingDocFile] = useState(null);
   const [supportingDocType, setSupportingDocType] = useState("");
+  const [supportingTin, setSupportingTin] = useState("");
+  const [supportingBranchCode, setSupportingBranchCode] = useState("");
   const [supportingDocStatus, setSupportingDocStatus] = useState("");
   const [supportingDocLoading, setSupportingDocLoading] = useState(false);
   const [ownerForm, setOwnerForm] = useState({
@@ -672,6 +676,7 @@ const AccountSettings = ({
         currentPassword: passwordForm.currentPassword,
         newPassword: passwordForm.newPassword,
       });
+      reconnectSocket();
       setPasswordMessage(response.message || "Password updated.");
       setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch (error) {
@@ -799,6 +804,16 @@ const AccountSettings = ({
       setSupportingDocStatus("We could not find your email. Please refresh and try again.");
       return;
     }
+    if (BIR_SUPPORTING_TYPES.has(supportingDocType)) {
+      if (!String(ownerForm.businessName || "").trim()) {
+        setSupportingDocStatus("Enter the business name shown on your BIR document.");
+        return;
+      }
+      if (!/^\d{9}$/.test(supportingTin) || !/^\d{3,5}$/.test(supportingBranchCode)) {
+        setSupportingDocStatus("Enter the 9-digit TIN and the branch code shown on your BIR document.");
+        return;
+      }
+    }
     setSupportingDocLoading(true);
     setSupportingDocStatus("");
     try {
@@ -816,6 +831,8 @@ const AccountSettings = ({
           owner_type: ownerForm.ownerType || profile.ownerType,
           business_name: ownerForm.businessName || profile.businessName,
           permit_number: ownerForm.permitNumber || profile.permitNumber,
+          tax_identification_number: BIR_SUPPORTING_TYPES.has(supportingDocType) ? supportingTin : "",
+          branch_code: BIR_SUPPORTING_TYPES.has(supportingDocType) ? supportingBranchCode : "",
           address: profile.address,
         },
       });
@@ -1823,11 +1840,32 @@ const AccountSettings = ({
                   <SelectField
                     label="Document Type"
                     value={supportingDocType}
-                    onChange={(event) => setSupportingDocType(event.target.value)}
+                    onChange={(event) => {
+                      setSupportingDocType(event.target.value);
+                      setSupportingTin("");
+                      setSupportingBranchCode("");
+                    }}
                     options={SUPPORTING_DOCUMENT_TYPES.map((entry) => ({ label: entry, value: entry }))}
                     placeholder="Select document type"
                     disabled={supportingDocLoading}
                   />
+
+                  {BIR_SUPPORTING_TYPES.has(supportingDocType) && (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <label className="space-y-1 text-sm font-semibold text-gray-700">
+                        <span>Business name on document</span>
+                        <input value={ownerForm.businessName} onChange={(event) => setOwnerForm((previous) => ({ ...previous, businessName: event.target.value }))} maxLength={120} className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" />
+                      </label>
+                      <label className="space-y-1 text-sm font-semibold text-gray-700">
+                        <span>Taxpayer Identification Number (TIN)</span>
+                        <input value={supportingTin} onChange={(event) => setSupportingTin(event.target.value.replace(/\D/g, "").slice(0, 9))} inputMode="numeric" autoComplete="off" placeholder="9 digits" className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" />
+                      </label>
+                      <label className="space-y-1 text-sm font-semibold text-gray-700">
+                        <span>Branch code</span>
+                        <input value={supportingBranchCode} onChange={(event) => setSupportingBranchCode(event.target.value.replace(/\D/g, "").slice(0, 5))} inputMode="numeric" autoComplete="off" placeholder="As shown" className="w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" />
+                      </label>
+                    </div>
+                  )}
 
                   <input
                     type="file"

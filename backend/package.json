@@ -12,6 +12,7 @@
     "db:migrate:kyc": "node scripts/migrate-kyc-collections.js",
     "db:migrate:notifications": "node scripts/migrate-notifications.js",
     "db:migrate:reports": "node scripts/migrate-report-indexes.js",
+    "db:migrate:session-revocations": "node scripts/migrate-session-revocation-indexes.js",
     "db:migrate:local": "node scripts/migrate-mongo-to-local.js",
     "services:check": "node scripts/check-external-services.js"
   },

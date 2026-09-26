@@ -11,6 +11,7 @@ import BookingAccessModal from "../components/BookingAccessModal";
 import VehiclePreviewModal from "../components/VehiclePreviewModal";
 import { sanitizeBookingRange } from "../utils/dateUtils";
 import VehicleCard from "../components/VehicleCard";
+import { VehicleGridSkeleton } from "../components/LoadingSkeletons";
 import { DEFAULT_VEHICLE_IMAGE } from "../utils/media";
 import { matchesLocationSearch, validateLocationSearch } from "../utils/locationSearch";
 
@@ -350,7 +351,7 @@ export default function VehiclesPage({
               </div>
 
               {loading && (
-                <div role="status" className="rp-results-status">Loading available vehicles...</div>
+                <VehicleGridSkeleton label="Loading available vehicles" />
               )}
 
               {!loading && error && (

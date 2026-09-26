@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronDown, Database, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import { CalendarDays, ChevronDown, Database, RefreshCw, TriangleAlert } from "lucide-react";
+import { AdminDataSkeleton } from "../components/LoadingSkeletons";
 import { AdminPageHeader, AdminSidebar } from "./components/AdminShell";
 import {
   ConfirmationDialog,
@@ -254,7 +255,7 @@ export default function AdminLayout({ user, onLogout }) {
           <div className="mx-auto max-w-[1600px] p-4 sm:p-5 lg:p-5">
             {activeView === "transactions" ? <TransactionRecords /> : null}
             {activeView === "reports" ? <ReportsView /> : null}
-            {!["transactions", "reports"].includes(activeView) && loadState === "loading" ? <DataLoadingState /> : null}
+            {!["transactions", "reports"].includes(activeView) && loadState === "loading" ? <AdminDataSkeleton view={activeView} /> : null}
             {!["transactions", "reports"].includes(activeView) && loadState === "error" ? <DataErrorState message={loadError} onRetry={() => void loadAdminData()} onLogout={onLogout} /> : null}
             {loadState === "ready" && activeView === "dashboard" ? <DashboardView vehicles={vehicles} customers={customers} documents={documents} bookings={bookings} period={dashboardPeriod} onSelect={selectView} /> : null}
             {loadState === "ready" && activeView === "bookings" ? <BookingsView key={`bookings-${viewContext.status || "all"}`} bookings={bookings} initialStatus={viewContext.status} onView={viewBooking} /> : null}
@@ -263,18 +264,6 @@ export default function AdminLayout({ user, onLogout }) {
             {loadState === "ready" && activeView === "documents" ? <DocumentsView key={`documents-${viewContext.status || "all"}`} documents={documents} initialStatus={viewContext.status} onView={viewDocument} onReview={setReviewDocument} /> : null}
           </div>
         </main>
-      </div>
-    </div>
-  );
-}
-
-function DataLoadingState() {
-  return (
-    <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="text-center">
-        <LoaderCircle size={32} strokeWidth={2} className="mx-auto animate-spin text-blue-600" aria-hidden="true" />
-        <p className="mt-4 font-semibold text-slate-900">Loading RentifyPro data</p>
-        <p className="mt-1 text-sm text-slate-500">Reading customers, vehicles, bookings, and documents from the shared database.</p>
       </div>
     </div>
   );
