@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
+import { getMongoConnectionConfig } from "../config/mongoConnection.js";
 import AdminCredential from "../models/AdminCredential.js";
 import AdminMfaChallenge from "../models/AdminMfaChallenge.js";
 import AdminPasswordReset from "../models/AdminPasswordReset.js";
@@ -200,8 +201,9 @@ const synchronizeCredentials = async (config, status) => {
 async function main() {
   loadEnvironment();
   const { config, errors } = validateAdminCredentialConfig();
+  const databaseConfig = getMongoConnectionConfig();
 
-  if (!process.env.MONGODB_URI) errors.push("MONGODB_URI is required.");
+  if (!databaseConfig.uri) errors.push("MONGODB_URI, MONGO_URI, or MONGO_URI_DIRECT is required.");
   if (config.passkey && config.passwordHash && await bcrypt.compare(config.passkey, config.passwordHash)) {
     errors.push("ADMIN_SECRET_KEY must be different from the configured admin password.");
   }
@@ -213,7 +215,7 @@ async function main() {
   }
 
   try {
-    await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+    await mongoose.connect(databaseConfig.uri, databaseConfig.options);
     const status = await readCredentialStatus(config);
 
     if (process.argv.includes("--check")) {

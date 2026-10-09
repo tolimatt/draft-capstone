@@ -11,6 +11,7 @@ import helmet from "helmet";
 import hpp from "hpp";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
+import { getMongoConnectionConfig } from "./config/mongoConnection.js";
 import AdminCredential from "./models/AdminCredential.js";
 import AdminMfaChallenge from "./models/AdminMfaChallenge.js";
 import AdminPasswordReset from "./models/AdminPasswordReset.js";
@@ -214,9 +215,10 @@ const readAdminSession = (request) => {
 
 const connectDatabase = async () => {
   if (mongoose.connection.readyState === 1) return mongoose.connection;
-  if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI is not configured.");
+  const { uri, options } = getMongoConnectionConfig();
+  if (!uri) throw new Error("MONGODB_URI, MONGO_URI, or MONGO_URI_DIRECT must be configured.");
   if (!databaseConnectionAttempt) {
-    databaseConnectionAttempt = mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
+    databaseConnectionAttempt = mongoose.connect(uri, options)
       .finally(() => { databaseConnectionAttempt = null; });
   }
   return databaseConnectionAttempt;
@@ -318,7 +320,7 @@ const requireAdminSession = async (request, response, next) => {
     return next();
   } catch {
     return response.status(503).json({
-      message: "The RentifyPro database is unavailable. Start MongoDB and verify MONGODB_URI in backend/.env.",
+      message: "The RentifyPro database is unavailable. Verify the MongoDB URI, database name, and network access in backend/.env.",
       code: "DATABASE_UNAVAILABLE",
     });
   }
@@ -840,15 +842,15 @@ async function startServer() {
 
   app.listen(port, () => console.log(`RentifyPro API listening on http://localhost:${port}`));
 
-  if (process.env.MONGODB_URI) {
+  if (getMongoConnectionConfig().uri) {
     connectDatabase()
       .then(async () => {
         await ensureAdminAccount();
-        console.log("Connected to the shared RentifyPro MongoDB database");
+        console.log(`Connected to the shared RentifyPro MongoDB database: ${mongoose.connection.name}`);
       })
       .catch((error) => console.error("MongoDB connection failed:", error.message));
   } else {
-    console.warn("MONGODB_URI is not set; starting without a database connection");
+    console.warn("No MongoDB URI is set; starting without a database connection");
   }
 }
 

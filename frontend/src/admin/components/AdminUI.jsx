@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import VehicleImage from "./VehicleImage";
+import ManualDocumentComparison from "./ManualDocumentComparison";
 import { presentVehicle } from "../vehiclePresentation";
 
 export function StatusBadge({ value }) {
@@ -339,7 +340,7 @@ function CustomerDocumentCard({ document }) {
   );
 }
 
-export function DocumentReviewDialog({ document, onClose, onApprove, onReject }) {
+export function DocumentReviewDialog({ document, onClose, onApprove, onReject, onCompare }) {
   const dialogRef = useDialogFocus(Boolean(document));
   if (!document) return null;
   return (
@@ -351,7 +352,9 @@ export function DocumentReviewDialog({ document, onClose, onApprove, onReject })
         </div>
         <div className="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5">
           <div className="grid items-start gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
-          <PreviewPane item={document} className="h-56 sm:h-64" compact />
+          <div><PreviewPane item={document} className="h-56 sm:h-64" compact />
+            {document.canCompareManually && document.previewUrl ? <a href={document.previewUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-blue-700 underline underline-offset-4 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-600">Open original document</a> : null}
+          </div>
           <dl className="min-w-0 divide-y divide-slate-100 rounded-xl border border-slate-200 px-3 [overflow-wrap:anywhere]">
             {[
               ['Customer', document.customer],
@@ -360,7 +363,7 @@ export function DocumentReviewDialog({ document, onClose, onApprove, onReject })
               ['Submitted', document.submitted],
               ['Current status', document.approval],
               ['Queue stage', formatQueueStage(document.processingStage)],
-              ['AI confidence', document.confidence === null ? 'Not available' : `${document.confidence}%`],
+              ['Extraction score', document.confidence === null ? 'Not available' : `${document.confidence}%`],
               ['Details matched', document.detailsMatched ? 'Yes' : 'No'],
               ['Tampering flag', document.suspectedTampering ? 'Flagged for review' : 'Not flagged'],
             ].map(([label, value]) => (
@@ -370,10 +373,12 @@ export function DocumentReviewDialog({ document, onClose, onApprove, onReject })
             {document.reason ? <div className="py-2"><dt className="text-xs font-semibold text-slate-500">Screening notes</dt><dd className="mt-1 text-sm leading-5 text-slate-700">{document.reason}</dd></div> : null}
           </dl>
           </div>
+          {document.canCompareManually ? <ManualDocumentComparison key={`${document.id}:${document.reviewVersion}`} document={document} onCompare={onCompare} /> : null}
+          {document.canApprove === false ? <p className="mt-4 text-sm leading-6 text-amber-800">Document approval is blocked until the required comparison has passed. A mismatch requires corrected registration details or a new upload.</p> : null}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
           <button type="button" onClick={onReject} className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-100">Reject</button>
-          <button type="button" onClick={onApprove} className="h-11 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100">Approve Document</button>
+          <button type="button" onClick={onApprove} disabled={document.canApprove === false} className="h-11 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-600">Approve Document</button>
         </div>
       </div>
     </div>

@@ -270,9 +270,25 @@ export default function AdminAccountPage({ user, onLogout }) {
       requireReason: true,
       requirePassword: true,
       onConfirm: async ({ reason, adminPassword }) => {
-        const payload = await adminDataApi.updateDocument(document.id, { approval, reason, adminPassword });
+        const payload = await adminDataApi.updateDocument(document.id, { approval, reason, adminPassword, reviewVersion: document.reviewVersion });
         setDocuments((current) => current.map((item) => item.id === document.id ? payload.document : item));
         showFeedback(`Document marked as ${approval.toLowerCase()}.`);
+      },
+    });
+  };
+
+  const requestDocumentComparison = (document, comparison) => {
+    setReviewDocument(null);
+    requestConfirmation({
+      tone: "primary", title: "Save the inspected document comparison?",
+      description: "The backend will compare the entered document fields against registration. Final document approval remains a separate decision.",
+      confirmLabel: "Save comparison", requireReason: true, requirePassword: true,
+      onConfirm: async ({ reason, adminPassword }) => {
+        const payload = await adminDataApi.compareDocument(document.id, { ...comparison, reason, adminPassword });
+        const updated = { ...document, ...payload.document };
+        setDocuments((current) => current.map((item) => item.id === document.id ? updated : item));
+        setReviewDocument(updated);
+        showFeedback("Document comparison saved. Final approval is still required.");
       },
     });
   };
@@ -305,6 +321,7 @@ export default function AdminAccountPage({ user, onLogout }) {
         onClose={() => setReviewDocument(null)}
         onApprove={() => requestDocumentDecision(reviewDocument, "Approved")}
         onReject={() => requestDocumentDecision(reviewDocument, "Rejected")}
+        onCompare={(comparison) => requestDocumentComparison(reviewDocument, comparison)}
       />
 
       <div className="min-h-screen w-full max-w-full lg:pl-64">

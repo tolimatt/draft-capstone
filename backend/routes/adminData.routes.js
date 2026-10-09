@@ -8,6 +8,9 @@ import AdminCredential from "../models/AdminCredential.js";
 import AdminAuditLog from "../models/AdminAuditLog.js";
 import { recordAdminAudit } from "../services/adminAudit.service.js";
 import { createAdminReportsRouter } from "./adminReports.routes.js";
+import { compareAdminKycDocument, validateAdminKycDecision, canReconcileApprovedIdentity } from "../services/privateKycReview.service.js";
+import { getPrivateKycReviewContext } from "../data/private-kyc/services/privateKycReviewContext.js";
+import { canManuallyCompareDocument, hasCurrentManualDocumentComparison } from "../data/private-kyc/services/manualDocumentComparison.js";
 import { ADMIN_API_CONTRACT_VERSION, ADMIN_API_ROUTES } from "../../shared/adminApiContract.js";
 import {
   sendCustomerAccountChangeAlert,
@@ -126,7 +129,16 @@ const mapDocument = (document, usersByEmail) => {
     mimeType: asText(document.mimeType, "application/octet-stream"),
     reason: asText(document.reason),
     confidence: Number.isFinite(Number(document.confidence)) ? Number(document.confidence) : null,
-    detailsMatched: document.detailsMatched !== false,
+    detailsMatched: document.detailsMatched === true,
+    canCompareManually: canManuallyCompareDocument(document),
+    canApprove: document.status === "pending_review" && (document.docType !== "id" || document.detailsMatched === true)
+      && (!["private-ocr", "manual"].includes(document.provider) || hasCurrentManualDocumentComparison(document)),
+    reviewVersion: document.reviewVersion || document.fileHash,
+    fileHash: document.fileHash,
+    docType: document.docType,
+    selectedDocCategory: document.selectedDocCategory,
+    privateScreening: document.privateScreening || null,
+    provider: document.provider,
     mismatchFields: Array.isArray(document.mismatchFields) ? document.mismatchFields.slice(0, 12) : [],
     suspectedTampering: Boolean(document.suspectedTampering),
     previewUrl: document.fileKey ? `/api/admin/documents/${document._id.toString()}/file` : "",
@@ -855,7 +867,7 @@ export function createAdminDataRouter({ requireAdminSession }) {
           projection: { owner: 1, name: 1, description: 1, coverDisplayMode: 1, dailyRentalRate: 1, pricingUnit: 1, location: 1, availabilityStatus: 1, images: 1, imageUrl: 1, driverOptionEnabled: 1, specs: 1, createdAt: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("prekycdocuments").find({}, {
-          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, detailsMatched: 1, mismatchFields: 1, suspectedTampering: 1, processingAttempts: 1, nextAttemptAt: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1 },
+          projection: { email: 1, role: 1, docType: 1, status: 1, docCategory: 1, selectedDocCategory: 1, confidence: 1, reason: 1, detailsMatched: 1, mismatchFields: 1, suspectedTampering: 1, processingAttempts: 1, nextAttemptAt: 1, fileName: 1, fileKey: 1, mimeType: 1, createdAt: 1, reviewVersion: 1, fileHash: 1, provider: 1, privateScreening: 1, manualComparison: 1, validationChecks: 1 },
         }).sort({ createdAt: -1 }).toArray(),
         database.collection("bookings").find({}, {
           projection: { vehicle: 1, renter: 1, owner: 1, pickupAt: 1, returnAt: 1, status: 1, paymentStatus: 1, paymentAmountDue: 1, driverSelected: 1, reviewRating: 1, reviewComment: 1, reviewCreatedAt: 1, createdAt: 1 },
@@ -955,6 +967,45 @@ export function createAdminDataRouter({ requireAdminSession }) {
     }
   });
 
+  router.get("/documents/:id/comparison", async (request, response, next) => {
+    try {
+      if (!validObjectId(request.params.id)) return response.status(400).json({ message: "Invalid document ID." });
+      const document = await mongoose.connection.db.collection("prekycdocuments").findOne({ _id: new mongoose.Types.ObjectId(request.params.id) });
+      if (!document) return response.status(404).json({ message: "Document not found." });
+      const context = await getPrivateKycReviewContext(document, kycDirectory);
+      response.setHeader("Cache-Control", "private, no-store");
+      return response.json(context);
+    } catch (error) {
+      if (error.status) return response.status(error.status).json({ message: error.message });
+      return next(error);
+    }
+  });
+
+  router.post("/documents/:id/comparison", async (request, response, next) => {
+    try {
+      if (!validObjectId(request.params.id)) return response.status(400).json({ message: "Invalid document ID." });
+      const reauthentication = await verifyCriticalAction(request, { requireReason: true });
+      if (reauthentication.error) return response.status(reauthentication.error.status).json({ message: reauthentication.error.message });
+      const collection = mongoose.connection.db.collection("prekycdocuments");
+      const document = await collection.findOne({ _id: new mongoose.Types.ObjectId(request.params.id) });
+      if (!document) return response.status(404).json({ message: "Document not found." });
+      const updated = await compareAdminKycDocument({ collection, document,
+        input: { ...request.body, remarks: reauthentication.reason },
+        reviewerId: request.adminAccount?.key || request.adminAccount?.email,
+        directory: kycDirectory });
+      await recordAdminAudit({ request, admin: request.adminAccount, action: "document.compared",
+        targetType: "document", targetId: request.params.id, reason: reauthentication.reason,
+        summary: "Inspected the original document and compared its registration details; final approval remains pending.",
+        metadata: { fileHash: document.fileHash, reviewVersion: document.reviewVersion,
+          fieldsCompared: updated.manualComparison.fieldsCompared } });
+      response.setHeader("Cache-Control", "private, no-store");
+      return response.json({ document: mapDocument(updated, new Map()) });
+    } catch (error) {
+      if (error.status) return response.status(error.status).json({ message: error.message });
+      return next(error);
+    }
+  });
+
   router.patch("/documents/:id", async (request, response, next) => {
     try {
       if (!validObjectId(request.params.id)) return response.status(400).json({ message: "Invalid document ID." });
@@ -965,12 +1016,14 @@ export function createAdminDataRouter({ requireAdminSession }) {
       const reauthentication = await verifyCriticalAction(request, { requireReason: true });
       if (reauthentication.error) return response.status(reauthentication.error.status).json({ message: reauthentication.error.message, code: reauthentication.error.code });
 
+      const current = await mongoose.connection.db.collection("prekycdocuments").findOne({ _id: new mongoose.Types.ObjectId(request.params.id) });
+      validateAdminKycDecision(current, approval, request.body?.reviewVersion);
       const now = new Date();
       const setFields = {
         status: approval === "Approved" ? "verified" : "rejected",
         reason: reauthentication.reason,
         reviewedAt: now,
-        provider: "manual-super-admin",
+        decisionSource: "admin_review",
         processingLockedAt: null,
         nextAttemptAt: null,
       };
@@ -979,7 +1032,9 @@ export function createAdminDataRouter({ requireAdminSession }) {
       const update = { $set: setFields };
       if (approval === "Rejected") update.$unset = { verifiedAt: "" };
       const result = await mongoose.connection.db.collection("prekycdocuments").findOneAndUpdate(
-        { _id: new mongoose.Types.ObjectId(request.params.id), status: { $in: ["queued", "processing", "retry_wait", "pending_review"] } },
+        { _id: new mongoose.Types.ObjectId(request.params.id), status: "pending_review", fileHash: current.fileHash,
+          ...(current.reviewVersion ? { reviewVersion: current.reviewVersion } : {}),
+          ...(approval === "Approved" && current.docType === "id" ? { detailsMatched: true } : {}) },
         update,
         { returnDocument: "after" },
       );
@@ -992,20 +1047,18 @@ export function createAdminDataRouter({ requireAdminSession }) {
           const objectId = new mongoose.Types.ObjectId(userId);
           const kycCase = await mongoose.connection.db.collection("kyc_cases").findOne(
             { user: objectId },
-            { projection: { status: 1 } },
+            { projection: { status: 1, idDocumentHash: 1, challengePassedAt: 1, updatedAt: 1 } },
           );
-          if (kycCase?.status === "challenge_passed") {
+          if (canReconcileApprovedIdentity(updatedDocument, kycCase)) {
             const verifiedAt = new Date();
-            await Promise.all([
-              mongoose.connection.db.collection("kyc_cases").updateOne(
-                { user: objectId },
+            const reconciled = await mongoose.connection.db.collection("kyc_cases").updateOne(
+                { user: objectId, status: "challenge_passed", updatedAt: kycCase.updatedAt },
                 { $set: { status: "approved", verifiedAt, remarks: "Face match completed and document approved by the Super Admin.", updatedAt: verifiedAt } },
-              ),
-              mongoose.connection.db.collection("users").updateOne(
+              );
+            if (reconciled.modifiedCount === 1) await mongoose.connection.db.collection("users").updateOne(
                 { _id: objectId },
                 { $set: { kycStatus: "approved", updatedAt: verifiedAt } },
-              ),
-            ]);
+              );
           }
         }
       }
@@ -1027,6 +1080,7 @@ export function createAdminDataRouter({ requireAdminSession }) {
       });
       return response.json({ document: mapDocument(updatedDocument, usersByEmail) });
     } catch (error) {
+      if (error.status) return response.status(error.status).json({ message: error.message });
       return next(error);
     }
   });

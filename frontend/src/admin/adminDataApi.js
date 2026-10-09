@@ -107,6 +107,13 @@ export const adminDataApi = {
     method: "PATCH",
     body: JSON.stringify(details),
   }),
+  getDocumentComparison: (id) => request(`/admin/documents/${encodeURIComponent(id)}/comparison`, { cache: "no-store" }),
+  compareDocument: async (id, details) => {
+    const payload = await request(`/admin/documents/${encodeURIComponent(id)}/comparison`, {
+      method: "POST", body: JSON.stringify(details),
+    });
+    return { ...payload, document: normalizeDocument(payload.document) };
+  },
   updateDocument: async (id, details) => {
     const payload = await request(`/admin/documents/${encodeURIComponent(id)}`, {
       method: "PATCH",
